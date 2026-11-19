@@ -35,3 +35,13 @@
 .task-editor-cancel{border:1px solid #e0e7df;background:#fff;color:#617268}
 .task-editor-cancel:hover{background:#f1f5ef}
 @media(max-width:600px){.task-row{gap:9px;padding:12px 10px}.task-edit-button{padding:7px 8px;font-size:.64rem}.task-editor-overlay{align-items:end;padding:0}.task-editor-dialog{width:100%;max-height:92vh;border-radius:19px 19px 0 0;padding:21px 17px max(22px,env(safe-area-inset-bottom))}.task-editor-actions{display:grid;grid-template-columns:1fr 1fr}.task-editor-actions .button{min-width:0;width:100%}}
+
+
+/* Task list controls — searchable and filterable task overview */
+.task-toolbar{display:grid;grid-template-columns:minmax(180px,1.6fr) repeat(3,minmax(120px,1fr));gap:9px;margin:0 0 13px;padding:13px;background:#fff;border:1px solid var(--line);border-radius:13px}
+.task-toolbar-field{display:grid;gap:6px;min-width:0}
+.task-toolbar-field>span{font-size:.62rem;font-weight:700;letter-spacing:.06em;color:#819087}
+.task-toolbar-field input,.task-toolbar-field select{width:100%;min-width:0;height:37px;border:1px solid #e1e8e1;border-radius:8px;padding:8px 10px;background:#fbfcfa;color:#34483f;outline:none;font-size:.71rem}
+.task-toolbar-field input:focus,.task-toolbar-field select:focus{border-color:#7aab87;box-shadow:0 0 0 3px rgba(110,157,121,.12)}
+.task-toolbar-field input::placeholder{color:#a9b4ac}
+@media(max-width:600px){.task-toolbar{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;padding:11px}.task-search-field{grid-column:1/-1}}
