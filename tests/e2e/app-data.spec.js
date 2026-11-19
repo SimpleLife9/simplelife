@@ -34,6 +34,7 @@ const preference = {
 async function mockSupabaseSession(page) {
   const insertedTasks = [];
   const updatedTasks = [];
+  let createdCount = 0;
 
   await page.route(`${projectUrl}/**`, async (route) => {
     const request = route.request();
@@ -93,7 +94,10 @@ async function mockSupabaseSession(page) {
     if (url.pathname === '/rest/v1/task' && method === 'POST') {
       const payload = request.postDataJSON();
       const rows = Array.isArray(payload) ? payload : [payload];
-      insertedTasks.push(...rows);
+      insertedTasks.push(...rows.map((row) => ({
+        ...row,
+        created_at: new Date(Date.UTC(2026, 10, 19, 12, 0, createdCount++)).toISOString(),
+      })));
       await route.fulfill({ status: 201, headers: corsHeaders, body: '' });
       return;
     }
@@ -203,6 +207,59 @@ test('mock-authenticated task creation uses the signed-in profile and Havana tim
     completion_outcome: null,
   });
   await expect(page.getByText('Pendiente', { exact: true })).toBeVisible();
+
+  // Create two more tasks to exercise search, filters and sorting as a single batch.
+  await page.getByLabel('¿Qué necesitas hacer?').fill('Comprar arroz');
+  await page.getByLabel('Prioridad').selectOption('4');
+  await page.getByRole('button', { name: 'Añadir tarea' }).click();
+  await expect(page.getByText('Tarea creada.')).toBeVisible();
+
+  await page.getByLabel('¿Qué necesitas hacer?').fill('Preparar reunión');
+  await page.getByLabel('Prioridad').selectOption('2');
+  await page.getByLabel('Fecha (opcional)').fill('2026-11-23');
+  await page.getByRole('button', { name: 'Añadir tarea' }).click();
+  await expect(page.getByText('Tarea creada.')).toBeVisible();
+  expect(insertedTasks).toHaveLength(3);
+
+  const taskNames = page.locator('.task-list .task-row-copy strong');
+
+  // 1) Search matches both task title and description.
+  await page.getByLabel('Buscar tareas').fill('prioridades');
+  await expect(page.getByText('Revisar el plan semanal', { exact: true })).toBeVisible();
+  await expect(page.getByText('Comprar arroz', { exact: true })).toHaveCount(0);
+  await page.getByLabel('Buscar tareas').fill('texto inexistente');
+  await expect(page.getByText('No hay coincidencias')).toBeVisible();
+  await page.getByLabel('Buscar tareas').fill('');
+
+  // 2) Priority filter shows only the selected priority.
+  await page.getByLabel('Filtrar por prioridad').selectOption('4');
+  await expect(page.getByText('Comprar arroz', { exact: true })).toBeVisible();
+  await expect(page.getByText('Revisar el plan semanal', { exact: true })).toHaveCount(0);
+  await page.getByLabel('Filtrar por prioridad').selectOption('all');
+
+  // 3) Status filter separates completed and active tasks.
+  await page.getByRole('button', { name: 'Completar tarea: Revisar el plan semanal' }).click();
+  await expect(page.getByText('Tarea completada.')).toBeVisible();
+  await page.getByLabel('Filtrar por estado').selectOption('completed');
+  await expect(page.getByText('Revisar el plan semanal', { exact: true })).toBeVisible();
+  await expect(page.getByText('Comprar arroz', { exact: true })).toHaveCount(0);
+  await page.getByLabel('Filtrar por estado').selectOption('all');
+  await expect(page.getByText('Comprar arroz', { exact: true })).toBeVisible();
+
+  // 4) Sorting supports priority, due date and newest first.
+  await page.getByLabel('Ordenar tareas').selectOption('priority');
+  await expect(taskNames).toHaveText(['Revisar el plan semanal', 'Preparar reunión', 'Comprar arroz']);
+  await page.getByLabel('Ordenar tareas').selectOption('due');
+  await expect(taskNames).toHaveText(['Revisar el plan semanal', 'Preparar reunión', 'Comprar arroz']);
+  await page.getByLabel('Ordenar tareas').selectOption('recent');
+  await expect(taskNames).toHaveText(['Preparar reunión', 'Comprar arroz', 'Revisar el plan semanal']);
+
+  // Reopen and return to active tasks after checking the completed filter.
+  await page.getByLabel('Filtrar por estado').selectOption('completed');
+  await page.getByRole('button', { name: 'Reabrir tarea: Revisar el plan semanal' }).click();
+  await expect(page.getByText('Tarea reabierta.')).toBeVisible();
+  await page.getByLabel('Filtrar por estado').selectOption('open');
+  await expect(page.getByText('Revisar el plan semanal', { exact: true })).toBeVisible();
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole('button', { name: 'Editar tarea: Revisar el plan semanal' }).click();
