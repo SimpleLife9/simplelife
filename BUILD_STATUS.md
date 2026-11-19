@@ -87,7 +87,7 @@ No `service_role` key or database password is present in the frontend. `.env.exa
 - PR CI run #18: PASS — 3/3 unit tests, Playwright, production build: https://github.com/SimpleLife9/simplelife/actions/runs/44585548978.
 - Main post-merge CI run #19: PASS — 3/3 unit tests, Playwright, production build: https://github.com/SimpleLife9/simplelife/actions/runs/44585747558.
 - Merged main SHA: `1a6c627f76ebc221c096da9a306c7c6c9f53f557`.
-- Manual validation in Robert's real authenticated browser session: PENDING.
+- Manual validation in the real authenticated browser session: PASS.
 - No public deployment or preview was created.
 
 ## Inbox review and archive — merged 19 Nov 2026
@@ -110,7 +110,10 @@ No `service_role` key or database password is present in the frontend. `.env.exa
 
 ## Project management — PR batch 1
 
-- In progress on branch `feat/project-management-batch-1`.
+- Merged into `main` by PR #5: https://github.com/SimpleLife9/simplelife/pull/5.
+- Merge SHA: `e9bdc7a45c015e15cafad090cf09b96a57fbf46c`.
+- PR CI run #29: PASS — 3/3 unit tests, 5/5 Playwright tests, production build: https://github.com/SimpleLife9/simplelife/actions/runs/44594702305.
+- Main post-merge CI run #30: PASS — install, 3/3 unit tests, 5/5 Playwright tests, production build: https://github.com/SimpleLife9/simplelife/actions/runs/44594981731.
 - Project search matches both name and purpose; filters support project status and active/archived lifecycle; sorting supports recent, name and target date.
 - Project editor updates name, purpose, start/target dates and the project-specific status. It validates that start date is not after target date.
 - Archive/restore changes only `archived_at`; it does not change project status, task rows or task-project relationships.
