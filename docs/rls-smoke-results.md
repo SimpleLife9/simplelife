@@ -7,20 +7,19 @@
 
 ## Test method
 
-Executed transaction-scoped SQL against the actual development database. Three synthetic Auth identities were used: two with profiles and one without a profile. JWT subject/role claims were set while running as the PostgreSQL `authenticated` role. Synthetic records were removed before commit; a follow-up query confirmed zero matching Auth users, profiles, areas, goals, captures, or lists remained.
+Executed transaction-scoped SQL against the actual development database. Synthetic Auth identities were created for two accounts and for a third account without a profile. JWT subject/role claims were set while running as the PostgreSQL `authenticated` role. Synthetic records were deleted before commit; follow-up checks returned zero matching synthetic users, profiles, areas, goals, captures, or lists.
 
-This validates database policies and the profile bootstrap insert pattern. It is not a full browser sign-up against Supabase Auth.
+These tests exercise database RLS and the profile bootstrap insert pattern. They are not a full browser sign-up against Supabase Auth.
 
 ## Results
 
 | Check | Result |
 | --- | --- |
-| Account A reads only its profile | PASS — 1 row visible |
-| Account A reads only its life area | PASS — 1 row visible |
-| Account A reads only its goal | PASS — 1 row visible |
-| Account A reads only its capture | PASS — 1 row visible |
-| Account A reads only its list | PASS — 1 row visible |
-| Account A updates its own life area | PASS — permitted update column |
+| Account A reads its own profile, area, goal, capture and list | PASS — 1 row visible per resource |
+| Account A cannot read Account B's life area | PASS — 0 rows visible |
+| Account B reads its own life area and cannot read A's | PASS — 1 own row, 0 other rows |
+| Account A updates its own life area | PASS — 1 row updated |
+| Account B updates its own life area | PASS — 1 row updated |
 | Account A inserts its own life area | PASS — 1 row inserted |
 | Account A updates Account B's life area | PASS — 0 rows affected |
 | Account A inserts a life area owned by Account B | PASS — blocked by RLS |
@@ -37,9 +36,19 @@ This validates database policies and the profile bootstrap insert pattern. It is
 | UPDATE privilege on owner_user_id | PASS — DENIED |
 | UPDATE privilege on ordinary editable title | PASS — GRANTED |
 
+## Structural inventory and advisors
+
+- Public tables: 17.
+- Tables with RLS enabled: 17/17.
+- Public table grants to `anon`: 0.
+- Physical DELETE grants to `authenticated`: 0.
+- Supabase Security advisor: 0 warnings.
+- Supabase Health advisor: 0 warnings.
+- Performance advisor: 9 unused-index informational hints; no indexes were dropped.
+
 ## Cleanup verification
 
-The follow-up SQL query returned zero for all counts:
+After the transaction-scoped test runs, follow-up checks returned zero matching synthetic records:
 - matching synthetic Auth users: 0
 - matching UserProfile records: 0
 - synthetic LifeArea records: 0
@@ -49,7 +58,7 @@ The follow-up SQL query returned zero for all counts:
 
 ## Remaining limits
 
-- Browser tests cover the sign-in/sign-up interface and mobile-width layout using the app's development configuration. They do not create an Auth account or submit a real password.
+- Playwright checks the login/registration interface and a 390px mobile viewport. It does not create a Supabase Auth account or submit a real password.
 - A real authenticated browser E2E against Supabase remains a separate gate; it needs a controlled test identity and a safe lifecycle for removing it.
 - Physical-device Android/iOS/PWA installation and notification checks remain manual.
-- Do not treat this evidence as a production security certification.
+- This is development evidence, not a production security certification.

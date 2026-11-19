@@ -26,11 +26,23 @@ También puedes ejecutarlo desde una terminal en esta carpeta:
 
 ```powershell
 Copy-Item .env.example .env.local
-npm install
+npm ci
 npm run dev
 ```
 
 Necesita Node.js 22.12 o posterior para Vite 8.3.
+
+## Pruebas y build
+
+```bash
+npm ci
+npm test
+npx playwright install chromium
+npm run test:e2e
+npm run build
+```
+
+Los tests unitarios validan el generador UUIDv7. Playwright comprueba los formularios de acceso/registro y el layout móvil a 390px. La CI ejecuta estas pruebas y el build en GitHub Actions.
 
 ## Conexión
 
@@ -45,13 +57,4 @@ URL: `https://iybnjrnysiikbtokyshg.supabase.co`
 - No están implementados eventos, recurrencias, hábitos, espacios compartidos, permisos de equipo, integraciones con ARIA ni automatizaciones.
 - No hay almacenamiento offline de datos personales. El service worker guarda solo el shell público de la aplicación.
 - Esta es una versión local de desarrollo; no está desplegada públicamente ni es producción.
-- Las listas y tareas aún requieren pruebas negativas adicionales para referencias cruzadas desde clientes autenticados reales.
-
-## Calidad local
-
-```bash
-npm test
-npm run build
-```
-
-La prueba automática actual valida el formato UUIDv7, el timestamp y los límites del generador.
+- Las pruebas Playwright actuales no crean una cuenta Supabase ni prueban una sesión autenticada real. Las pruebas RLS contra la base de desarrollo están documentadas en `docs/rls-smoke-results.md`.
