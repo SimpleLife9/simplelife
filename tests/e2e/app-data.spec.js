@@ -183,6 +183,27 @@ test('mock-authenticated task creation uses the signed-in profile and Havana tim
   });
   await expect(page.getByText('Revisar el plan semanal')).toBeVisible();
 
+  await page.getByRole('button', { name: 'Completar tarea: Revisar el plan semanal' }).click();
+  await expect(page.getByText('Tarea completada.')).toBeVisible();
+  expect(insertedTasks[0]).toMatchObject({
+    status: 'completed',
+    completion_outcome: 'complete',
+  });
+
+  await page.getByRole('button', { name: 'Reabrir tarea: Revisar el plan semanal' }).click();
+  await expect(page.getByText('Tarea reabierta.')).toBeVisible();
+  expect(updatedTasks.at(-1)).toEqual({
+    status: 'todo',
+    completed_at: null,
+    completion_outcome: null,
+  });
+  expect(insertedTasks[0]).toMatchObject({
+    status: 'todo',
+    completed_at: null,
+    completion_outcome: null,
+  });
+  await expect(page.getByText('Pendiente', { exact: true })).toBeVisible();
+
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole('button', { name: 'Editar tarea: Revisar el plan semanal' }).click();
   const mobileEditor = page.getByRole('dialog', { name: 'Editar tarea' });
