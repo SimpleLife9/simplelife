@@ -653,8 +653,8 @@ test('Projects support search, lifecycle, editing, archive, restore and linked t
   await expect(page.getByRole('button', { name: 'Ver proyecto: Automatizar ventas' })).toBeVisible();
   await expect(page.getByLabel('Filtrar por estado de trabajo')).toBeDisabled();
   const archivedProjectCard = page.locator('.project-card-archived').filter({ has: page.getByRole('heading', { name: 'Automatizar ventas' }) });
+  await expect(archivedProjectCard.locator('.status-tag')).toHaveCount(1);
   await expect(archivedProjectCard.locator('.status-tag')).toHaveText('Archivado');
-  await expect(archivedProjectCard.getByText('ARCHIVADO')).toHaveCount(0);
   await page.getByRole('button', { name: 'Restaurar proyecto: Automatizar ventas' }).click();
   await expect(page.getByText('Proyecto restaurado.')).toBeVisible();
   expect(projectA.archived_at).toBeNull();
