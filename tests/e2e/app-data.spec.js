@@ -31,9 +31,14 @@ const preference = {
   updated_at: '2026-11-19T00:00:00.000Z',
 };
 
-async function mockSupabaseSession(page) {
+async function mockSupabaseSession(page, initialData = {}) {
   const insertedTasks = [];
   const updatedTasks = [];
+  const taskRows = [...(initialData.tasks || [])];
+  const projects = [...(initialData.projects || [])];
+  const insertedProjects = [];
+  const updatedProjects = [];
+  const projectLinks = [...(initialData.links || [])];
   const captures = [
     {
       id: '00000000-0000-7000-8000-000000000101',
@@ -128,7 +133,41 @@ async function mockSupabaseSession(page) {
     }
 
     if (url.pathname === '/rest/v1/task' && method === 'GET') {
-      await json(200, insertedTasks);
+      await json(200, taskRows.filter((task) => !task.deleted_at));
+      return;
+    }
+
+    if (url.pathname === '/rest/v1/project' && method === 'GET') {
+      await json(200, projects.filter((project) => !project.deleted_at));
+      return;
+    }
+
+    if (url.pathname === '/rest/v1/project' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const rows = Array.isArray(payload) ? payload : [payload];
+      projects.unshift(...rows);
+      insertedProjects.push(...rows);
+      await route.fulfill({ status: 201, headers: corsHeaders, body: '' });
+      return;
+    }
+
+    if (url.pathname === '/rest/v1/project' && method === 'PATCH') {
+      const payload = request.postDataJSON();
+      const idFilter = url.searchParams.get('id') || '';
+      const ownerFilter = url.searchParams.get('owner_user_id') || '';
+      const project = projects.find((row) => idFilter === `eq.${row.id}` && ownerFilter === `eq.${row.owner_user_id}` && !row.deleted_at);
+      if (!project) {
+        await json(200, []);
+        return;
+      }
+      Object.assign(project, payload);
+      updatedProjects.push({ id: project.id, ...payload });
+      await json(200, [{ id: project.id }], { 'content-range': '0-0/*' });
+      return;
+    }
+
+    if (url.pathname === '/rest/v1/task_project_link' && method === 'GET') {
+      await json(200, projectLinks);
       return;
     }
 
@@ -180,10 +219,12 @@ async function mockSupabaseSession(page) {
     if (url.pathname === '/rest/v1/task' && method === 'POST') {
       const payload = request.postDataJSON();
       const rows = Array.isArray(payload) ? payload : [payload];
-      insertedTasks.push(...rows.map((row) => ({
+      const createdRows = rows.map((row) => ({
         ...row,
         created_at: new Date(Date.UTC(2026, 10, 19, 12, 0, createdCount++)).toISOString(),
-      })));
+      }));
+      insertedTasks.push(...createdRows);
+      taskRows.push(...createdRows);
       await route.fulfill({ status: 201, headers: corsHeaders, body: '' });
       return;
     }
@@ -192,7 +233,7 @@ async function mockSupabaseSession(page) {
       const payload = request.postDataJSON();
       const idFilter = url.searchParams.get('id') || '';
       const ownerFilter = url.searchParams.get('owner_user_id') || '';
-      const task = insertedTasks.find((row) => idFilter === `eq.${row.id}` && ownerFilter === `eq.${row.owner_user_id}`);
+      const task = taskRows.find((row) => idFilter === `eq.${row.id}` && ownerFilter === `eq.${row.owner_user_id}`);
       if (!task) {
         await json(200, []);
         return;
@@ -211,7 +252,7 @@ async function mockSupabaseSession(page) {
     await json(404, { message: `Unexpected mocked Supabase request: ${method} ${url.pathname}` });
   });
 
-  return { insertedTasks, updatedTasks, captures, updatedCaptures, insertedCaptures, insertedCaptureParts };
+  return { insertedTasks, updatedTasks, taskRows, projects, insertedProjects, updatedProjects, projectLinks, captures, updatedCaptures, insertedCaptures, insertedCaptureParts };
 }
 
 test('mock-authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
