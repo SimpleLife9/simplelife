@@ -12,7 +12,7 @@ Esta es la primera interfaz de desarrollo sobre el proyecto Supabase `Simplelife
 - Pantalla Hoy con tareas abiertas y tareas con fecha de hoy.
 - Inbox que conserva la captura original y crea su fragmento inicial.
 - Áreas de vida, metas y submetas.
-- Proyectos y tareas, con relación opcional de tarea a proyecto.
+- Proyectos y tareas, con relación opcional de tarea a proyecto, edición y reapertura de tareas completadas.
 - Notas, ideas y listas con elementos marcables.
 - PWA instalable con caché limitada al shell público; las respuestas autenticadas y los datos personales no se cachean.
 
