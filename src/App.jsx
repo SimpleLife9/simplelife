@@ -508,6 +508,22 @@ function GoalsPage({ profile, refreshKey, runAction, busy }) {
   const [goalReason, setGoalReason] = useState('');
   const [targetDate, setTargetDate] = useState('');
   const [subgoalDraft, setSubgoalDraft] = useState({});
+  const [showAreaModal, setShowAreaModal] = useState(false);
+  const [showGoalModal, setShowGoalModal] = useState(false);
+
+  const closeAreaModal = () => {
+    if (busy) return;
+    setShowAreaModal(false);
+    setAreaTitle('');
+  };
+  const closeGoalModal = () => {
+    if (busy) return;
+    setShowGoalModal(false);
+    setSelectedArea('');
+    setGoalTitle('');
+    setGoalReason('');
+    setTargetDate('');
+  };
 
   const addArea = async (event) => {
     event.preventDefault();
@@ -517,6 +533,7 @@ function GoalsPage({ profile, refreshKey, runAction, busy }) {
       const { error: insertError } = await supabase.from('life_area').insert({ id: uuidv7(), owner_user_id: profile.id, created_by_user_id: profile.id, title });
       if (insertError) throw insertError;
       setAreaTitle('');
+      setShowAreaModal(false);
     }, 'Área creada.');
   };
 
@@ -530,7 +547,11 @@ function GoalsPage({ profile, refreshKey, runAction, busy }) {
         target_date: targetDate || null, status: 'active',
       });
       if (insertError) throw insertError;
-      setGoalTitle(''); setGoalReason(''); setTargetDate('');
+      setSelectedArea('');
+      setGoalTitle('');
+      setGoalReason('');
+      setTargetDate('');
+      setShowGoalModal(false);
     }, 'Meta creada.');
   };
 
@@ -544,32 +565,74 @@ function GoalsPage({ profile, refreshKey, runAction, busy }) {
     }, 'Submeta creada.');
   };
 
-  return <div className="management-layout">
-    <div className="content-main">
-      <SectionTitle detail={`${areas.length} áreas`}>Tus áreas de vida</SectionTitle>
-      {loading ? <p className="muted">Cargando…</p> : localError ? <div className="form-error">{localError}</div> : areas.length ? <div className="area-grid">{areas.map((area) => {
-        const areaGoals = goals.filter((goal) => goal.life_area_id === area.id);
-        return <div className="area-card" key={area.id}><div className="area-card-top"><span className="area-symbol">◎</span><span className="area-count">{areaGoals.length} metas</span></div><h3>{area.title}</h3>{area.description && <p>{area.description}</p>}<div className="goal-mini-list">{areaGoals.map((goal) => <div className="goal-mini-wrap" key={goal.id}><div className="goal-mini"><span>↳</span><div><strong>{goal.title}</strong><small>{goal.target_date ? `Objetivo: ${formatDate(goal.target_date)}` : 'Sin fecha objetivo'}</small></div><StatusTag status={goal.status} /></div>{subgoals.filter((subgoal) => subgoal.goal_id === goal.id).map((subgoal) => <div className="subgoal-mini" key={subgoal.id}>· {subgoal.title}</div>)}</div>)}</div>
-          {areaGoals.length > 0 && <div className="subgoal-entry">{areaGoals.slice(0, 2).map((goal) => <div className="subgoal-form" key={goal.id}><input value={subgoalDraft[goal.id] || ''} onChange={(event) => setSubgoalDraft((current) => ({ ...current, [goal.id]: event.target.value }))} placeholder={`Submeta para: ${goal.title}`} /><button onClick={() => addSubgoal(goal.id)} disabled={busy || !(subgoalDraft[goal.id] || '').trim()}>+</button></div>)}</div>}
-        </div>;
-      })}</div> : <EmptyState title="Empieza por tus áreas" detail="Crea ámbitos para ordenar lo que importa en tu vida." />}
+  return <>
+    <div className="management-layout management-layout-single">
+      <div className="content-main">
+        <div className="section-heading-row">
+          <SectionTitle detail={`${areas.length} áreas`}>Tus áreas de vida</SectionTitle>
+          <div className="section-create-actions">
+            <button type="button" className="section-create-button" onClick={() => setShowGoalModal(true)}>Nueva Meta</button>
+            <button type="button" className="section-create-button" onClick={() => setShowAreaModal(true)}>Nueva Area</button>
+          </div>
+        </div>
+        {loading ? <p className="muted">Cargando…</p> : localError ? <div className="form-error">{localError}</div> : areas.length ? <div className="area-grid">{areas.map((area) => {
+          const areaGoals = goals.filter((goal) => goal.life_area_id === area.id);
+          return <div className="area-card" key={area.id}><div className="area-card-top"><span className="area-symbol">◎</span><span className="area-count">{areaGoals.length} metas</span></div><h3>{area.title}</h3>{area.description && <p>{area.description}</p>}<div className="goal-mini-list">{areaGoals.map((goal) => <div className="goal-mini-wrap" key={goal.id}><div className="goal-mini"><span>↳</span><div><strong>{goal.title}</strong><small>{goal.target_date ? `Objetivo: ${formatDate(goal.target_date)}` : 'Sin fecha objetivo'}</small></div><StatusTag status={goal.status} /></div>{subgoals.filter((subgoal) => subgoal.goal_id === goal.id).map((subgoal) => <div className="subgoal-mini" key={subgoal.id}>· {subgoal.title}</div>)}</div>)}</div>
+            {areaGoals.length > 0 && <div className="subgoal-entry">{areaGoals.slice(0, 2).map((goal) => <div className="subgoal-form" key={goal.id}><input value={subgoalDraft[goal.id] || ''} onChange={(event) => setSubgoalDraft((current) => ({ ...current, [goal.id]: event.target.value }))} placeholder={`Submeta para: ${goal.title}`} /><button onClick={() => addSubgoal(goal.id)} disabled={busy || !(subgoalDraft[goal.id] || '').trim()}>+</button></div>)}</div>}
+          </div>;
+        })}</div> : <EmptyState title="Empieza por tus áreas" detail="Crea ámbitos para ordenar lo que importa en tu vida." />}
+      </div>
     </div>
-    <aside className="content-side sticky-side">
-      <FormCard title="Nueva área" onSubmit={addArea} submitLabel="Crear área" busy={busy}>
-        <Field label="Nombre del área" name="area" value={areaTitle} onChange={(event) => setAreaTitle(event.target.value)} placeholder="Ej. Finanzas, físico, familia…" required />
-      </FormCard>
-      <FormCard title="Nueva meta" onSubmit={addGoal} submitLabel="Crear meta" busy={busy}>
-        <label className="field"><span>Área de vida</span><select required value={selectedArea} onChange={(event) => setSelectedArea(event.target.value)}><option value="">Selecciona un área</option>{areas.map((area) => <option key={area.id} value={area.id}>{area.title}</option>)}</select></label>
-        <Field label="Resultado que buscas" name="goal" value={goalTitle} onChange={(event) => setGoalTitle(event.target.value)} placeholder="Ej. Ahorrar 2.000 €" required />
-        <Field label="Motivo (opcional)" name="reason" value={goalReason} onChange={(event) => setGoalReason(event.target.value)} placeholder="¿Por qué es importante?" />
-        <Field label="Fecha objetivo (opcional)" name="targetDate" type="date" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} />
-      </FormCard>
-    </aside>
-  </div>;
+
+    {showAreaModal && (
+      <div className="task-editor-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) closeAreaModal(); }} onKeyDown={(event) => { if (event.key === 'Escape' && !busy) closeAreaModal(); }}>
+        <section className="task-editor-dialog floating-form-dialog" role="dialog" aria-modal="true" aria-labelledby="area-create-title">
+          <div className="task-editor-heading">
+            <div><div className="eyebrow">ORGANIZA TU VIDA</div><h2 id="area-create-title">Nueva área</h2></div>
+            <button type="button" className="task-editor-close" onClick={closeAreaModal} disabled={busy} aria-label="Cerrar nueva área">×</button>
+          </div>
+          <form className="task-editor-form" onSubmit={addArea}>
+            <Field label="Nombre del área" name="area" value={areaTitle} onChange={(event) => setAreaTitle(event.target.value)} placeholder="Ej. Finanzas, físico, familia…" required autoFocus />
+            <div className="task-editor-actions">
+              <button type="button" className="button task-editor-cancel" onClick={closeAreaModal} disabled={busy}>Cancelar</button>
+              <button type="submit" className="button button-primary" disabled={busy || !areaTitle.trim()}>{busy ? 'Guardando…' : 'Crear área'} <span>→</span></button>
+            </div>
+          </form>
+        </section>
+      </div>
+    )}
+
+    {showGoalModal && (
+      <div className="task-editor-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) closeGoalModal(); }} onKeyDown={(event) => { if (event.key === 'Escape' && !busy) closeGoalModal(); }}>
+        <section className="task-editor-dialog floating-form-dialog" role="dialog" aria-modal="true" aria-labelledby="goal-create-title">
+          <div className="task-editor-heading">
+            <div><div className="eyebrow">DEFINE LO QUE BUSCAS</div><h2 id="goal-create-title">Nueva meta</h2></div>
+            <button type="button" className="task-editor-close" onClick={closeGoalModal} disabled={busy} aria-label="Cerrar nueva meta">×</button>
+          </div>
+          <form className="task-editor-form" onSubmit={addGoal}>
+            <label className="field"><span>Área de vida</span><select required value={selectedArea} onChange={(event) => setSelectedArea(event.target.value)}><option value="">Selecciona un área</option>{areas.map((area) => <option key={area.id} value={area.id}>{area.title}</option>)}</select></label>
+            {areas.length === 0 && <p className="task-editor-note">Primero crea un área de vida para poder asociar esta meta.</p>}
+            <Field label="Resultado que buscas" name="goal" value={goalTitle} onChange={(event) => setGoalTitle(event.target.value)} placeholder="Ej. Ahorrar 2.000 €" required autoFocus />
+            <Field label="Motivo (opcional)" name="reason" value={goalReason} onChange={(event) => setGoalReason(event.target.value)} placeholder="¿Por qué es importante?" />
+            <Field label="Fecha objetivo (opcional)" name="targetDate" type="date" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} />
+            <div className="task-editor-actions">
+              <button type="button" className="button task-editor-cancel" onClick={closeGoalModal} disabled={busy}>Cancelar</button>
+              <button type="submit" className="button button-primary" disabled={busy || areas.length === 0 || !selectedArea || !goalTitle.trim()}>{busy ? 'Guardando…' : 'Crear meta'} <span>→</span></button>
+            </div>
+          </form>
+        </section>
+      </div>
+    )}
+  </>;
 }
 
 function StatusTag({ status }) {
   const labels = { draft: 'Borrador', planning: 'En planificación', todo: 'Pendiente', in_progress: 'En curso', blocked: 'Bloqueada', active: 'Activa', paused: 'En pausa', completed: 'Completada', cancelled: 'Cancelada' };
+  return <span className={`status-tag status-${status}`}>{labels[status] || status}</span>;
+}
+function ProjectStatusTag({ status, archived = false }) {
+  if (archived) return <span className="status-tag status-archived">Archivado</span>;
+  const labels = { planning: 'En planificación', active: 'En marcha', paused: 'En pausa', completed: 'Completado', cancelled: 'Cancelado' };
   return <span className={`status-tag status-${status}`}>{labels[status] || status}</span>;
 }
 
@@ -592,6 +655,12 @@ function ProjectsPage({ profile, refreshKey, runAction, busy, setActivePage, set
   const [editTargetDate, setEditTargetDate] = useState('');
   const [editStatus, setEditStatus] = useState('planning');
   const [selectedProject, setSelectedProject] = useState(null);
+  const [showNewProject, setShowNewProject] = useState(false);
+  const closeNewProject = () => {
+    if (busy) return;
+    setShowNewProject(false);
+    setName(''); setPurpose(''); setStartDate(''); setTargetDate('');
+  };
 
   const visibleProjects = useMemo(() => {
     const term = search.trim().toLocaleLowerCase('es');
@@ -599,7 +668,8 @@ function ProjectsPage({ profile, refreshKey, runAction, busy, setActivePage, set
       const lifecycleMatches = lifecycleFilter === 'all'
         || (lifecycleFilter === 'active' && !project.archived_at)
         || (lifecycleFilter === 'archived' && Boolean(project.archived_at));
-      const statusMatches = statusFilter === 'all' || project.status === statusFilter;
+      // Work-state filters apply only to projects that are not archived.
+      const statusMatches = statusFilter === 'all' || (!project.archived_at && project.status === statusFilter);
       const searchMatches = !term || `${project.name || ''} ${project.purpose || ''}`.toLocaleLowerCase('es').includes(term);
       return lifecycleMatches && statusMatches && searchMatches;
     });
@@ -641,6 +711,7 @@ function ProjectsPage({ profile, refreshKey, runAction, busy, setActivePage, set
       });
       if (insertError) throw insertError;
       setName(''); setPurpose(''); setStartDate(''); setTargetDate('');
+      setShowNewProject(false);
     }, 'Proyecto creado.');
   };
 
@@ -652,13 +723,16 @@ function ProjectsPage({ profile, refreshKey, runAction, busy, setActivePage, set
       return;
     }
     await runAction(async () => {
-      const { data, error: updateError } = await supabase.from('project').update({
+      const projectUpdates = {
         name: editName.trim(),
         purpose: editPurpose.trim() || null,
         start_date: editStartDate || null,
         target_date: editTargetDate || null,
-        status: editStatus,
-      }).eq('id', editingProject.id).eq('owner_user_id', profile.id).is('deleted_at', null).select('id');
+      };
+      // Preserve work status while archived; it becomes editable again after restoration.
+      if (!editingProject.archived_at) projectUpdates.status = editStatus;
+      const { data, error: updateError } = await supabase.from('project').update(projectUpdates)
+        .eq('id', editingProject.id).eq('owner_user_id', profile.id).is('deleted_at', null).select('id');
       if (updateError) throw updateError;
       if (!data?.length) throw new Error('No se pudo actualizar el proyecto. Puede que ya no exista o no pertenezca a esta cuenta.');
       setEditingProject(null);
@@ -689,30 +763,33 @@ function ProjectsPage({ profile, refreshKey, runAction, busy, setActivePage, set
   };
 
   return <>
-    <div className="management-layout">
+    <div className="management-layout management-layout-single">
       <div className="content-main">
-        <SectionTitle detail={`${visibleProjects.length} de ${projects.length} proyectos`}>
-          {lifecycleFilter === 'archived' ? 'Proyectos archivados' : lifecycleFilter === 'all' ? 'Todos los proyectos' : 'Proyectos sin archivar'}
-        </SectionTitle>
+        <div className="section-heading-row">
+          <SectionTitle detail={`${visibleProjects.length} de ${projects.length} proyectos`}>
+            {lifecycleFilter === 'archived' ? 'Proyectos archivados' : lifecycleFilter === 'all' ? 'Todos los proyectos' : 'Proyectos sin archivar'}
+          </SectionTitle>
+          <div className="section-create-actions"><button type="button" className="section-create-button" onClick={() => setShowNewProject(true)}>Nuevo Proyecto</button></div>
+        </div>
         <div className="project-toolbar" aria-label="Buscar y organizar proyectos">
           <label className="project-toolbar-field project-search-field">
             <span>Buscar</span>
             <input aria-label="Buscar proyectos" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Nombre o propósito…" />
           </label>
           <label className="project-toolbar-field">
-            <span>Estado</span>
-            <select aria-label="Filtrar proyectos por estado" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <span>Estado de trabajo</span>
+            <select aria-label="Filtrar por estado de trabajo" value={statusFilter} disabled={lifecycleFilter === 'archived'} onChange={(event) => setStatusFilter(event.target.value)}>
               <option value="all">Todos</option>
               <option value="planning">Planificación</option>
-              <option value="active">Activos</option>
+              <option value="active">En marcha</option>
               <option value="paused">En pausa</option>
               <option value="completed">Completados</option>
               <option value="cancelled">Cancelados</option>
             </select>
           </label>
           <label className="project-toolbar-field">
-            <span>Vista</span>
-            <select aria-label="Mostrar proyectos" value={lifecycleFilter} onChange={(event) => setLifecycleFilter(event.target.value)}>
+            <span>Archivo</span>
+            <select aria-label="Filtrar proyectos por archivo" value={lifecycleFilter} onChange={(event) => { const nextValue = event.target.value; setLifecycleFilter(nextValue); if (nextValue === 'archived') setStatusFilter('all'); }}>
               <option value="active">Sin archivar</option>
               <option value="archived">Archivados</option>
               <option value="all">Todos</option>
@@ -734,7 +811,7 @@ function ProjectsPage({ profile, refreshKey, runAction, busy, setActivePage, set
               return <article className={`project-card ${project.archived_at ? 'project-card-archived' : ''}`} key={project.id}>
                 <button type="button" className="project-open-button" onClick={() => setSelectedProject(project)} aria-label={`Ver proyecto: ${project.name}`}>
                   <div className="project-cover"><span>✳</span><small>{project.target_date ? `Hasta ${formatDate(project.target_date)}` : 'Sin fecha objetivo'}</small></div>
-                  <div className="project-body"><StatusTag status={project.status} />{project.archived_at && <span className="project-archived-label">ARCHIVADO</span>}<h3>{project.name}</h3><p>{project.purpose || 'Un espacio para convertir una intención en acciones concretas.'}</p><div className="project-foot"><span>{count} tareas vinculadas</span><span>Ver proyecto ↗</span></div></div>
+                  <div className="project-body"><ProjectStatusTag status={project.status} archived={Boolean(project.archived_at)} /><h3>{project.name}</h3><p>{project.purpose || 'Un espacio para convertir una intención en acciones concretas.'}</p><div className="project-foot"><span>{count} tareas vinculadas</span><span>Ver proyecto ↗</span></div></div>
                 </button>
                 <div className="project-card-actions">
                   <button type="button" className="project-action-button" onClick={() => openEditor(project)} disabled={busy} aria-label={`Editar proyecto: ${project.name}`}>Editar</button>
@@ -745,16 +822,29 @@ function ProjectsPage({ profile, refreshKey, runAction, busy, setActivePage, set
           </div>
         ) : projects.length ? <EmptyState title="No hay coincidencias" detail="Prueba otra búsqueda o cambia los filtros de proyectos." icon="⌕" /> : <EmptyState title="Todavía no hay proyectos" detail="Crea uno para organizar tareas alrededor de un resultado concreto." icon="▤" />}
       </div>
-      <aside className="content-side">
-        <FormCard title="Nuevo proyecto" onSubmit={addProject} submitLabel="Crear proyecto" busy={busy}>
-          <Field label="Nombre" name="project" value={name} onChange={(event) => setName(event.target.value)} placeholder="Ej. Lanzar mi negocio" required />
-          <TextAreaField label="Propósito (opcional)" name="purpose" value={purpose} onChange={(event) => setPurpose(event.target.value)} placeholder="¿Qué quieres conseguir?" rows={3} />
-          <Field label="Fecha de inicio (opcional)" name="start" type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
-          <Field label="Fecha objetivo (opcional)" name="target" type="date" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} />
-          <p className="project-form-note">La fecha objetivo debe ser igual o posterior al inicio.</p>
-        </FormCard>
-      </aside>
     </div>
+
+    {showNewProject && (
+      <div className="task-editor-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) closeNewProject(); }} onKeyDown={(event) => { if (event.key === 'Escape' && !busy) closeNewProject(); }}>
+        <section className="task-editor-dialog floating-form-dialog" role="dialog" aria-modal="true" aria-labelledby="project-create-title">
+          <div className="task-editor-heading">
+            <div><div className="eyebrow">CONVIERTE UNA INTENCIÓN EN ACCIONES</div><h2 id="project-create-title">Nuevo proyecto</h2></div>
+            <button type="button" className="task-editor-close" onClick={closeNewProject} disabled={busy} aria-label="Cerrar nuevo proyecto">×</button>
+          </div>
+          <form className="task-editor-form" onSubmit={addProject}>
+            <Field label="Nombre" name="project" value={name} onChange={(event) => setName(event.target.value)} placeholder="Ej. Lanzar mi negocio" required autoFocus />
+            <TextAreaField label="Propósito (opcional)" name="purpose" value={purpose} onChange={(event) => setPurpose(event.target.value)} placeholder="¿Qué quieres conseguir?" rows={3} />
+            <Field label="Fecha de inicio (opcional)" name="start" type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
+            <Field label="Fecha objetivo (opcional)" name="target" type="date" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} />
+            <p className="project-form-note">La fecha objetivo debe ser igual o posterior al inicio.</p>
+            <div className="task-editor-actions">
+              <button type="button" className="button task-editor-cancel" onClick={closeNewProject} disabled={busy}>Cancelar</button>
+              <button type="submit" className="button button-primary" disabled={busy || !name.trim()}>{busy ? 'Guardando…' : 'Crear proyecto'} <span>→</span></button>
+            </div>
+          </form>
+        </section>
+      </div>
+    )}
 
     {editingProject && (
       <div className="task-editor-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setEditingProject(null); }}>
@@ -768,9 +858,11 @@ function ProjectsPage({ profile, refreshKey, runAction, busy, setActivePage, set
             <TextAreaField label="Propósito (opcional)" name="editProjectPurpose" value={editPurpose} onChange={(event) => setEditPurpose(event.target.value)} rows={3} />
             <Field label="Fecha de inicio (opcional)" name="editProjectStart" type="date" value={editStartDate} onChange={(event) => setEditStartDate(event.target.value)} />
             <Field label="Fecha objetivo (opcional)" name="editProjectTarget" type="date" value={editTargetDate} onChange={(event) => setEditTargetDate(event.target.value)} />
-            <label className="field"><span>Estado del proyecto</span><select aria-label="Estado del proyecto" value={editStatus} onChange={(event) => setEditStatus(event.target.value)}>
-              <option value="planning">En planificación</option><option value="active">Activo</option><option value="paused">En pausa</option><option value="completed">Completado</option><option value="cancelled">Cancelado</option>
-            </select></label>
+            {!editingProject.archived_at
+              ? <label className="field"><span>Estado de trabajo</span><select aria-label="Estado de trabajo" value={editStatus} onChange={(event) => setEditStatus(event.target.value)}>
+                  <option value="planning">En planificación</option><option value="active">En marcha</option><option value="paused">En pausa</option><option value="completed">Completado</option><option value="cancelled">Cancelado</option>
+                </select></label>
+              : <p className="task-editor-note">Este proyecto está archivado. Su estado de trabajo se conserva y volverá a estar disponible al restaurarlo.</p>}
             <p className="task-editor-note">Editar el proyecto no cambia sus tareas vinculadas ni elimina relaciones.</p>
             <div className="task-editor-actions"><button type="button" className="button task-editor-cancel" onClick={() => setEditingProject(null)} disabled={busy}>Cancelar</button><button type="submit" className="button button-primary" disabled={busy || !editName.trim()}>{busy ? 'Guardando…' : 'Guardar cambios'} <span>→</span></button></div>
           </form>
@@ -785,7 +877,7 @@ function ProjectsPage({ profile, refreshKey, runAction, busy, setActivePage, set
             <div><div className="eyebrow">DETALLE DEL PROYECTO</div><h2 id="project-detail-title">{selectedProject.name}</h2></div>
             <button type="button" className="task-editor-close" onClick={() => setSelectedProject(null)} aria-label="Cerrar detalle del proyecto">×</button>
           </div>
-          <div className="project-detail-meta"><StatusTag status={selectedProject.status} /><span>{selectedProject.start_date ? `Inicio: ${formatDate(selectedProject.start_date)}` : 'Sin fecha de inicio'}</span><span>{selectedProject.target_date ? `Objetivo: ${formatDate(selectedProject.target_date)}` : 'Sin fecha objetivo'}</span></div>
+          <div className="project-detail-meta"><ProjectStatusTag status={selectedProject.status} archived={Boolean(selectedProject.archived_at)} /><span>{selectedProject.start_date ? `Inicio: ${formatDate(selectedProject.start_date)}` : 'Sin fecha de inicio'}</span><span>{selectedProject.target_date ? `Objetivo: ${formatDate(selectedProject.target_date)}` : 'Sin fecha objetivo'}</span></div>
           {selectedProject.purpose && <p className="project-detail-purpose">{selectedProject.purpose}</p>}
           <div className="project-task-summary"><div><strong>{taskCounts.total}</strong><small>Tareas vinculadas</small></div><div><strong>{taskCounts.active}</strong><small>Abiertas</small></div><div><strong>{taskCounts.completed}</strong><small>Completadas</small></div><div><strong>{taskCounts.blocked}</strong><small>Bloqueadas</small></div></div>
           <div className="project-detail-section"><strong>Tareas del proyecto</strong>
@@ -814,6 +906,12 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
   const [statusFilter, setStatusFilter] = useState('open');
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [taskSort, setTaskSort] = useState('priority');
+  const [showNewTask, setShowNewTask] = useState(false);
+  const closeNewTask = () => {
+    if (busy) return;
+    setShowNewTask(false);
+    setAction(''); setDescription(''); setPriority('3'); setDueDate(''); setProjectId('');
+  };
 
   const visibleTasks = useMemo(() => {
     const term = taskSearch.trim().toLocaleLowerCase('es');
@@ -865,6 +963,7 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
         if (linkError) throw new Error(`La tarea se creó, pero no se pudo vincular al proyecto: ${linkError.message}`);
       }
       setAction(''); setDescription(''); setPriority('3'); setDueDate(''); setProjectId('');
+      setShowNewTask(false);
     }, 'Tarea creada.');
   };
 
@@ -906,9 +1005,12 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
   }, 'Tarea reabierta.');
 
   return <>
-    <div className="management-layout">
+    <div className="management-layout management-layout-single">
       <div className="content-main">
-        <SectionTitle detail={`${visibleTasks.length} de ${tasks.length} tareas`}>Todas tus tareas</SectionTitle>
+        <div className="section-heading-row">
+          <SectionTitle detail={`${visibleTasks.length} de ${tasks.length} tareas`}>Todas tus tareas</SectionTitle>
+          <div className="section-create-actions"><button type="button" className="section-create-button" onClick={() => setShowNewTask(true)}>Nueva Tarea</button></div>
+        </div>
         <div className="task-toolbar" aria-label="Buscar y organizar tareas">
           <label className="task-toolbar-field task-search-field">
             <span>Buscar</span>
@@ -975,16 +1077,29 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
           </div>
         ) : <EmptyState title="No hay coincidencias" detail="Cambia la búsqueda o los filtros para ver otras tareas." icon="⌕" /> : <EmptyState title="No hay tareas todavía" detail="Añade una acción pequeña para empezar a moverte." />}
       </div>
-      <aside className="content-side">
-        <FormCard title="Nueva tarea" onSubmit={addTask} submitLabel="Añadir tarea" busy={busy}>
-          <Field label="¿Qué necesitas hacer?" name="action" value={action} onChange={(event) => setAction(event.target.value)} placeholder="Ej. Llamar al proveedor" required />
-          <TextAreaField label="Detalles (opcional)" name="description" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Información que te ayude a ejecutarla…" rows={3} />
-          <label className="field"><span>Prioridad</span><select value={priority} onChange={(event) => setPriority(event.target.value)}><option value="1">1 · Muy alta</option><option value="2">2 · Alta</option><option value="3">3 · Normal</option><option value="4">4 · Baja</option><option value="5">5 · Flexible</option></select></label>
-          <Field label="Fecha (opcional)" name="due" type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} />
-          <label className="field"><span>Proyecto (opcional)</span><select value={projectId} onChange={(event) => setProjectId(event.target.value)}><option value="">Sin proyecto</option>{projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select></label>
-        </FormCard>
-      </aside>
     </div>
+
+    {showNewTask && (
+      <div className="task-editor-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) closeNewTask(); }} onKeyDown={(event) => { if (event.key === 'Escape' && !busy) closeNewTask(); }}>
+        <section className="task-editor-dialog floating-form-dialog" role="dialog" aria-modal="true" aria-labelledby="task-create-title">
+          <div className="task-editor-heading">
+            <div><div className="eyebrow">UNA ACCIÓN CONCRETA</div><h2 id="task-create-title">Nueva tarea</h2></div>
+            <button type="button" className="task-editor-close" onClick={closeNewTask} disabled={busy} aria-label="Cerrar nueva tarea">×</button>
+          </div>
+          <form className="task-editor-form" onSubmit={addTask}>
+            <Field label="¿Qué necesitas hacer?" name="action" value={action} onChange={(event) => setAction(event.target.value)} placeholder="Ej. Llamar al proveedor" required autoFocus />
+            <TextAreaField label="Detalles (opcional)" name="description" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Información que te ayude a ejecutarla…" rows={3} />
+            <label className="field"><span>Prioridad</span><select aria-label="Prioridad" value={priority} onChange={(event) => setPriority(event.target.value)}><option value="1">1 · Muy alta</option><option value="2">2 · Alta</option><option value="3">3 · Normal</option><option value="4">4 · Baja</option><option value="5">5 · Flexible</option></select></label>
+            <Field label="Fecha (opcional)" name="due" type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} />
+            <label className="field"><span>Proyecto (opcional)</span><select value={projectId} onChange={(event) => setProjectId(event.target.value)}><option value="">Sin proyecto</option>{projects.filter((project) => !project.archived_at).map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select></label>
+            <div className="task-editor-actions">
+              <button type="button" className="button task-editor-cancel" onClick={closeNewTask} disabled={busy}>Cancelar</button>
+              <button type="submit" className="button button-primary" disabled={busy || !action.trim()}>{busy ? 'Guardando…' : 'Añadir tarea'} <span>→</span></button>
+            </div>
+          </form>
+        </section>
+      </div>
+    )}
 
     {editingTask && (
       <div
