@@ -493,7 +493,7 @@ function GoalsPage({ profile, refreshKey, runAction, busy }) {
 }
 
 function StatusTag({ status }) {
-  const labels = { draft: 'Borrador', active: 'Activa', paused: 'Pausada', completed: 'Completada', cancelled: 'Cancelada' };
+  const labels = { draft: 'Borrador', todo: 'Pendiente', active: 'Activa', paused: 'Pausada', completed: 'Completada', cancelled: 'Cancelada' };
   return <span className={`status-tag status-${status}`}>{labels[status] || status}</span>;
 }
 
@@ -591,6 +591,17 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
     if (updateError) throw updateError;
   }, 'Tarea completada.');
 
+  const reopenTask = (task) => runAction(async () => {
+    const { data, error: updateError } = await supabase.from('task')
+      .update({ status: 'todo', completed_at: null, completion_outcome: null })
+      .eq('id', task.id)
+      .eq('owner_user_id', profile.id)
+      .eq('status', 'completed')
+      .select('id');
+    if (updateError) throw updateError;
+    if (!data?.length) throw new Error('No se pudo reabrir la tarea. Puede que ya no esté completada o no pertenezca a esta cuenta.');
+  }, 'Tarea reabierta.');
+
   return <>
     <div className="management-layout">
       <div className="content-main">
@@ -607,6 +618,15 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
                   <small>{task.due_date ? `Fecha: ${formatDate(task.due_date)}` : 'Sin fecha'} · Prioridad {task.priority}</small>
                 </div>
                 <StatusTag status={task.status} />
+                {task.status === 'completed' && (
+                  <button
+                    type="button"
+                    className="task-edit-button task-reopen-button"
+                    onClick={() => reopenTask(task)}
+                    disabled={busy}
+                    aria-label={`Reabrir tarea: ${task.action}`}
+                  >Reabrir</button>
+                )}
                 <button
                   type="button"
                   className="task-edit-button"
