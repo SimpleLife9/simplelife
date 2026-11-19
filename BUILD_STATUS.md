@@ -90,14 +90,19 @@ No `service_role` key or database password is present in the frontend. `.env.exa
 - Manual validation in Robert's real authenticated browser session: PENDING.
 - No public deployment or preview was created.
 
-## Inbox review and archive — implementation in PR
+## Inbox review and archive — merged 19 Nov 2026
 
-- Added search over the original capture text.
-- Added attention-state filters: needs review, reviewed, archived, and all.
-- Added reversible review state transitions: needs_review ↔ reviewed.
-- Added archive and restore: active capture → archived → needs_review.
+- Inbox review and archive merged into `main` by PR #4: https://github.com/SimpleLife9/simplelife/pull/4.
+- Search over the original capture text.
+- Attention-state filters: needs review, reviewed, archived, and all (default: needs review).
+- Reversible review state transitions: `needs_review` ↔ `reviewed`.
+- Archive and restore: active capture → archived → `needs_review`.
 - Each update is scoped by capture ID and authenticated owner, requests only the `attention_status` column, and treats zero updated rows as an error.
-- No content_original, capture_part, schema, RLS policy, table-level grants, or existing capture data is modified by review/archive actions.
+- No `content_original`, `capture_part`, schema, RLS policy, table-level grants, or existing capture data is modified by review/archive actions.
 - Uses the existing column-level UPDATE permission for `capture.attention_status`; the existing owner-scoped `capture_self` RLS policy remains in place.
-- Playwright coverage added for search, no-match state, all review states, mark/unmark reviewed, archive/restore, and creating a capture while preserving the original text and first fragment.
-- CI validation and merge are pending.
+- Playwright validates search, no-match state, all review states, mark/unmark reviewed, archive/restore, and capture creation while preserving the original text and first fragment.
+- PR CI run #22: PASS — 3/3 unit tests, Playwright, production build: https://github.com/SimpleLife9/simplelife/actions/runs/44589486561.
+- Main post-merge CI run #23: PASS — 3/3 unit tests, Playwright, production build: https://github.com/SimpleLife9/simplelife/actions/runs/44589672743.
+- Merged main SHA: `cae6dc3e352be7135f909969721c33bddc8837dd`.
+- Manual validation in Robert's real authenticated browser session: PENDING.
+- No public deployment or preview was created.
