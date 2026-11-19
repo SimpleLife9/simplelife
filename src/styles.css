@@ -100,3 +100,18 @@
 .project-detail-task small{margin-top:4px;color:#9aa69e;font-size:.61rem}
 @media(max-width:820px){.project-toolbar{grid-template-columns:repeat(2,minmax(0,1fr))}.project-search-field{grid-column:1/-1}}
 @media(max-width:600px){.project-toolbar{grid-template-columns:1fr;padding:11px}.project-search-field{grid-column:auto}.project-detail-dialog{padding:20px 15px max(22px,env(safe-area-inset-bottom))}.project-task-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.project-detail-task{align-items:flex-start}.project-detail-task .status-tag{white-space:nowrap}.project-card-actions{padding:0 12px 12px}}
+
+
+/* Modal creation controls for goals, projects and tasks */
+.section-heading-row{display:flex;align-items:center;justify-content:space-between;gap:15px;margin:0 0 18px}
+.section-heading-row .section-title{flex:1;min-width:0;margin:0}
+.section-create-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+.section-create-button{min-height:39px;border:1px solid #d8e5d7;border-radius:10px;background:#edf4eb;color:#315e46;padding:9px 14px;font-size:.72rem;font-weight:800;letter-spacing:.01em;cursor:pointer;transition:background .15s,border-color .15s,transform .15s}
+.section-create-button:hover{background:#e2efdf;border-color:#c4d9c1;transform:translateY(-1px)}
+.section-create-button:focus-visible{outline:3px solid rgba(89,138,99,.35);outline-offset:2px}
+.section-create-button:disabled{opacity:.55;cursor:not-allowed}
+.management-layout-single{grid-template-columns:minmax(0,1fr)}
+.floating-form-dialog{width:min(520px,100%)}
+.status-archived{background:#eef1ee;color:#728078;border:1px solid #e0e6e0}
+.project-toolbar-field select:disabled{background:#f0f2ef;color:#9aa49d;cursor:not-allowed}
+@media(max-width:600px){.section-heading-row{align-items:flex-start;flex-direction:column;gap:12px}.section-create-actions{width:100%;justify-content:flex-start}.section-create-button{flex:1}.section-heading-row .section-title{width:100%}}
