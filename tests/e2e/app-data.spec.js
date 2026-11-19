@@ -194,8 +194,11 @@ test('mock-authenticated task creation uses the signed-in profile and Havana tim
     completion_outcome: 'complete',
   });
 
+  // Completed tasks are hidden in the default Active filter.
+  await page.getByLabel('Filtrar por estado').selectOption('completed');
   await page.getByRole('button', { name: 'Reabrir tarea: Revisar el plan semanal' }).click();
   await expect(page.getByText('Tarea reabierta.')).toBeVisible();
+  await page.getByLabel('Filtrar por estado').selectOption('open');
   expect(updatedTasks.at(-1)).toEqual({
     status: 'todo',
     completed_at: null,
