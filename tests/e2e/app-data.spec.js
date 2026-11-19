@@ -144,7 +144,7 @@ test('mock-authenticated task creation uses the signed-in profile and Havana tim
   await expect(page.getByRole('heading', { name: 'Tareas', exact: true })).toBeVisible();
 
   await page.getByLabel('¿Qué necesitas hacer?').fill('Revisar el plan del día');
-  await page.getByLabel('Prioridad', { exact: true }).selectOption('2');
+  await page.locator('.content-side .form-card select').first().selectOption('2');
   await page.getByLabel('Fecha (opcional)').fill('2026-11-20');
   await page.getByRole('button', { name: 'Añadir tarea' }).click();
 
@@ -210,12 +210,12 @@ test('mock-authenticated task creation uses the signed-in profile and Havana tim
 
   // Create two more tasks to exercise search, filters and sorting as a single batch.
   await page.getByLabel('¿Qué necesitas hacer?').fill('Comprar arroz');
-  await page.getByLabel('Prioridad', { exact: true }).selectOption('4');
+  await page.locator('.content-side .form-card select').first().selectOption('4');
   await page.getByRole('button', { name: 'Añadir tarea' }).click();
   await expect(page.getByText('Tarea creada.')).toBeVisible();
 
   await page.getByLabel('¿Qué necesitas hacer?').fill('Preparar reunión');
-  await page.getByLabel('Prioridad', { exact: true }).selectOption('2');
+  await page.locator('.content-side .form-card select').first().selectOption('2');
   await page.getByLabel('Fecha (opcional)').fill('2026-11-20');
   await page.getByRole('button', { name: 'Añadir tarea' }).click();
   await expect(page.getByText('Tarea creada.')).toBeVisible();
