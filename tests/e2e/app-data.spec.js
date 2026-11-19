@@ -163,7 +163,7 @@ test('mock-authenticated task creation uses the signed-in profile and Havana tim
   await expect(editor.getByLabel('Nombre de la tarea')).toHaveValue('Revisar el plan del día');
   await editor.getByLabel('Nombre de la tarea').fill('Revisar el plan semanal');
   await editor.getByLabel('Detalles (opcional)').fill('Comprobar prioridades y fechas.');
-  await editor.getByLabel('Prioridad').selectOption('1');
+  await editor.getByRole('combobox').selectOption('1');
   await editor.getByLabel('Fecha (opcional)').fill('2026-11-21');
   await editor.getByRole('button', { name: 'Guardar cambios' }).click();
 
