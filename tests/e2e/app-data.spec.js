@@ -563,7 +563,7 @@ test('Projects support search, lifecycle, editing, archive, restore and linked t
   await expect(detail).toBeVisible();
   await expect(detail.getByText('Documentar proceso de ventas')).toBeVisible();
   await expect(detail.getByText('En curso', { exact: true })).toBeVisible();
-  await expect(detail.locator('.project-task-summary')).toContainText(['1', '1', '0', '0']);
+  expect(await detail.locator('.project-task-summary > div strong').allTextContents()).toEqual(['1', '1', '0', '0']);
   await detail.getByRole('button', { name: 'Cerrar' }).click();
 
   // Edit all project fields and status, scoped to the signed-in owner.
