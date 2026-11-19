@@ -59,11 +59,16 @@ No `service_role` key or database password is present in the frontend. `.env.exa
 - Physical Android/iOS PWA validation: NOT RUN.
 - No deployment or public preview has been created.
 
-## Reopening completed tasks — implementation on branch
+## Reopening completed tasks — merged 19 Nov 2026
 
-- Added **Reabrir** to completed tasks in **Más → Tareas**.
-- Reopening changes status from `completed` to `todo` and clears `completed_at` and `completion_outcome`.
+- Task reopening merged into `main` by PR #2: https://github.com/SimpleLife9/simplelife/pull/2.
+- **Más → Tareas** shows **Reabrir** only for tasks with status `completed`.
+- Reopening changes status to `todo` and clears `completed_at` and `completion_outcome`.
 - The update is scoped by task ID, authenticated profile owner, and current completed status; a zero-row response is treated as an error.
 - No schema, RLS policy, table privilege, or existing task data was changed.
-- Playwright coverage added for the complete → reopen lifecycle, including the status and completion metadata payload.
-- CI validation is pending for this branch.
+- Playwright validates create → edit → complete → reopen, the update payload, and the resulting pending state.
+- PR CI run #12: PASS — install, 3/3 unit tests, Playwright, production build: https://github.com/SimpleLife9/simplelife/actions/runs/44571472302.
+- Main post-merge CI run #13: PASS — install, 3/3 unit tests, Playwright, production build: https://github.com/SimpleLife9/simplelife/actions/runs/44571702065.
+- Merged main SHA: `2d0b9791fd1dad03ae3f056a86f914b29cd00d52`.
+- Manual reopening through Robert's real authenticated browser session: PENDING.
+- No deployment or public preview was created.
