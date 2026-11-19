@@ -370,7 +370,7 @@ test('Inbox supports search, review states, archiving, restore and original capt
   await page.getByRole('button', { name: 'Iniciar sesión' }).click();
 
   await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Inbox', exact: true }).click();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
   await expect(page.getByRole('heading', { name: 'Inbox', exact: true })).toBeVisible();
 
   // 1) Search the original capture text and show a clear no-match state.
