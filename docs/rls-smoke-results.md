@@ -11,7 +11,7 @@ Executed transaction-scoped SQL against the actual development database. Synthet
 
 These tests exercise database RLS and the profile bootstrap insert pattern. They are not a full browser sign-up against Supabase Auth.
 
-## Results
+## Database results
 
 | Check | Result |
 | --- | --- |
@@ -56,9 +56,12 @@ After the transaction-scoped test runs, follow-up checks returned zero matching 
 - synthetic Capture records: 0
 - synthetic List records: 0
 
-## Remaining limits
+## Browser coverage and remaining limits
 
-- Playwright checks the login/registration interface and a 390px mobile viewport. It does not create a Supabase Auth account or submit a real password.
-- A real authenticated browser E2E against Supabase remains a separate gate; it needs a controlled test identity and a safe lifecycle for removing it.
+- Playwright browser tests: 3/3 PASS.
+- Sign-in/registration interface, required fields and 390px layout: PASS.
+- A separate mocked-auth browser test drives the Supabase JS client through a simulated session, loads profile/preferences, and posts a task. It verifies owner/creator identity, UUIDv7, date, priority and timezone.
+- The mocked browser test does not contact Supabase Auth or persist any user data.
+- A real authenticated browser E2E against Supabase remains pending; it needs a controlled test identity and a safe lifecycle for removing it.
 - Physical-device Android/iOS/PWA installation and notification checks remain manual.
 - This is development evidence, not a production security certification.

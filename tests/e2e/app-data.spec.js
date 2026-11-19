@@ -108,7 +108,7 @@ async function mockSupabaseSession(page) {
   return insertedTasks;
 }
 
-test('authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
+test('mock-authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
   const insertedTasks = await mockSupabaseSession(page);
   await page.goto('/');
 

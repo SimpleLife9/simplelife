@@ -42,7 +42,7 @@ npm run test:e2e
 npm run build
 ```
 
-Los tests unitarios validan el generador UUIDv7. Playwright comprueba los formularios de acceso/registro y el layout móvil a 390px. La CI ejecuta estas pruebas y el build en GitHub Actions.
+Playwright comprueba los formularios de acceso/registro y el layout móvil a 390px. Además, un test con Auth/PostgREST simulados comprueba el flujo cliente de carga de perfil y creación de tarea. Ese mock no equivale a una sesión real ni escribe en Supabase. La CI ejecuta las pruebas y el build en GitHub Actions.
 
 ## Conexión
 
@@ -57,4 +57,4 @@ URL: `https://iybnjrnysiikbtokyshg.supabase.co`
 - No están implementados eventos, recurrencias, hábitos, espacios compartidos, permisos de equipo, integraciones con ARIA ni automatizaciones.
 - No hay almacenamiento offline de datos personales. El service worker guarda solo el shell público de la aplicación.
 - Esta es una versión local de desarrollo; no está desplegada públicamente ni es producción.
-- Las pruebas Playwright actuales no crean una cuenta Supabase ni prueban una sesión autenticada real. Las pruebas RLS contra la base de desarrollo están documentadas en `docs/rls-smoke-results.md`.
+- Un E2E con una cuenta Supabase real y validación en dispositivo físico siguen pendientes. Las pruebas RLS transaccionales están documentadas en `docs/rls-smoke-results.md`.
