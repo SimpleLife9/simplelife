@@ -89,3 +89,15 @@ No `service_role` key or database password is present in the frontend. `.env.exa
 - Merged main SHA: `1a6c627f76ebc221c096da9a306c7c6c9f53f557`.
 - Manual validation in Robert's real authenticated browser session: PENDING.
 - No public deployment or preview was created.
+
+## Inbox review and archive — implementation in PR
+
+- Added search over the original capture text.
+- Added attention-state filters: needs review, reviewed, archived, and all.
+- Added reversible review state transitions: needs_review ↔ reviewed.
+- Added archive and restore: active capture → archived → needs_review.
+- Each update is scoped by capture ID and authenticated owner, requests only the `attention_status` column, and treats zero updated rows as an error.
+- No content_original, capture_part, schema, RLS policy, table-level grants, or existing capture data is modified by review/archive actions.
+- Uses the existing column-level UPDATE permission for `capture.attention_status`; the existing owner-scoped `capture_self` RLS policy remains in place.
+- Playwright coverage added for search, no-match state, all review states, mark/unmark reviewed, archive/restore, and creating a capture while preserving the original text and first fragment.
+- CI validation and merge are pending.

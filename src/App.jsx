@@ -390,6 +390,32 @@ function TaskRow({ task, onComplete, busy }) {
 function InboxPage({ profile, refreshKey, runAction, busy }) {
   const { rows, loading, localError } = useRows('capture', profile, refreshKey, (query) => query
     .is('deleted_at', null).order('captured_at', { ascending: false }).limit(50));
+  const [captureSearch, setCaptureSearch] = useState('');
+  const [attentionFilter, setAttentionFilter] = useState('needs_review');
+
+  const visibleCaptures = useMemo(() => {
+    const term = captureSearch.trim().toLocaleLowerCase('es');
+    return rows.filter((capture) => {
+      const statusMatches = attentionFilter === 'all' || capture.attention_status === attentionFilter;
+      const searchMatches = !term || String(capture.content_original || '').toLocaleLowerCase('es').includes(term);
+      return statusMatches && searchMatches;
+    });
+  }, [rows, captureSearch, attentionFilter]);
+
+  const updateAttention = (capture, nextStatus) => runAction(async () => {
+    const { data, error } = await supabase.from('capture')
+      .update({ attention_status: nextStatus })
+      .eq('id', capture.id)
+      .eq('owner_user_id', profile.id)
+      .select('id');
+    if (error) throw error;
+    if (!data?.length) throw new Error('No se pudo actualizar la captura. Puede que ya no exista o no pertenezca a esta cuenta.');
+  }, nextStatus === 'reviewed'
+    ? 'Captura marcada como revisada.'
+    : nextStatus === 'archived'
+      ? 'Captura archivada.'
+      : 'Captura devuelta a pendientes.');
+
   const submit = async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -411,14 +437,64 @@ function InboxPage({ profile, refreshKey, runAction, busy }) {
     }, 'Captura guardada.');
   };
 
+  const attentionLabels = {
+    needs_review: 'Pendiente de revisión',
+    reviewed: 'Revisada',
+    archived: 'Archivada',
+  };
+
   return <div className="inbox-layout">
     <div className="inbox-composer"><div className="composer-top"><span className="composer-icon">↳</span><div><strong>Sácalo de tu cabeza.</strong><p>Una frase basta. No necesitas organizarla ahora.</p></div></div>
       <form onSubmit={submit}><textarea name="capture" rows="4" placeholder="Escribe aquí lo que tienes en mente…" required /><div className="composer-bottom"><span>✦ El original se conserva sin alteraciones.</span><button className="button button-primary" disabled={busy}>Guardar captura <span>→</span></button></div></form>
     </div>
-    <div className="inbox-list-wrap"><SectionTitle detail={`${rows.length} capturas`}>Capturado recientemente</SectionTitle>
-      {loading ? <p className="muted">Cargando…</p> : localError ? <div className="form-error">{localError}</div> : rows.length ? <div className="capture-list">{rows.map((capture) => <div className="capture-row" key={capture.id}><span className="capture-bullet">✳</span><div><p>{capture.content_original}</p><small>{new Intl.DateTimeFormat('es', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Havana' }).format(new Date(capture.captured_at))}</small></div><span className="status-pill">Sin revisar</span></div>)}</div> : <EmptyState title="El Inbox está vacío" detail="Empieza escribiendo cualquier cosa que no quieras olvidar." />}
+    <div className="inbox-list-wrap">
+      <SectionTitle detail={`${visibleCaptures.length} de ${rows.length} capturas`}>Capturado recientemente</SectionTitle>
+      <div className="capture-toolbar" aria-label="Buscar y revisar capturas">
+        <label className="capture-toolbar-field capture-search-field">
+          <span>Buscar</span>
+          <input aria-label="Buscar capturas" type="search" value={captureSearch} onChange={(event) => setCaptureSearch(event.target.value)} placeholder="Buscar en el contenido original…" />
+        </label>
+        <label className="capture-toolbar-field">
+          <span>Revisión</span>
+          <select aria-label="Filtrar capturas por revisión" value={attentionFilter} onChange={(event) => setAttentionFilter(event.target.value)}>
+            <option value="needs_review">Pendientes</option>
+            <option value="reviewed">Revisadas</option>
+            <option value="archived">Archivadas</option>
+            <option value="all">Todas</option>
+          </select>
+        </label>
+      </div>
+      {loading ? <p className="muted">Cargando…</p> : localError ? <div className="form-error">{localError}</div> : rows.length ? visibleCaptures.length ? (
+        <div className="capture-list">{visibleCaptures.map((capture) => (
+          <div className={`capture-row capture-row-${capture.attention_status}`} key={capture.id}>
+            <span className="capture-bullet">✳</span>
+            <div className="capture-row-content">
+              <p>{capture.content_original}</p>
+              <small>{new Intl.DateTimeFormat('es', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Havana' }).format(new Date(capture.captured_at))}</small>
+              <div className="capture-row-actions">
+                <span className={`capture-status capture-status-${capture.attention_status}`}>{attentionLabels[capture.attention_status] || 'Pendiente de revisión'}</span>
+                {capture.attention_status === 'archived' ? (
+                  <button type="button" className="capture-action-button" disabled={busy} onClick={() => updateAttention(capture, 'needs_review')} aria-label={`Restaurar captura: ${capture.content_original}`}>Restaurar</button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className="capture-action-button"
+                      disabled={busy}
+                      onClick={() => updateAttention(capture, capture.attention_status === 'reviewed' ? 'needs_review' : 'reviewed')}
+                      aria-label={capture.attention_status === 'reviewed' ? `Volver a pendientes: ${capture.content_original}` : `Marcar revisada: ${capture.content_original}`}
+                    >{capture.attention_status === 'reviewed' ? 'Volver a pendientes' : 'Marcar revisada'}</button>
+                    <button type="button" className="capture-action-button capture-archive-button" disabled={busy} onClick={() => updateAttention(capture, 'archived')} aria-label={`Archivar captura: ${capture.content_original}`}>Archivar</button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}</div>
+      ) : <EmptyState title="No hay coincidencias" detail="Cambia la búsqueda o el filtro para encontrar otras capturas." icon="⌕" />
+      : <EmptyState title="El Inbox está vacío" detail="Empieza escribiendo cualquier cosa que no quieras olvidar." /> }
     </div>
-    <div className="honest-note"><span>ⓘ</span><p>La clasificación automática con IA todavía no está conectada. Por ahora, SimpleLife conserva tus capturas y sus fragmentos originales sin inventar una interpretación.</p></div>
+    <div className="honest-note"><span>ⓘ</span><p>La clasificación automática con IA todavía no está conectada. Por ahora, SimpleLife conserva tus capturas y sus fragmentos originales sin inventar una interpretación. Revisar o archivar una captura no modifica ni elimina su contenido original.</p></div>
   </div>;
 }
 
