@@ -299,8 +299,8 @@ function ConfigurationScreen() {
 }
 function LoadingScreen({ label }) { return <div className="center-screen"><div className="loading-mark">✳</div><p>{label}</p></div>; }
 
-function Field({ label, name, type = 'text', placeholder, required = false, autoComplete, minLength, value, onChange }) {
-  return <label className="field"><span>{label}</span><input name={name} type={type} placeholder={placeholder} required={required} autoComplete={autoComplete} minLength={minLength} value={value} onChange={onChange} /></label>;
+function Field({ label, name, type = 'text', placeholder, required = false, autoComplete, minLength, value, onChange, autoFocus = false }) {
+  return <label className="field"><span>{label}</span><input name={name} type={type} placeholder={placeholder} required={required} autoComplete={autoComplete} minLength={minLength} value={value} onChange={onChange} autoFocus={autoFocus} /></label>;
 }
 function TextAreaField({ label, name, placeholder, required = false, rows = 3, value, onChange }) {
   return <label className="field"><span>{label}</span><textarea name={name} placeholder={placeholder} required={required} rows={rows} value={value} onChange={onChange} /></label>;
@@ -531,6 +531,20 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
   const [priority, setPriority] = useState('3');
   const [dueDate, setDueDate] = useState('');
   const [projectId, setProjectId] = useState('');
+  const [editingTask, setEditingTask] = useState(null);
+  const [editAction, setEditAction] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editPriority, setEditPriority] = useState('3');
+  const [editDueDate, setEditDueDate] = useState('');
+
+  const openEditor = (task) => {
+    setEditingTask(task);
+    setEditAction(task.action || '');
+    setEditDescription(task.description || '');
+    setEditPriority(String(task.priority ?? 3));
+    setEditDueDate(task.due_date || '');
+  };
+
   const addTask = async (event) => {
     event.preventDefault();
     if (!action.trim()) return;
@@ -550,15 +564,104 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
       setAction(''); setDescription(''); setPriority('3'); setDueDate(''); setProjectId('');
     }, 'Tarea creada.');
   };
+
+  const saveTask = async (event) => {
+    event.preventDefault();
+    if (!editingTask || !editAction.trim()) return;
+    await runAction(async () => {
+      const { data, error: updateError } = await supabase
+        .from('task')
+        .update({
+          action: editAction.trim(),
+          description: editDescription.trim() || null,
+          priority: Number(editPriority),
+          due_date: editDueDate || null,
+        })
+        .eq('id', editingTask.id)
+        .eq('owner_user_id', profile.id)
+        .select('id');
+      if (updateError) throw updateError;
+      if (!data?.length) throw new Error('No se pudo actualizar la tarea. Puede que ya no exista o no pertenezca a esta cuenta.');
+      setEditingTask(null);
+    }, 'Tarea actualizada.');
+  };
+
   const completeTask = (task) => runAction(async () => {
-    const { error: updateError } = await supabase.from('task').update({ status: 'completed', completed_at: new Date().toISOString(), completion_outcome: 'complete' }).eq('id', task.id);
+    const { error: updateError } = await supabase.from('task').update({ status: 'completed', completed_at: new Date().toISOString(), completion_outcome: 'complete' }).eq('id', task.id).eq('owner_user_id', profile.id);
     if (updateError) throw updateError;
   }, 'Tarea completada.');
-  return <div className="management-layout"><div className="content-main"><SectionTitle detail={`${tasks.filter((task) => !['completed','cancelled'].includes(task.status)).length} abiertas`}>Todas tus tareas</SectionTitle>
-    {loading ? <p className="muted">Cargando…</p> : localError ? <div className="form-error">{localError}</div> : tasks.length ? <div className="task-list">{tasks.map((task) => <div className={`task-row ${task.status === 'completed' ? 'task-done' : ''}`} key={task.id}>{task.status === 'completed' ? <span className="task-check checked">✓</span> : <button className="task-check" onClick={() => completeTask(task)} disabled={busy} aria-label="Completar tarea" />}<div className="task-row-copy"><strong>{task.action}</strong><small>{task.due_date ? `Fecha: ${formatDate(task.due_date)}` : 'Sin fecha'} · Prioridad {task.priority}</small></div><StatusTag status={task.status} /></div>)}</div> : <EmptyState title="No hay tareas todavía" detail="Añade una acción pequeña para empezar a moverte." />}
-  </div><aside className="content-side"><FormCard title="Nueva tarea" onSubmit={addTask} submitLabel="Añadir tarea" busy={busy}><Field label="¿Qué necesitas hacer?" name="action" value={action} onChange={(event) => setAction(event.target.value)} placeholder="Ej. Llamar al proveedor" required /><TextAreaField label="Detalles (opcional)" name="description" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Información que te ayude a ejecutarla…" rows={3} /><label className="field"><span>Prioridad</span><select value={priority} onChange={(event) => setPriority(event.target.value)}><option value="1">1 · Muy alta</option><option value="2">2 · Alta</option><option value="3">3 · Normal</option><option value="4">4 · Baja</option><option value="5">5 · Flexible</option></select></label><Field label="Fecha (opcional)" name="due" type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /><label className="field"><span>Proyecto (opcional)</span><select value={projectId} onChange={(event) => setProjectId(event.target.value)}><option value="">Sin proyecto</option>{projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select></label></FormCard></aside></div>;
-}
 
+  return <>
+    <div className="management-layout">
+      <div className="content-main">
+        <SectionTitle detail={`${tasks.filter((task) => !['completed','cancelled'].includes(task.status)).length} abiertas`}>Todas tus tareas</SectionTitle>
+        {loading ? <p className="muted">Cargando…</p> : localError ? <div className="form-error">{localError}</div> : tasks.length ? (
+          <div className="task-list">
+            {tasks.map((task) => (
+              <div className={`task-row ${task.status === 'completed' ? 'task-done' : ''}`} key={task.id}>
+                {task.status === 'completed'
+                  ? <span className="task-check checked" aria-label="Tarea completada">✓</span>
+                  : <button className="task-check" onClick={() => completeTask(task)} disabled={busy} aria-label={`Completar tarea: ${task.action}`} />}
+                <div className="task-row-copy">
+                  <strong>{task.action}</strong>
+                  <small>{task.due_date ? `Fecha: ${formatDate(task.due_date)}` : 'Sin fecha'} · Prioridad {task.priority}</small>
+                </div>
+                <StatusTag status={task.status} />
+                <button
+                  type="button"
+                  className="task-edit-button"
+                  onClick={() => openEditor(task)}
+                  disabled={busy}
+                  aria-label={`Editar tarea: ${task.action}`}
+                >Editar</button>
+              </div>
+            ))}
+          </div>
+        ) : <EmptyState title="No hay tareas todavía" detail="Añade una acción pequeña para empezar a moverte." />}
+      </div>
+      <aside className="content-side">
+        <FormCard title="Nueva tarea" onSubmit={addTask} submitLabel="Añadir tarea" busy={busy}>
+          <Field label="¿Qué necesitas hacer?" name="action" value={action} onChange={(event) => setAction(event.target.value)} placeholder="Ej. Llamar al proveedor" required />
+          <TextAreaField label="Detalles (opcional)" name="description" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Información que te ayude a ejecutarla…" rows={3} />
+          <label className="field"><span>Prioridad</span><select value={priority} onChange={(event) => setPriority(event.target.value)}><option value="1">1 · Muy alta</option><option value="2">2 · Alta</option><option value="3">3 · Normal</option><option value="4">4 · Baja</option><option value="5">5 · Flexible</option></select></label>
+          <Field label="Fecha (opcional)" name="due" type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} />
+          <label className="field"><span>Proyecto (opcional)</span><select value={projectId} onChange={(event) => setProjectId(event.target.value)}><option value="">Sin proyecto</option>{projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select></label>
+        </FormCard>
+      </aside>
+    </div>
+
+    {editingTask && (
+      <div
+        className="task-editor-overlay"
+        onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setEditingTask(null); }}
+        onKeyDown={(event) => { if (event.key === 'Escape' && !busy) setEditingTask(null); }}
+      >
+        <section className="task-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="task-editor-title">
+          <div className="task-editor-heading">
+            <div><div className="eyebrow">ACTUALIZA TU PLAN</div><h2 id="task-editor-title">Editar tarea</h2></div>
+            <button type="button" className="task-editor-close" onClick={() => setEditingTask(null)} disabled={busy} aria-label="Cerrar edición">×</button>
+          </div>
+          <form className="task-editor-form" onSubmit={saveTask}>
+            <Field label="Nombre de la tarea" name="editAction" value={editAction} onChange={(event) => setEditAction(event.target.value)} required autoFocus />
+            <TextAreaField label="Detalles (opcional)" name="editDescription" value={editDescription} onChange={(event) => setEditDescription(event.target.value)} placeholder="Información que te ayude a ejecutarla…" rows={3} />
+            <label className="field">
+              <span>Prioridad</span>
+              <select value={editPriority} onChange={(event) => setEditPriority(event.target.value)}>
+                <option value="1">1 · Muy alta</option><option value="2">2 · Alta</option><option value="3">3 · Normal</option><option value="4">4 · Baja</option><option value="5">5 · Flexible</option>
+              </select>
+            </label>
+            <Field label="Fecha (opcional)" name="editDue" type="date" value={editDueDate} onChange={(event) => setEditDueDate(event.target.value)} />
+            <p className="task-editor-note">El estado de la tarea y su asociación a proyectos se mantienen sin cambios.</p>
+            <div className="task-editor-actions">
+              <button type="button" className="button task-editor-cancel" onClick={() => setEditingTask(null)} disabled={busy}>Cancelar</button>
+              <button type="submit" className="button button-primary" disabled={busy || !editAction.trim()}>{busy ? 'Guardando…' : 'Guardar cambios'} <span>→</span></button>
+            </div>
+          </form>
+        </section>
+      </div>
+    )}
+  </>;
+}
 function NotesPage({ profile, refreshKey, runAction, busy }) {
   const { rows, loading, localError } = useRows('note_idea', profile, refreshKey, (query) => query.is('deleted_at', null).order('created_at', { ascending: false }));
   const [kind, setKind] = useState('note');

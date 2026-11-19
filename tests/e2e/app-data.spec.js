@@ -33,6 +33,7 @@ const preference = {
 
 async function mockSupabaseSession(page) {
   const insertedTasks = [];
+  const updatedTasks = [];
 
   await page.route(`${projectUrl}/**`, async (route) => {
     const request = route.request();
@@ -85,7 +86,7 @@ async function mockSupabaseSession(page) {
     }
 
     if (url.pathname === '/rest/v1/task' && method === 'GET') {
-      await json(200, []);
+      await json(200, insertedTasks);
       return;
     }
 
@@ -97,6 +98,21 @@ async function mockSupabaseSession(page) {
       return;
     }
 
+    if (url.pathname === '/rest/v1/task' && method === 'PATCH') {
+      const payload = request.postDataJSON();
+      const idFilter = url.searchParams.get('id') || '';
+      const ownerFilter = url.searchParams.get('owner_user_id') || '';
+      const task = insertedTasks.find((row) => idFilter === `eq.${row.id}` && ownerFilter === `eq.${row.owner_user_id}`);
+      if (!task) {
+        await json(200, []);
+        return;
+      }
+      Object.assign(task, payload);
+      updatedTasks.push({ ...payload });
+      await json(200, [{ id: task.id }], { 'content-range': '0-0/*' });
+      return;
+    }
+
     if (url.pathname.startsWith('/rest/v1/')) {
       await json(200, []);
       return;
@@ -105,11 +121,11 @@ async function mockSupabaseSession(page) {
     await json(404, { message: `Unexpected mocked Supabase request: ${method} ${url.pathname}` });
   });
 
-  return insertedTasks;
+  return { insertedTasks, updatedTasks };
 }
 
 test('mock-authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
-  const insertedTasks = await mockSupabaseSession(page);
+  const { insertedTasks, updatedTasks } = await mockSupabaseSession(page);
   await page.goto('/');
 
   await page.getByLabel('Correo electrónico').fill(authUser.email);
@@ -140,4 +156,39 @@ test('mock-authenticated task creation uses the signed-in profile and Havana tim
     time_zone: 'America/Havana',
   });
   expect(insertedTasks[0].id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+
+  await page.getByRole('button', { name: 'Editar tarea: Revisar el plan del día' }).click();
+  const editor = page.getByRole('dialog', { name: 'Editar tarea' });
+  await expect(editor).toBeVisible();
+  await expect(editor.getByLabel('Nombre de la tarea')).toHaveValue('Revisar el plan del día');
+  await editor.getByLabel('Nombre de la tarea').fill('Revisar el plan semanal');
+  await editor.getByLabel('Detalles (opcional)').fill('Comprobar prioridades y fechas.');
+  await editor.getByRole('combobox').selectOption('1');
+  await editor.getByLabel('Fecha (opcional)').fill('2026-11-21');
+  await editor.getByRole('button', { name: 'Guardar cambios' }).click();
+
+  await expect(page.getByText('Tarea actualizada.')).toBeVisible();
+  expect(updatedTasks).toHaveLength(1);
+  expect(updatedTasks[0]).toEqual({
+    action: 'Revisar el plan semanal',
+    description: 'Comprobar prioridades y fechas.',
+    priority: 1,
+    due_date: '2026-11-21',
+  });
+  expect(insertedTasks[0]).toMatchObject({
+    action: 'Revisar el plan semanal',
+    status: 'todo',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+  });
+  await expect(page.getByText('Revisar el plan semanal')).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('button', { name: 'Editar tarea: Revisar el plan semanal' }).click();
+  const mobileEditor = page.getByRole('dialog', { name: 'Editar tarea' });
+  await expect(mobileEditor).toBeVisible();
+  const editorBox = await mobileEditor.boundingBox();
+  expect(editorBox.width).toBeLessThanOrEqual(390);
+  await mobileEditor.getByRole('button', { name: 'Cancelar' }).click();
+  await expect(mobileEditor).toBeHidden();
 });
