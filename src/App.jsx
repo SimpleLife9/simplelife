@@ -536,6 +536,35 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
   const [editDescription, setEditDescription] = useState('');
   const [editPriority, setEditPriority] = useState('3');
   const [editDueDate, setEditDueDate] = useState('');
+  const [taskSearch, setTaskSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('open');
+  const [priorityFilter, setPriorityFilter] = useState('all');
+  const [taskSort, setTaskSort] = useState('priority');
+
+  const visibleTasks = useMemo(() => {
+    const term = taskSearch.trim().toLocaleLowerCase('es');
+    const filtered = tasks.filter((task) => {
+      const statusMatches = statusFilter === 'all'
+        || (statusFilter === 'open' && !['completed', 'cancelled'].includes(task.status))
+        || (statusFilter === 'completed' && task.status === 'completed');
+      const priorityMatches = priorityFilter === 'all' || String(task.priority) === priorityFilter;
+      const searchMatches = !term || `${task.action || ''} ${task.description || ''}`.toLocaleLowerCase('es').includes(term);
+      return statusMatches && priorityMatches && searchMatches;
+    });
+
+    const compareDueDate = (a, b) => {
+      if (!a.due_date && !b.due_date) return 0;
+      if (!a.due_date) return 1;
+      if (!b.due_date) return -1;
+      return String(a.due_date).localeCompare(String(b.due_date));
+    };
+    filtered.sort((a, b) => {
+      if (taskSort === 'due') return compareDueDate(a, b) || (a.priority ?? 3) - (b.priority ?? 3);
+      if (taskSort === 'recent') return String(b.created_at || '').localeCompare(String(a.created_at || ''));
+      return (a.priority ?? 3) - (b.priority ?? 3) || compareDueDate(a, b) || String(b.created_at || '').localeCompare(String(a.created_at || ''));
+    });
+    return filtered;
+  }, [tasks, taskSearch, statusFilter, priorityFilter, taskSort]);
 
   const openEditor = (task) => {
     setEditingTask(task);
@@ -605,10 +634,43 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
   return <>
     <div className="management-layout">
       <div className="content-main">
-        <SectionTitle detail={`${tasks.filter((task) => !['completed','cancelled'].includes(task.status)).length} abiertas`}>Todas tus tareas</SectionTitle>
-        {loading ? <p className="muted">Cargando…</p> : localError ? <div className="form-error">{localError}</div> : tasks.length ? (
+        <SectionTitle detail={`${visibleTasks.length} de ${tasks.length} tareas`}>Todas tus tareas</SectionTitle>
+        <div className="task-toolbar" aria-label="Buscar y organizar tareas">
+          <label className="task-toolbar-field task-search-field">
+            <span>Buscar</span>
+            <input aria-label="Buscar tareas" type="search" value={taskSearch} onChange={(event) => setTaskSearch(event.target.value)} placeholder="Nombre o detalles…" />
+          </label>
+          <label className="task-toolbar-field">
+            <span>Estado</span>
+            <select aria-label="Filtrar por estado" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+              <option value="open">Activas</option>
+              <option value="completed">Completadas</option>
+              <option value="all">Todas</option>
+            </select>
+          </label>
+          <label className="task-toolbar-field">
+            <span>Prioridad</span>
+            <select aria-label="Filtrar por prioridad" value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value)}>
+              <option value="all">Todas</option>
+              <option value="1">1 · Muy alta</option>
+              <option value="2">2 · Alta</option>
+              <option value="3">3 · Normal</option>
+              <option value="4">4 · Baja</option>
+              <option value="5">5 · Flexible</option>
+            </select>
+          </label>
+          <label className="task-toolbar-field">
+            <span>Ordenar</span>
+            <select aria-label="Ordenar tareas" value={taskSort} onChange={(event) => setTaskSort(event.target.value)}>
+              <option value="priority">Por prioridad</option>
+              <option value="due">Por fecha</option>
+              <option value="recent">Más recientes</option>
+            </select>
+          </label>
+        </div>
+        {loading ? <p className="muted">Cargando…</p> : localError ? <div className="form-error">{localError}</div> : tasks.length ? visibleTasks.length ? (
           <div className="task-list">
-            {tasks.map((task) => (
+            {visibleTasks.map((task) => (
               <div className={`task-row ${task.status === 'completed' ? 'task-done' : ''}`} key={task.id}>
                 {task.status === 'completed'
                   ? <span className="task-check checked" aria-label="Tarea completada">✓</span>
@@ -637,7 +699,7 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
               </div>
             ))}
           </div>
-        ) : <EmptyState title="No hay tareas todavía" detail="Añade una acción pequeña para empezar a moverte." />}
+        ) : <EmptyState title="No hay coincidencias" detail="Cambia la búsqueda o los filtros para ver otras tareas." icon="⌕" /> : <EmptyState title="No hay tareas todavía" detail="Añade una acción pequeña para empezar a moverte." />}
       </div>
       <aside className="content-side">
         <FormCard title="Nueva tarea" onSubmit={addTask} submitLabel="Añadir tarea" busy={busy}>

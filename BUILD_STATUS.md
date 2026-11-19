@@ -72,3 +72,13 @@ No `service_role` key or database password is present in the frontend. `.env.exa
 - Merged main SHA: `2d0b9791fd1dad03ae3f056a86f914b29cd00d52`.
 - Manual reopening through Robert's real authenticated browser session: PENDING.
 - No deployment or public preview was created.
+
+## Task list controls — implementation in PR
+
+- Added search by task name and details.
+- Added status filters: active, completed, all.
+- Added exact priority filter (1–5).
+- Added sorting by priority, due date (no-date tasks last), and newest first.
+- Filtering and ordering are client-side over the authenticated user's task rows; no schema, RLS, or privilege change.
+- Playwright coverage uses a mocked Supabase session and three tasks with different descriptions, priorities, statuses, and due dates.
+- CI validation and merge are pending.
