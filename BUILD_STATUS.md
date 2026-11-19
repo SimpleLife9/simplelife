@@ -106,3 +106,17 @@ No `service_role` key or database password is present in the frontend. `.env.exa
 - Merged main SHA: `cae6dc3e352be7135f909969721c33bddc8837dd`.
 - Manual validation in Robert's real authenticated browser session: PENDING.
 - No public deployment or preview was created.
+
+
+## Project management — PR batch 1
+
+- In progress on branch `feat/project-management-batch-1`.
+- Project search matches both name and purpose; filters support project status and active/archived lifecycle; sorting supports recent, name and target date.
+- Project editor updates name, purpose, start/target dates and the project-specific status. It validates that start date is not after target date.
+- Archive/restore changes only `archived_at`; it does not change project status, task rows or task-project relationships.
+- Project detail displays existing linked tasks and totals for linked, active, completed and blocked tasks; navigation to the task list is available.
+- All project updates are scoped by project ID, authenticated owner and non-deleted row; zero-row updates are treated as errors.
+- The existing `project` table already contains the required lifecycle/date fields and column-level UPDATE privileges. No schema, RLS or database data changes are part of this batch.
+- Playwright coverage uses a mocked Auth/PostgREST session; it does not represent a real Supabase database write.
+- Manual validation: PENDING.
+- No public deployment or preview was created.

@@ -246,7 +246,7 @@ function App() {
           {activePage === 'today' && <TodayPage profile={profile} refreshKey={refreshKey} runAction={runAction} busy={busy} setActivePage={setActivePage} />}
           {activePage === 'inbox' && <InboxPage profile={profile} refreshKey={refreshKey} runAction={runAction} busy={busy} />}
           {activePage === 'goals' && <GoalsPage profile={profile} refreshKey={refreshKey} runAction={runAction} busy={busy} />}
-          {activePage === 'projects' && <ProjectsPage profile={profile} refreshKey={refreshKey} runAction={runAction} busy={busy} />}
+          {activePage === 'projects' && <ProjectsPage profile={profile} refreshKey={refreshKey} runAction={runAction} busy={busy} setActivePage={setActivePage} setMorePage={setMorePage} />}
           {activePage === 'more' && morePage === 'tasks' && <TasksPage profile={profile} refreshKey={refreshKey} runAction={runAction} busy={busy} />}
           {activePage === 'more' && morePage === 'notes' && <NotesPage profile={profile} refreshKey={refreshKey} runAction={runAction} busy={busy} />}
           {activePage === 'more' && morePage === 'lists' && <ListsPage profile={profile} refreshKey={refreshKey} runAction={runAction} busy={busy} />}
@@ -569,36 +569,234 @@ function GoalsPage({ profile, refreshKey, runAction, busy }) {
 }
 
 function StatusTag({ status }) {
-  const labels = { draft: 'Borrador', todo: 'Pendiente', active: 'Activa', paused: 'Pausada', completed: 'Completada', cancelled: 'Cancelada' };
+  const labels = { draft: 'Borrador', planning: 'En planificación', todo: 'Pendiente', in_progress: 'En curso', blocked: 'Bloqueada', active: 'Activa', paused: 'En pausa', completed: 'Completada', cancelled: 'Cancelada' };
   return <span className={`status-tag status-${status}`}>{labels[status] || status}</span>;
 }
 
-function ProjectsPage({ profile, refreshKey, runAction, busy }) {
+function ProjectsPage({ profile, refreshKey, runAction, busy, setActivePage, setMorePage }) {
   const { rows: projects, loading, localError } = useRows('project', profile, refreshKey, (query) => query.is('deleted_at', null).order('created_at', { ascending: false }));
   const { rows: links } = useRows('task_project_link', profile, refreshKey);
+  const { rows: tasks } = useRows('task', profile, refreshKey, (query) => query.is('deleted_at', null));
   const [name, setName] = useState('');
   const [purpose, setPurpose] = useState('');
+  const [startDate, setStartDate] = useState('');
   const [targetDate, setTargetDate] = useState('');
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [lifecycleFilter, setLifecycleFilter] = useState('active');
+  const [sortBy, setSortBy] = useState('recent');
+  const [editingProject, setEditingProject] = useState(null);
+  const [editName, setEditName] = useState('');
+  const [editPurpose, setEditPurpose] = useState('');
+  const [editStartDate, setEditStartDate] = useState('');
+  const [editTargetDate, setEditTargetDate] = useState('');
+  const [editStatus, setEditStatus] = useState('planning');
+  const [selectedProject, setSelectedProject] = useState(null);
+
+  const visibleProjects = useMemo(() => {
+    const term = search.trim().toLocaleLowerCase('es');
+    const filtered = projects.filter((project) => {
+      const lifecycleMatches = lifecycleFilter === 'all'
+        || (lifecycleFilter === 'active' && !project.archived_at)
+        || (lifecycleFilter === 'archived' && Boolean(project.archived_at));
+      const statusMatches = statusFilter === 'all' || project.status === statusFilter;
+      const searchMatches = !term || `${project.name || ''} ${project.purpose || ''}`.toLocaleLowerCase('es').includes(term);
+      return lifecycleMatches && statusMatches && searchMatches;
+    });
+    const compareTarget = (a, b) => {
+      if (!a.target_date && !b.target_date) return 0;
+      if (!a.target_date) return 1;
+      if (!b.target_date) return -1;
+      return String(a.target_date).localeCompare(String(b.target_date));
+    };
+    filtered.sort((a, b) => {
+      if (sortBy === 'name') return String(a.name || '').localeCompare(String(b.name || ''), 'es');
+      if (sortBy === 'target') return compareTarget(a, b) || String(a.name || '').localeCompare(String(b.name || ''), 'es');
+      return String(b.created_at || '').localeCompare(String(a.created_at || ''));
+    });
+    return filtered;
+  }, [projects, search, statusFilter, lifecycleFilter, sortBy]);
+
+  const openEditor = (project) => {
+    setEditingProject(project);
+    setEditName(project.name || '');
+    setEditPurpose(project.purpose || '');
+    setEditStartDate(project.start_date || '');
+    setEditTargetDate(project.target_date || '');
+    setEditStatus(project.status || 'planning');
+  };
+
   const addProject = async (event) => {
     event.preventDefault();
     if (!name.trim()) return;
+    if (startDate && targetDate && startDate > targetDate) {
+      await runAction(async () => { throw new Error('La fecha de inicio no puede ser posterior a la fecha objetivo.'); });
+      return;
+    }
     await runAction(async () => {
-      const { error: insertError } = await supabase.from('project').insert({ id: uuidv7(), owner_user_id: profile.id, created_by_user_id: profile.id, name: name.trim(), purpose: purpose.trim() || null, target_date: targetDate || null, status: 'active' });
+      const { error: insertError } = await supabase.from('project').insert({
+        id: uuidv7(), owner_user_id: profile.id, created_by_user_id: profile.id,
+        name: name.trim(), purpose: purpose.trim() || null,
+        start_date: startDate || null, target_date: targetDate || null, status: 'active',
+      });
       if (insertError) throw insertError;
-      setName(''); setPurpose(''); setTargetDate('');
+      setName(''); setPurpose(''); setStartDate(''); setTargetDate('');
     }, 'Proyecto creado.');
   };
-  return <div className="management-layout">
-    <div className="content-main"><SectionTitle detail={`${projects.length} proyectos`}>Proyectos activos</SectionTitle>
-      {loading ? <p className="muted">Cargando…</p> : localError ? <div className="form-error">{localError}</div> : projects.length ? <div className="project-grid">{projects.map((project) => {
-        const count = links.filter((link) => link.project_id === project.id).length;
-        return <div className="project-card" key={project.id}><div className="project-cover"><span>✳</span><small>{project.target_date ? `Hasta ${formatDate(project.target_date)}` : 'Sin fecha objetivo'}</small></div><div className="project-body"><StatusTag status={project.status} /><h3>{project.name}</h3><p>{project.purpose || 'Un espacio para convertir una intención en acciones concretas.'}</p><div className="project-foot"><span>{count} tareas vinculadas</span><span>↗</span></div></div></div>;
-      })}</div> : <EmptyState title="Todavía no hay proyectos" detail="Crea uno para organizar tareas alrededor de un resultado concreto." icon="▤" />}
-    </div>
-    <aside className="content-side"><FormCard title="Nuevo proyecto" onSubmit={addProject} submitLabel="Crear proyecto" busy={busy}><Field label="Nombre" name="project" value={name} onChange={(event) => setName(event.target.value)} placeholder="Ej. Lanzar mi negocio" required /><TextAreaField label="Propósito (opcional)" name="purpose" value={purpose} onChange={(event) => setPurpose(event.target.value)} placeholder="¿Qué quieres conseguir?" rows={3} /><Field label="Fecha objetivo (opcional)" name="target" type="date" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} /></FormCard></aside>
-  </div>;
-}
 
+  const saveProject = async (event) => {
+    event.preventDefault();
+    if (!editingProject || !editName.trim()) return;
+    if (editStartDate && editTargetDate && editStartDate > editTargetDate) {
+      await runAction(async () => { throw new Error('La fecha de inicio no puede ser posterior a la fecha objetivo.'); });
+      return;
+    }
+    await runAction(async () => {
+      const { data, error: updateError } = await supabase.from('project').update({
+        name: editName.trim(),
+        purpose: editPurpose.trim() || null,
+        start_date: editStartDate || null,
+        target_date: editTargetDate || null,
+        status: editStatus,
+      }).eq('id', editingProject.id).eq('owner_user_id', profile.id).is('deleted_at', null).select('id');
+      if (updateError) throw updateError;
+      if (!data?.length) throw new Error('No se pudo actualizar el proyecto. Puede que ya no exista o no pertenezca a esta cuenta.');
+      setEditingProject(null);
+    }, 'Proyecto actualizado.');
+  };
+
+  const toggleArchive = (project) => runAction(async () => {
+    const archive = !project.archived_at;
+    const { data, error: updateError } = await supabase.from('project')
+      .update({ archived_at: archive ? new Date().toISOString() : null })
+      .eq('id', project.id)
+      .eq('owner_user_id', profile.id)
+      .is('deleted_at', null)
+      .select('id');
+    if (updateError) throw updateError;
+    if (!data?.length) throw new Error('No se pudo cambiar el archivo del proyecto. Actualiza la vista e inténtalo de nuevo.');
+  }, project.archived_at ? 'Proyecto restaurado.' : 'Proyecto archivado.');
+
+  const projectTaskRows = selectedProject
+    ? tasks.filter((task) => links.some((link) => link.project_id === selectedProject.id && link.task_id === task.id))
+      .sort((a, b) => String(a.due_date || '9999-12-31').localeCompare(String(b.due_date || '9999-12-31')))
+    : [];
+  const taskCounts = {
+    total: projectTaskRows.length,
+    completed: projectTaskRows.filter((task) => task.status === 'completed').length,
+    blocked: projectTaskRows.filter((task) => task.status === 'blocked').length,
+    active: projectTaskRows.filter((task) => ['todo', 'in_progress'].includes(task.status)).length,
+  };
+
+  return <>
+    <div className="management-layout">
+      <div className="content-main">
+        <SectionTitle detail={`${visibleProjects.length} de ${projects.length} proyectos`}>
+          {lifecycleFilter === 'archived' ? 'Proyectos archivados' : lifecycleFilter === 'all' ? 'Todos los proyectos' : 'Proyectos sin archivar'}
+        </SectionTitle>
+        <div className="project-toolbar" aria-label="Buscar y organizar proyectos">
+          <label className="project-toolbar-field project-search-field">
+            <span>Buscar</span>
+            <input aria-label="Buscar proyectos" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Nombre o propósito…" />
+          </label>
+          <label className="project-toolbar-field">
+            <span>Estado</span>
+            <select aria-label="Filtrar proyectos por estado" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+              <option value="all">Todos</option>
+              <option value="planning">Planificación</option>
+              <option value="active">Activos</option>
+              <option value="paused">En pausa</option>
+              <option value="completed">Completados</option>
+              <option value="cancelled">Cancelados</option>
+            </select>
+          </label>
+          <label className="project-toolbar-field">
+            <span>Vista</span>
+            <select aria-label="Mostrar proyectos" value={lifecycleFilter} onChange={(event) => setLifecycleFilter(event.target.value)}>
+              <option value="active">Sin archivar</option>
+              <option value="archived">Archivados</option>
+              <option value="all">Todos</option>
+            </select>
+          </label>
+          <label className="project-toolbar-field">
+            <span>Ordenar</span>
+            <select aria-label="Ordenar proyectos" value={sortBy} onChange={(event) => setSortBy(event.target.value)}>
+              <option value="recent">Más recientes</option>
+              <option value="name">Nombre</option>
+              <option value="target">Fecha objetivo</option>
+            </select>
+          </label>
+        </div>
+        {loading ? <p className="muted">Cargando…</p> : localError ? <div className="form-error">{localError}</div> : visibleProjects.length ? (
+          <div className="project-grid">
+            {visibleProjects.map((project) => {
+              const count = tasks.filter((task) => links.some((link) => link.project_id === project.id && link.task_id === task.id)).length;
+              return <article className={`project-card ${project.archived_at ? 'project-card-archived' : ''}`} key={project.id}>
+                <button type="button" className="project-open-button" onClick={() => setSelectedProject(project)} aria-label={`Ver proyecto: ${project.name}`}>
+                  <div className="project-cover"><span>✳</span><small>{project.target_date ? `Hasta ${formatDate(project.target_date)}` : 'Sin fecha objetivo'}</small></div>
+                  <div className="project-body"><StatusTag status={project.status} />{project.archived_at && <span className="project-archived-label">ARCHIVADO</span>}<h3>{project.name}</h3><p>{project.purpose || 'Un espacio para convertir una intención en acciones concretas.'}</p><div className="project-foot"><span>{count} tareas vinculadas</span><span>Ver proyecto ↗</span></div></div>
+                </button>
+                <div className="project-card-actions">
+                  <button type="button" className="project-action-button" onClick={() => openEditor(project)} disabled={busy} aria-label={`Editar proyecto: ${project.name}`}>Editar</button>
+                  <button type="button" className="project-action-button" onClick={() => toggleArchive(project)} disabled={busy} aria-label={`${project.archived_at ? 'Restaurar' : 'Archivar'} proyecto: ${project.name}`}>{project.archived_at ? 'Restaurar' : 'Archivar'}</button>
+                </div>
+              </article>;
+            })}
+          </div>
+        ) : projects.length ? <EmptyState title="No hay coincidencias" detail="Prueba otra búsqueda o cambia los filtros de proyectos." icon="⌕" /> : <EmptyState title="Todavía no hay proyectos" detail="Crea uno para organizar tareas alrededor de un resultado concreto." icon="▤" />}
+      </div>
+      <aside className="content-side">
+        <FormCard title="Nuevo proyecto" onSubmit={addProject} submitLabel="Crear proyecto" busy={busy}>
+          <Field label="Nombre" name="project" value={name} onChange={(event) => setName(event.target.value)} placeholder="Ej. Lanzar mi negocio" required />
+          <TextAreaField label="Propósito (opcional)" name="purpose" value={purpose} onChange={(event) => setPurpose(event.target.value)} placeholder="¿Qué quieres conseguir?" rows={3} />
+          <Field label="Fecha de inicio (opcional)" name="start" type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
+          <Field label="Fecha objetivo (opcional)" name="target" type="date" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} />
+          <p className="project-form-note">La fecha objetivo debe ser igual o posterior al inicio.</p>
+        </FormCard>
+      </aside>
+    </div>
+
+    {editingProject && (
+      <div className="task-editor-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setEditingProject(null); }}>
+        <section className="task-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="project-editor-title">
+          <div className="task-editor-heading">
+            <div><div className="eyebrow">ACTUALIZA TU PLAN</div><h2 id="project-editor-title">Editar proyecto</h2></div>
+            <button type="button" className="task-editor-close" onClick={() => setEditingProject(null)} disabled={busy} aria-label="Cerrar edición del proyecto">×</button>
+          </div>
+          <form className="task-editor-form" onSubmit={saveProject}>
+            <Field label="Nombre del proyecto" name="editProjectName" value={editName} onChange={(event) => setEditName(event.target.value)} required />
+            <TextAreaField label="Propósito (opcional)" name="editProjectPurpose" value={editPurpose} onChange={(event) => setEditPurpose(event.target.value)} rows={3} />
+            <Field label="Fecha de inicio (opcional)" name="editProjectStart" type="date" value={editStartDate} onChange={(event) => setEditStartDate(event.target.value)} />
+            <Field label="Fecha objetivo (opcional)" name="editProjectTarget" type="date" value={editTargetDate} onChange={(event) => setEditTargetDate(event.target.value)} />
+            <label className="field"><span>Estado del proyecto</span><select aria-label="Estado del proyecto" value={editStatus} onChange={(event) => setEditStatus(event.target.value)}>
+              <option value="planning">En planificación</option><option value="active">Activo</option><option value="paused">En pausa</option><option value="completed">Completado</option><option value="cancelled">Cancelado</option>
+            </select></label>
+            <p className="task-editor-note">Editar el proyecto no cambia sus tareas vinculadas ni elimina relaciones.</p>
+            <div className="task-editor-actions"><button type="button" className="button task-editor-cancel" onClick={() => setEditingProject(null)} disabled={busy}>Cancelar</button><button type="submit" className="button button-primary" disabled={busy || !editName.trim()}>{busy ? 'Guardando…' : 'Guardar cambios'} <span>→</span></button></div>
+          </form>
+        </section>
+      </div>
+    )}
+
+    {selectedProject && (
+      <div className="task-editor-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedProject(null); }}>
+        <section className="task-editor-dialog project-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="project-detail-title">
+          <div className="task-editor-heading">
+            <div><div className="eyebrow">DETALLE DEL PROYECTO</div><h2 id="project-detail-title">{selectedProject.name}</h2></div>
+            <button type="button" className="task-editor-close" onClick={() => setSelectedProject(null)} aria-label="Cerrar detalle del proyecto">×</button>
+          </div>
+          <div className="project-detail-meta"><StatusTag status={selectedProject.status} /><span>{selectedProject.start_date ? `Inicio: ${formatDate(selectedProject.start_date)}` : 'Sin fecha de inicio'}</span><span>{selectedProject.target_date ? `Objetivo: ${formatDate(selectedProject.target_date)}` : 'Sin fecha objetivo'}</span></div>
+          {selectedProject.purpose && <p className="project-detail-purpose">{selectedProject.purpose}</p>}
+          <div className="project-task-summary"><div><strong>{taskCounts.total}</strong><small>Tareas vinculadas</small></div><div><strong>{taskCounts.active}</strong><small>Abiertas</small></div><div><strong>{taskCounts.completed}</strong><small>Completadas</small></div><div><strong>{taskCounts.blocked}</strong><small>Bloqueadas</small></div></div>
+          <div className="project-detail-section"><strong>Tareas del proyecto</strong>
+            {projectTaskRows.length ? <div className="project-detail-task-list">{projectTaskRows.map((task) => <div className="project-detail-task" key={task.id}><div><b>{task.action}</b><small>{task.due_date ? `Fecha: ${formatDate(task.due_date)}` : 'Sin fecha'}</small></div><StatusTag status={task.status} /></div>)}</div> : <p className="muted">Todavía no hay tareas vinculadas a este proyecto.</p>}
+          </div>
+          <div className="task-editor-actions"><button type="button" className="button task-editor-cancel" onClick={() => setSelectedProject(null)}>Cerrar</button><button type="button" className="button button-primary" onClick={() => { setSelectedProject(null); setActivePage('more'); setMorePage('tasks'); }}>Ir a Tareas <span>→</span></button></div>
+        </section>
+      </div>
+    )}
+  </>;
+}
 function TasksPage({ profile, refreshKey, runAction, busy }) {
   const { rows: tasks, loading, localError } = useRows('task', profile, refreshKey, (query) => query.is('deleted_at', null).order('priority', { ascending: true }).order('created_at', { ascending: false }));
   const { rows: projects } = useRows('project', profile, refreshKey, (query) => query.is('deleted_at', null).order('name'));
