@@ -45,3 +45,23 @@
 .task-toolbar-field input:focus,.task-toolbar-field select:focus{border-color:#7aab87;box-shadow:0 0 0 3px rgba(110,157,121,.12)}
 .task-toolbar-field input::placeholder{color:#a9b4ac}
 @media(max-width:600px){.task-toolbar{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;padding:11px}.task-search-field{grid-column:1/-1}}
+
+
+/* Inbox review controls and capture lifecycle */
+.capture-toolbar{display:grid;grid-template-columns:minmax(180px,1fr) minmax(150px,.55fr);gap:10px;margin:0 0 13px;padding:12px;background:#fff;border:1px solid var(--line);border-radius:13px}
+.capture-toolbar-field{display:grid;gap:6px;min-width:0}
+.capture-toolbar-field>span{font-size:.62rem;font-weight:700;letter-spacing:.06em;color:#819087}
+.capture-toolbar-field input,.capture-toolbar-field select{width:100%;min-width:0;height:37px;border:1px solid #e1e8e1;border-radius:8px;padding:8px 10px;background:#fbfcfa;color:#34483f;outline:none;font-size:.72rem}
+.capture-toolbar-field input:focus,.capture-toolbar-field select:focus{border-color:#7aab87;box-shadow:0 0 0 3px rgba(110,157,121,.12)}
+.capture-toolbar-field input::placeholder{color:#a9b4ac}
+.capture-row-content{flex:1;min-width:0}
+.capture-row-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:10px}
+.capture-status{display:inline-flex;align-items:center;padding:5px 8px;border-radius:7px;background:#f4f5f2;color:#79877f;font-size:.62rem;font-weight:700}
+.capture-status-needs_review{background:#f7f1e4;color:#92784b}
+.capture-status-reviewed{background:#e8f2e8;color:#4b7957}
+.capture-status-archived{background:#eff1ef;color:#829087}
+.capture-action-button{border:1px solid #e0e8df;background:#fff;color:#4d6a58;border-radius:7px;padding:6px 9px;font-size:.64rem;font-weight:700}
+.capture-action-button:hover{background:#edf4eb;border-color:#cbdcc9}
+.capture-archive-button{color:#8a7467;border-color:#ebe4df}
+.capture-archive-button:hover{background:#f7f1ed;border-color:#e6d8cf}
+@media(max-width:600px){.capture-toolbar{grid-template-columns:1fr;gap:9px;padding:11px}.capture-row{padding:14px 12px;gap:10px}.capture-row-actions{gap:6px}.capture-action-button{padding:7px 8px;font-size:.62rem}}
