@@ -555,6 +555,8 @@ test('Projects support search, lifecycle, editing, archive, restore and linked t
   await page.getByLabel('Filtrar proyectos por estado').selectOption('all');
   await page.getByLabel('Ordenar proyectos').selectOption('name');
   await expect(projectNames).toHaveText(['Automatizar negocio', 'Plan de lectura']);
+  await page.getByLabel('Ordenar proyectos').selectOption('target');
+  await expect(projectNames).toHaveText(['Automatizar negocio', 'Plan de lectura']);
   await page.getByLabel('Ordenar proyectos').selectOption('recent');
 
   // The project detail exposes its existing linked tasks without duplicating them.
@@ -564,7 +566,7 @@ test('Projects support search, lifecycle, editing, archive, restore and linked t
   await expect(detail.getByText('Documentar proceso de ventas')).toBeVisible();
   await expect(detail.getByText('En curso', { exact: true })).toBeVisible();
   expect(await detail.locator('.project-task-summary > div strong').allTextContents()).toEqual(['1', '1', '0', '0']);
-  await detail.getByRole('button', { name: 'Cerrar' }).click();
+  await detail.getByRole('button', { name: 'Cerrar', exact: true }).click();
 
   // Edit all project fields and status, scoped to the signed-in owner.
   await page.getByRole('button', { name: 'Editar proyecto: Automatizar negocio' }).click();
