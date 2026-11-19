@@ -704,7 +704,7 @@ function ProjectsPage({ profile, refreshKey, runAction, busy, setActivePage, set
             <select aria-label="Filtrar proyectos por estado" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
               <option value="all">Todos</option>
               <option value="planning">Planificación</option>
-              <option value="active">Sin archivar</option>
+              <option value="active">Activos</option>
               <option value="paused">En pausa</option>
               <option value="completed">Completados</option>
               <option value="cancelled">Cancelados</option>
@@ -713,7 +713,7 @@ function ProjectsPage({ profile, refreshKey, runAction, busy, setActivePage, set
           <label className="project-toolbar-field">
             <span>Vista</span>
             <select aria-label="Mostrar proyectos" value={lifecycleFilter} onChange={(event) => setLifecycleFilter(event.target.value)}>
-              <option value="active">Activos</option>
+              <option value="active">Sin archivar</option>
               <option value="archived">Archivados</option>
               <option value="all">Todos</option>
             </select>
