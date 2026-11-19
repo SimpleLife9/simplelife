@@ -569,7 +569,7 @@ function GoalsPage({ profile, refreshKey, runAction, busy }) {
 }
 
 function StatusTag({ status }) {
-  const labels = { draft: 'Borrador', todo: 'Pendiente', active: 'Activa', paused: 'Pausada', completed: 'Completada', cancelled: 'Cancelada' };
+  const labels = { draft: 'Borrador', planning: 'En planificación', todo: 'Pendiente', in_progress: 'En curso', blocked: 'Bloqueada', active: 'Activa', paused: 'En pausa', completed: 'Completada', cancelled: 'Cancelada' };
   return <span className={`status-tag status-${status}`}>{labels[status] || status}</span>;
 }
 
