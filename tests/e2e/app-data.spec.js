@@ -97,7 +97,6 @@ async function mockSupabaseSession(page) {
       return;
     }
 
-    // Empty collections for any optional read made by the rendered page.
     if (url.pathname.startsWith('/rest/v1/')) {
       await json(200, []);
       return;
@@ -117,12 +116,12 @@ test('authenticated task creation uses the signed-in profile and Havana timezone
   await page.getByLabel('Contraseña').fill('not-a-real-password');
   await page.getByRole('button', { name: 'Iniciar sesión' }).click();
 
-  await expect(page.getByRole('heading', { name: 'Hoy' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
   await expect(page.getByText('Playwright Test')).toBeVisible();
 
   await page.getByRole('button', { name: 'Más' }).click();
   await page.getByRole('button', { name: 'Tareas', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Tareas' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Tareas', exact: true })).toBeVisible();
 
   await page.getByLabel('¿Qué necesitas hacer?').fill('Revisar el plan del día');
   await page.getByLabel('Prioridad').selectOption('2');
