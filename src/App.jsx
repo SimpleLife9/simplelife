@@ -685,14 +685,14 @@ function ProjectsPage({ profile, refreshKey, runAction, busy, setActivePage, set
     total: projectTaskRows.length,
     completed: projectTaskRows.filter((task) => task.status === 'completed').length,
     blocked: projectTaskRows.filter((task) => task.status === 'blocked').length,
-    active: projectTaskRows.filter((task) => !['completed', 'cancelled'].includes(task.status)).length,
+    active: projectTaskRows.filter((task) => ['todo', 'in_progress'].includes(task.status)).length,
   };
 
   return <>
     <div className="management-layout">
       <div className="content-main">
         <SectionTitle detail={`${visibleProjects.length} de ${projects.length} proyectos`}>
-          {lifecycleFilter === 'archived' ? 'Proyectos archivados' : lifecycleFilter === 'all' ? 'Todos los proyectos' : 'Proyectos activos'}
+          {lifecycleFilter === 'archived' ? 'Proyectos archivados' : lifecycleFilter === 'all' ? 'Todos los proyectos' : 'Proyectos sin archivar'}
         </SectionTitle>
         <div className="project-toolbar" aria-label="Buscar y organizar proyectos">
           <label className="project-toolbar-field project-search-field">
@@ -704,7 +704,7 @@ function ProjectsPage({ profile, refreshKey, runAction, busy, setActivePage, set
             <select aria-label="Filtrar proyectos por estado" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
               <option value="all">Todos</option>
               <option value="planning">Planificación</option>
-              <option value="active">Activos</option>
+              <option value="active">Sin archivar</option>
               <option value="paused">En pausa</option>
               <option value="completed">Completados</option>
               <option value="cancelled">Cancelados</option>
@@ -730,7 +730,7 @@ function ProjectsPage({ profile, refreshKey, runAction, busy, setActivePage, set
         {loading ? <p className="muted">Cargando…</p> : localError ? <div className="form-error">{localError}</div> : visibleProjects.length ? (
           <div className="project-grid">
             {visibleProjects.map((project) => {
-              const count = links.filter((link) => link.project_id === project.id).length;
+              const count = tasks.filter((task) => links.some((link) => link.project_id === project.id && link.task_id === task.id)).length;
               return <article className={`project-card ${project.archived_at ? 'project-card-archived' : ''}`} key={project.id}>
                 <button type="button" className="project-open-button" onClick={() => setSelectedProject(project)} aria-label={`Ver proyecto: ${project.name}`}>
                   <div className="project-cover"><span>✳</span><small>{project.target_date ? `Hasta ${formatDate(project.target_date)}` : 'Sin fecha objetivo'}</small></div>
@@ -787,7 +787,7 @@ function ProjectsPage({ profile, refreshKey, runAction, busy, setActivePage, set
           </div>
           <div className="project-detail-meta"><StatusTag status={selectedProject.status} /><span>{selectedProject.start_date ? `Inicio: ${formatDate(selectedProject.start_date)}` : 'Sin fecha de inicio'}</span><span>{selectedProject.target_date ? `Objetivo: ${formatDate(selectedProject.target_date)}` : 'Sin fecha objetivo'}</span></div>
           {selectedProject.purpose && <p className="project-detail-purpose">{selectedProject.purpose}</p>}
-          <div className="project-task-summary"><div><strong>{taskCounts.total}</strong><small>Tareas vinculadas</small></div><div><strong>{taskCounts.active}</strong><small>Activas</small></div><div><strong>{taskCounts.completed}</strong><small>Completadas</small></div><div><strong>{taskCounts.blocked}</strong><small>Bloqueadas</small></div></div>
+          <div className="project-task-summary"><div><strong>{taskCounts.total}</strong><small>Tareas vinculadas</small></div><div><strong>{taskCounts.active}</strong><small>Abiertas</small></div><div><strong>{taskCounts.completed}</strong><small>Completadas</small></div><div><strong>{taskCounts.blocked}</strong><small>Bloqueadas</small></div></div>
           <div className="project-detail-section"><strong>Tareas del proyecto</strong>
             {projectTaskRows.length ? <div className="project-detail-task-list">{projectTaskRows.map((task) => <div className="project-detail-task" key={task.id}><div><b>{task.action}</b><small>{task.due_date ? `Fecha: ${formatDate(task.due_date)}` : 'Sin fecha'}</small></div><StatusTag status={task.status} /></div>)}</div> : <p className="muted">Todavía no hay tareas vinculadas a este proyecto.</p>}
           </div>
