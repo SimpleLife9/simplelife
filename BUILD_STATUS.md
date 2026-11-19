@@ -132,3 +132,18 @@ No `service_role` key or database password is present in the frontend. `.env.exa
 - An archived project displays only **Archivado**. The original work state is retained without allowing edits while archived, and becomes available again after restore.
 - Archived projects cannot be selected when creating a new task; they are excluded from work-state filtering.
 - No schema, RLS, grants, or live user records changed. Automated checks are pending CI.
+
+
+## Lote 4 — Modales de creación y coherencia de archivo de proyectos
+
+- PR: #6 — https://github.com/SimpleLife9/simplelife/pull/6
+- Código integrado en main: `522466d0f5df72068c473aea2fbfa538d2b1c454`
+- CI del PR #33: PASS — https://github.com/SimpleLife9/simplelife/actions/runs/44623324826
+- CI post-merge #34: PASS — https://github.com/SimpleLife9/simplelife/actions/runs/44623469017
+- Cobertura: 3/3 unit tests, 7/7 pruebas Playwright y build de producción PASS en la ejecución del PR.
+- Proyectos: nomenclatura `Estado de trabajo` / `En marcha` y `Archivo` / `Sin archivar`; los archivados muestran una sola etiqueta `Archivado`, no aparecen en filtros de estado de trabajo y conservan su estado previo para restauración.
+- Tareas: formulario modal abierto desde `Nueva Tarea`; selector de proyectos excluye los archivados.
+- Objetivos: formularios modales separados desde `Nueva Meta` y `Nueva Area`; la creación de una meta exige un área válida.
+- Formularios `Nuevo Proyecto`, `Nueva Tarea`, `Nueva Meta` y `Nueva Area` permanecen cerrados hasta accionar el botón superior; cancelar limpia campos y no escribe.
+- Sin cambios de esquema, migraciones, RLS, permisos, secretos ni registros reales. Sin despliegue público.
+- Validación manual del usuario: PENDIENTE.
