@@ -478,3 +478,161 @@ test('Inbox supports search, review states, archiving, restore and original capt
   });
   await expect(page.getByText(original)).toBeVisible();
 });
+
+
+test('Projects support search, lifecycle, editing, archive, restore and linked task detail', async ({ page }) => {
+  const projectA = {
+    id: '00000000-0000-7000-8000-000000000701',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    name: 'Automatizar negocio',
+    purpose: 'Liberar capacidad y tiempo',
+    status: 'active',
+    start_date: '2026-11-01',
+    target_date: '2026-12-01',
+    archived_at: null,
+    deleted_at: null,
+    created_at: '2026-11-18T12:00:00.000Z',
+  };
+  const projectB = {
+    id: '00000000-0000-7000-8000-000000000702',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    name: 'Plan de lectura',
+    purpose: 'Desarrollo personal',
+    status: 'paused',
+    start_date: null,
+    target_date: null,
+    archived_at: null,
+    deleted_at: null,
+    created_at: '2026-11-19T12:00:00.000Z',
+  };
+  const linkedTask = {
+    id: '00000000-0000-7000-8000-000000000711',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    action: 'Documentar proceso de ventas',
+    description: 'Dejar pasos claros para el equipo',
+    status: 'in_progress',
+    priority: 1,
+    due_date: '2026-11-25',
+    archived_at: null,
+    deleted_at: null,
+    created_at: '2026-11-19T09:00:00.000Z',
+  };
+  const link = {
+    id: '00000000-0000-7000-8000-000000000721',
+    task_id: linkedTask.id,
+    project_id: projectA.id,
+    relation_role: 'primary',
+  };
+  const { projects, insertedProjects, updatedProjects, taskRows, projectLinks } = await mockSupabaseSession(page, {
+    projects: [projectA, projectB],
+    tasks: [linkedTask],
+    links: [link],
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+
+  await page.locator('.side-nav').getByRole('button', { name: /Proyectos/ }).click();
+  await expect(page.getByRole('heading', { name: 'Proyectos', exact: true })).toBeVisible();
+  const projectNames = page.locator('.project-card h3');
+  await expect(projectNames).toHaveText(['Plan de lectura', 'Automatizar negocio']);
+
+  // Search covers both project name and purpose.
+  await page.getByLabel('Buscar proyectos').fill('capacidad');
+  await expect(projectNames).toHaveText(['Automatizar negocio']);
+  await page.getByLabel('Buscar proyectos').fill('no existe');
+  await expect(page.getByText('No hay coincidencias')).toBeVisible();
+  await page.getByLabel('Buscar proyectos').fill('');
+
+  // Status filter and name sorting.
+  await page.getByLabel('Filtrar proyectos por estado').selectOption('paused');
+  await expect(projectNames).toHaveText(['Plan de lectura']);
+  await page.getByLabel('Filtrar proyectos por estado').selectOption('all');
+  await page.getByLabel('Ordenar proyectos').selectOption('name');
+  await expect(projectNames).toHaveText(['Automatizar negocio', 'Plan de lectura']);
+  await page.getByLabel('Ordenar proyectos').selectOption('recent');
+
+  // The project detail exposes its existing linked tasks without duplicating them.
+  await page.getByRole('button', { name: 'Ver proyecto: Automatizar negocio' }).click();
+  const detail = page.getByRole('dialog', { name: 'Automatizar negocio' });
+  await expect(detail).toBeVisible();
+  await expect(detail.getByText('Documentar proceso de ventas')).toBeVisible();
+  await expect(detail.getByText('En curso', { exact: true })).toBeVisible();
+  await expect(detail.locator('.project-task-summary')).toContainText(['1', '1', '0', '0']);
+  await detail.getByRole('button', { name: 'Cerrar' }).click();
+
+  // Edit all project fields and status, scoped to the signed-in owner.
+  await page.getByRole('button', { name: 'Editar proyecto: Automatizar negocio' }).click();
+  const editor = page.getByRole('dialog', { name: 'Editar proyecto' });
+  await editor.getByLabel('Nombre del proyecto').fill('Automatizar ventas');
+  await editor.getByLabel('Propósito (opcional)').fill('Proceso operativo limpio');
+  await editor.getByLabel('Fecha de inicio (opcional)').fill('2026-11-02');
+  await editor.getByLabel('Fecha objetivo (opcional)').fill('2026-12-15');
+  await editor.getByLabel('Estado del proyecto').selectOption('completed');
+  await editor.getByRole('button', { name: 'Guardar cambios' }).click();
+  await expect(page.getByText('Proyecto actualizado.')).toBeVisible();
+  expect(updatedProjects.at(-1)).toEqual({
+    id: projectA.id,
+    name: 'Automatizar ventas',
+    purpose: 'Proceso operativo limpio',
+    start_date: '2026-11-02',
+    target_date: '2026-12-15',
+    status: 'completed',
+  });
+  await expect(page.getByRole('button', { name: 'Ver proyecto: Automatizar ventas' })).toBeVisible();
+
+  // Invalid date ranges are rejected before the update is sent.
+  await page.getByRole('button', { name: 'Editar proyecto: Automatizar ventas' }).click();
+  const invalidEditor = page.getByRole('dialog', { name: 'Editar proyecto' });
+  await invalidEditor.getByLabel('Fecha de inicio (opcional)').fill('2026-12-20');
+  await invalidEditor.getByLabel('Fecha objetivo (opcional)').fill('2026-12-15');
+  await invalidEditor.getByRole('button', { name: 'Guardar cambios' }).click();
+  await expect(page.getByText('La fecha de inicio no puede ser posterior a la fecha objetivo.')).toBeVisible();
+  expect(updatedProjects).toHaveLength(1);
+  await invalidEditor.getByLabel('Fecha de inicio (opcional)').fill('2026-11-02');
+  await invalidEditor.getByRole('button', { name: 'Guardar cambios' }).click();
+  await expect(page.getByText('Proyecto actualizado.')).toBeVisible();
+
+  // Archive and restore only alter archived_at; the state and task relation survive.
+  await page.getByRole('button', { name: 'Archivar proyecto: Automatizar ventas' }).click();
+  await expect(page.getByText('Proyecto archivado.')).toBeVisible();
+  expect(projectA.archived_at).toBeTruthy();
+  expect(projectA.status).toBe('completed');
+  expect(projectLinks).toHaveLength(1);
+  expect(projectLinks[0]).toMatchObject({ task_id: linkedTask.id, project_id: projectA.id });
+  expect(taskRows).toHaveLength(1);
+  await page.getByLabel('Mostrar proyectos').selectOption('archived');
+  await expect(page.getByRole('button', { name: 'Ver proyecto: Automatizar ventas' })).toBeVisible();
+  await page.getByRole('button', { name: 'Restaurar proyecto: Automatizar ventas' }).click();
+  await expect(page.getByText('Proyecto restaurado.')).toBeVisible();
+  expect(projectA.archived_at).toBeNull();
+  expect(projectA.status).toBe('completed');
+  await page.getByLabel('Mostrar proyectos').selectOption('active');
+  await expect(page.getByRole('button', { name: 'Ver proyecto: Automatizar ventas' })).toBeVisible();
+
+  // Create a project with a date range.
+  await page.getByLabel('Nombre').fill('Sistema SimpleLife');
+  await page.getByLabel('Propósito (opcional)').fill('Organizar los próximos pasos');
+  await page.getByLabel('Fecha de inicio (opcional)').fill('2026-11-20');
+  await page.getByLabel('Fecha objetivo (opcional)').fill('2026-12-31');
+  await page.getByRole('button', { name: 'Crear proyecto' }).click();
+  await expect(page.getByText('Proyecto creado.')).toBeVisible();
+  expect(insertedProjects).toHaveLength(1);
+  expect(insertedProjects[0]).toMatchObject({
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    name: 'Sistema SimpleLife',
+    purpose: 'Organizar los próximos pasos',
+    start_date: '2026-11-20',
+    target_date: '2026-12-31',
+    status: 'active',
+  });
+  expect(insertedProjects[0].id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  expect(projectLinks).toHaveLength(1);
+  expect(taskRows).toHaveLength(1);
+});
