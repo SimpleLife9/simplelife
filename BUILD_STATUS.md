@@ -39,3 +39,22 @@
 - No deployment or public preview has been created.
 
 No `service_role` key or database password is present in the frontend. `.env.example` contains only the project URL and public publishable key. The service worker does not cache authenticated responses or personal data.
+
+
+## Task editing — merged 19 Nov 2026
+
+- Task editor merged into `main` by PR #1: https://github.com/SimpleLife9/simplelife/pull/1.
+- Users can edit task action, description, priority and due date from **More → Tasks → Edit**.
+- The update filters by task ID and authenticated profile owner. It does not modify task ID, owner, creator, status or the existing project link.
+- No database schema, RLS policy or client privilege was changed.
+- Playwright mock-authenticated edit flow: PASS. It verifies the update request, returned-row handling, preserved status/ownership and editor layout at 390px.
+- PR CI run #9: PASS — 3/3 unit tests, 3/3 Playwright tests, Vite production build: https://github.com/SimpleLife9/simplelife/actions/runs/44563913283.
+- Main CI run #10 after merge: PASS — install, 3/3 unit tests, 3/3 Playwright tests and Vite production build: https://github.com/SimpleLife9/simplelife/actions/runs/44564166540.
+- Merged main commit: `3a419a499dd3ccc9f59e3d188f278f192e761155`.
+
+### Remaining validation gates
+
+- Manual task edit through Robert's real authenticated browser session: PENDING. The new Playwright edit coverage uses mocked Auth and PostgREST; it does not prove a live database update.
+- Automated end-to-end flow using real Supabase Auth: NOT RUN.
+- Physical Android/iOS PWA validation: NOT RUN.
+- No deployment or public preview has been created.
