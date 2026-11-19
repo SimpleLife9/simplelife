@@ -37,6 +37,10 @@ async function mockSupabaseSession(page, initialData = {}) {
   const taskRows = [...(initialData.tasks || [])];
   const projects = [...(initialData.projects || [])];
   const insertedProjects = [];
+  const areas = [...(initialData.areas || [])];
+  const insertedAreas = [];
+  const goals = [...(initialData.goals || [])];
+  const insertedGoals = [];
   const updatedProjects = [];
   const projectLinks = [...(initialData.links || [])];
   const captures = [
@@ -129,6 +133,29 @@ async function mockSupabaseSession(page, initialData = {}) {
 
     if (url.pathname === '/rest/v1/user_preference' && method === 'GET') {
       await json(200, preference);
+      return;
+    }
+
+    if (url.pathname === '/rest/v1/life_area' && method === 'GET') {
+      await json(200, areas.filter((area) => !area.deleted_at));
+      return;
+    }
+    if (url.pathname === '/rest/v1/life_area' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const rows = Array.isArray(payload) ? payload : [payload];
+      areas.unshift(...rows); insertedAreas.push(...rows);
+      await route.fulfill({ status: 201, headers: corsHeaders, body: '' });
+      return;
+    }
+    if (url.pathname === '/rest/v1/goal' && method === 'GET') {
+      await json(200, goals.filter((goal) => !goal.deleted_at));
+      return;
+    }
+    if (url.pathname === '/rest/v1/goal' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const rows = Array.isArray(payload) ? payload : [payload];
+      goals.unshift(...rows); insertedGoals.push(...rows);
+      await route.fulfill({ status: 201, headers: corsHeaders, body: '' });
       return;
     }
 
@@ -252,7 +279,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     await json(404, { message: `Unexpected mocked Supabase request: ${method} ${url.pathname}` });
   });
 
-  return { insertedTasks, updatedTasks, taskRows, projects, insertedProjects, updatedProjects, projectLinks, captures, updatedCaptures, insertedCaptures, insertedCaptureParts };
+  return { insertedTasks, updatedTasks, taskRows, projects, insertedProjects, updatedProjects, projectLinks, areas, insertedAreas, goals, insertedGoals, captures, updatedCaptures, insertedCaptures, insertedCaptureParts };
 }
 
 test('mock-authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
@@ -270,10 +297,16 @@ test('mock-authenticated task creation uses the signed-in profile and Havana tim
   await page.getByRole('button', { name: 'Tareas', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Tareas', exact: true })).toBeVisible();
 
-  await page.getByLabel('¿Qué necesitas hacer?').fill('Revisar el plan del día');
-  await page.locator('.content-side .form-card select').first().selectOption('2');
-  await page.getByLabel('Fecha (opcional)').fill('2026-11-20');
-  await page.getByRole('button', { name: 'Añadir tarea' }).click();
+  await expect(page.getByRole('button', { name: 'Nueva Tarea' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Nueva tarea' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Nueva Tarea' }).click();
+  const createTaskDialog = page.getByRole('dialog', { name: 'Nueva tarea' });
+  await expect(createTaskDialog).toBeVisible();
+  await createTaskDialog.getByLabel('¿Qué necesitas hacer?').fill('Revisar el plan del día');
+  await createTaskDialog.getByLabel('Prioridad').selectOption('2');
+  await createTaskDialog.getByLabel('Fecha (opcional)').fill('2026-11-20');
+  await createTaskDialog.getByRole('button', { name: 'Añadir tarea' }).click();
+  await expect(createTaskDialog).toBeHidden();
 
   await expect(page.getByText('Tarea creada.')).toBeVisible();
   expect(insertedTasks).toHaveLength(1);
@@ -339,15 +372,21 @@ test('mock-authenticated task creation uses the signed-in profile and Havana tim
   await expect(page.getByText('Pendiente', { exact: true })).toBeVisible();
 
   // Create two more tasks to exercise search, filters and sorting as a single batch.
-  await page.getByLabel('¿Qué necesitas hacer?').fill('Comprar arroz');
-  await page.locator('.content-side .form-card select').first().selectOption('4');
-  await page.getByRole('button', { name: 'Añadir tarea' }).click();
+  await page.getByRole('button', { name: 'Nueva Tarea' }).click();
+  const secondTaskDialog = page.getByRole('dialog', { name: 'Nueva tarea' });
+  await secondTaskDialog.getByLabel('¿Qué necesitas hacer?').fill('Comprar arroz');
+  await secondTaskDialog.getByLabel('Prioridad').selectOption('4');
+  await secondTaskDialog.getByRole('button', { name: 'Añadir tarea' }).click();
+  await expect(secondTaskDialog).toBeHidden();
   await expect(page.getByText('Tarea creada.')).toBeVisible();
 
-  await page.getByLabel('¿Qué necesitas hacer?').fill('Preparar reunión');
-  await page.locator('.content-side .form-card select').first().selectOption('2');
-  await page.getByLabel('Fecha (opcional)').fill('2026-11-20');
-  await page.getByRole('button', { name: 'Añadir tarea' }).click();
+  await page.getByRole('button', { name: 'Nueva Tarea' }).click();
+  const thirdTaskDialog = page.getByRole('dialog', { name: 'Nueva tarea' });
+  await thirdTaskDialog.getByLabel('¿Qué necesitas hacer?').fill('Preparar reunión');
+  await thirdTaskDialog.getByLabel('Prioridad').selectOption('2');
+  await thirdTaskDialog.getByLabel('Fecha (opcional)').fill('2026-11-20');
+  await thirdTaskDialog.getByRole('button', { name: 'Añadir tarea' }).click();
+  await expect(thirdTaskDialog).toBeHidden();
   await expect(page.getByText('Tarea creada.')).toBeVisible();
   expect(insertedTasks).toHaveLength(3);
 
@@ -539,6 +578,8 @@ test('Projects support search, lifecycle, editing, archive, restore and linked t
 
   await page.locator('.side-nav').getByRole('button', { name: /Proyectos/ }).click();
   await expect(page.getByRole('heading', { name: 'Proyectos', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Nuevo Proyecto' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Nuevo proyecto' })).toHaveCount(0);
   const projectNames = page.locator('.project-card h3');
   await expect(projectNames).toHaveText(['Plan de lectura', 'Automatizar negocio']);
 
@@ -550,9 +591,9 @@ test('Projects support search, lifecycle, editing, archive, restore and linked t
   await page.getByLabel('Buscar proyectos').fill('');
 
   // Status filter and name sorting.
-  await page.getByLabel('Filtrar proyectos por estado').selectOption('paused');
+  await page.getByLabel('Filtrar por estado de trabajo').selectOption('paused');
   await expect(projectNames).toHaveText(['Plan de lectura']);
-  await page.getByLabel('Filtrar proyectos por estado').selectOption('all');
+  await page.getByLabel('Filtrar por estado de trabajo').selectOption('all');
   await page.getByLabel('Ordenar proyectos').selectOption('name');
   await expect(projectNames).toHaveText(['Automatizar negocio', 'Plan de lectura']);
   await page.getByLabel('Ordenar proyectos').selectOption('target');
@@ -575,7 +616,7 @@ test('Projects support search, lifecycle, editing, archive, restore and linked t
   await editor.getByLabel('Propósito (opcional)').fill('Proceso operativo limpio');
   await editor.getByLabel('Fecha de inicio (opcional)').fill('2026-11-02');
   await editor.getByLabel('Fecha objetivo (opcional)').fill('2026-12-15');
-  await editor.getByLabel('Estado del proyecto').selectOption('completed');
+  await editor.getByLabel('Estado de trabajo').selectOption('completed');
   await editor.getByRole('button', { name: 'Guardar cambios' }).click();
   await expect(page.getByText('Proyecto actualizado.')).toBeVisible();
   expect(updatedProjects.at(-1)).toEqual({
@@ -608,21 +649,29 @@ test('Projects support search, lifecycle, editing, archive, restore and linked t
   expect(projectLinks).toHaveLength(1);
   expect(projectLinks[0]).toMatchObject({ task_id: linkedTask.id, project_id: projectA.id });
   expect(taskRows).toHaveLength(1);
-  await page.getByLabel('Mostrar proyectos').selectOption('archived');
+  await page.getByLabel('Filtrar proyectos por archivo').selectOption('archived');
   await expect(page.getByRole('button', { name: 'Ver proyecto: Automatizar ventas' })).toBeVisible();
+  await expect(page.getByLabel('Filtrar por estado de trabajo')).toBeDisabled();
+  const archivedProjectCard = page.locator('.project-card-archived').filter({ has: page.getByRole('heading', { name: 'Automatizar ventas' }) });
+  await expect(archivedProjectCard.locator('.status-tag')).toHaveCount(1);
+  await expect(archivedProjectCard.locator('.status-tag')).toHaveText('Archivado');
   await page.getByRole('button', { name: 'Restaurar proyecto: Automatizar ventas' }).click();
   await expect(page.getByText('Proyecto restaurado.')).toBeVisible();
   expect(projectA.archived_at).toBeNull();
   expect(projectA.status).toBe('completed');
-  await page.getByLabel('Mostrar proyectos').selectOption('active');
+  await page.getByLabel('Filtrar proyectos por archivo').selectOption('active');
   await expect(page.getByRole('button', { name: 'Ver proyecto: Automatizar ventas' })).toBeVisible();
 
-  // Create a project with a date range.
-  await page.getByLabel('Nombre').fill('Sistema SimpleLife');
-  await page.getByLabel('Propósito (opcional)').fill('Organizar los próximos pasos');
-  await page.getByLabel('Fecha de inicio (opcional)').fill('2026-11-20');
-  await page.getByLabel('Fecha objetivo (opcional)').fill('2026-12-31');
-  await page.getByRole('button', { name: 'Crear proyecto' }).click();
+  // Create a project only after opening the floating form.
+  await page.getByRole('button', { name: 'Nuevo Proyecto' }).click();
+  const createProjectDialog = page.getByRole('dialog', { name: 'Nuevo proyecto' });
+  await expect(createProjectDialog).toBeVisible();
+  await createProjectDialog.getByLabel('Nombre').fill('Sistema SimpleLife');
+  await createProjectDialog.getByLabel('Propósito (opcional)').fill('Organizar los próximos pasos');
+  await createProjectDialog.getByLabel('Fecha de inicio (opcional)').fill('2026-11-20');
+  await createProjectDialog.getByLabel('Fecha objetivo (opcional)').fill('2026-12-31');
+  await createProjectDialog.getByRole('button', { name: 'Crear proyecto' }).click();
+  await expect(createProjectDialog).toBeHidden();
   await expect(page.getByText('Proyecto creado.')).toBeVisible();
   expect(insertedProjects).toHaveLength(1);
   expect(insertedProjects[0]).toMatchObject({
@@ -637,4 +686,53 @@ test('Projects support search, lifecycle, editing, archive, restore and linked t
   expect(insertedProjects[0].id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   expect(projectLinks).toHaveLength(1);
   expect(taskRows).toHaveLength(1);
+});
+
+
+test('Objectives create areas and goals through separate floating forms', async ({ page }) => {
+  const { areas, insertedAreas, insertedGoals } = await mockSupabaseSession(page);
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+
+  await page.locator('.side-nav').getByRole('button', { name: /Objetivos/ }).click();
+  await expect(page.getByRole('heading', { name: 'Tus áreas de vida' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Nueva Meta' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Nueva Area' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Nueva área' })).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Nueva meta' })).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Nueva Meta' }).click();
+  const disabledGoalDialog = page.getByRole('dialog', { name: 'Nueva meta' });
+  await expect(disabledGoalDialog.getByRole('button', { name: 'Crear meta' })).toBeDisabled();
+  await disabledGoalDialog.getByRole('button', { name: 'Cancelar' }).click();
+  await expect(disabledGoalDialog).toBeHidden();
+
+  await page.getByRole('button', { name: 'Nueva Area' }).click();
+  const areaDialog = page.getByRole('dialog', { name: 'Nueva área' });
+  await areaDialog.getByLabel('Nombre del área').fill('Finanzas');
+  await areaDialog.getByRole('button', { name: 'Crear área' }).click();
+  await expect(areaDialog).toBeHidden();
+  await expect(page.getByText('Área creada.')).toBeVisible();
+  expect(insertedAreas).toHaveLength(1);
+  expect(insertedAreas[0]).toMatchObject({ owner_user_id: profile.id, created_by_user_id: profile.id, title: 'Finanzas' });
+
+  await page.getByRole('button', { name: 'Nueva Meta' }).click();
+  const goalDialog = page.getByRole('dialog', { name: 'Nueva meta' });
+  await goalDialog.getByLabel('Área de vida').selectOption({ label: 'Finanzas' });
+  await goalDialog.getByLabel('Resultado que buscas').fill('Crear un fondo de emergencia');
+  await goalDialog.getByLabel('Motivo (opcional)').fill('Tener estabilidad financiera');
+  await goalDialog.getByLabel('Fecha objetivo (opcional)').fill('2027-06-30');
+  await goalDialog.getByRole('button', { name: 'Crear meta' }).click();
+  await expect(goalDialog).toBeHidden();
+  await expect(page.getByText('Meta creada.')).toBeVisible();
+  expect(areas).toHaveLength(1);
+  expect(insertedGoals).toHaveLength(1);
+  expect(insertedGoals[0]).toMatchObject({
+    owner_user_id: profile.id, created_by_user_id: profile.id,
+    life_area_id: insertedAreas[0].id, title: 'Crear un fondo de emergencia',
+    reason: 'Tener estabilidad financiera', target_date: '2027-06-30', status: 'active',
+  });
 });

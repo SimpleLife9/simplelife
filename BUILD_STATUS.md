@@ -123,3 +123,12 @@ No `service_role` key or database password is present in the frontend. `.env.exa
 - Playwright coverage uses a mocked Auth/PostgREST session; it does not represent a real Supabase database write.
 - Manual validation: PENDING.
 - No public deployment or preview was created.
+
+
+## Creation modals and project/archive consistency — implementation in PR
+
+- Adds section-level **Nuevo Proyecto**, **Nueva Tarea**, **Nueva Meta** and **Nueva Area** actions. Creation forms open only on request in floating, accessible dialogs.
+- Project labels distinguish **Estado de trabajo** from **Archivo**; active status is labeled **En marcha**.
+- An archived project displays only **Archivado**. The original work state is retained without allowing edits while archived, and becomes available again after restore.
+- Archived projects cannot be selected when creating a new task; they are excluded from work-state filtering.
+- No schema, RLS, grants, or live user records changed. Automated checks are pending CI.
