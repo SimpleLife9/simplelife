@@ -73,12 +73,19 @@ No `service_role` key or database password is present in the frontend. `.env.exa
 - Manual reopening through Robert's real authenticated browser session: PENDING.
 - No deployment or public preview was created.
 
-## Task list controls — implementation in PR
+## Task list controls — merged 19 Nov 2026
 
-- Added search by task name and details.
-- Added status filters: active, completed, all.
-- Added exact priority filter (1–5).
-- Added sorting by priority, due date (no-date tasks last), and newest first.
+- Task list controls merged into `main` by PR #3: https://github.com/SimpleLife9/simplelife/pull/3.
+- Search matches task action/name and description.
+- Status filters: active (default), completed, and all.
+- Priority filter: exact levels 1–5.
+- Sorting: priority, due date (tasks without a date last), and newest first.
+- Results counter and a dedicated no-matches state.
+- Compact responsive controls; mobile layout is included in the browser suite.
 - Filtering and ordering are client-side over the authenticated user's task rows; no schema, RLS, or privilege change.
-- Playwright coverage uses a mocked Supabase session and three tasks with different descriptions, priorities, statuses, and due dates.
-- CI validation and merge are pending.
+- Playwright uses a mocked Supabase session and three tasks to verify search, status filter, priority filter, sorting, and the existing create/edit/complete/reopen flow.
+- PR CI run #18: PASS — 3/3 unit tests, Playwright, production build: https://github.com/SimpleLife9/simplelife/actions/runs/44585548978.
+- Main post-merge CI run #19: PASS — 3/3 unit tests, Playwright, production build: https://github.com/SimpleLife9/simplelife/actions/runs/44585747558.
+- Merged main SHA: `1a6c627f76ebc221c096da9a306c7c6c9f53f557`.
+- Manual validation in Robert's real authenticated browser session: PENDING.
+- No public deployment or preview was created.
