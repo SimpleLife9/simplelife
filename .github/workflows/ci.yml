@@ -1,0 +1,48 @@
+name: SimpleLife bootstrap, test and build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'bootstrap/*.b64'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: simplelife-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bootstrap-test-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Rebuild and verify initial source archive
+        run: |
+          if [ -f bootstrap/part01.b64 ]; then
+            cat bootstrap/part*.b64 | base64 -d > /tmp/simplelife-pwa-alpha.tar.xz
+            echo "7bc0c02d64fcf0e50a4d5a9686f2ad4e25a1d7a2da154d92b9e5670a2b74f21b  /tmp/simplelife-pwa-alpha.tar.xz" | sha256sum -c -
+            tar -xJf /tmp/simplelife-pwa-alpha.tar.xz -C /tmp
+            cp -a /tmp/simplelife-pwa/. .
+            rm -rf bootstrap
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -m "chore: expand initial SimpleLife app source"
+            git push
+          fi
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Run unit tests
+        run: npm test
+      - name: Build production assets
+        run: npm run build
