@@ -216,7 +216,7 @@ test('mock-authenticated task creation uses the signed-in profile and Havana tim
 
   await page.getByLabel('¿Qué necesitas hacer?').fill('Preparar reunión');
   await page.getByLabel('Prioridad').selectOption('2');
-  await page.getByLabel('Fecha (opcional)').fill('2026-11-23');
+  await page.getByLabel('Fecha (opcional)').fill('2026-11-20');
   await page.getByRole('button', { name: 'Añadir tarea' }).click();
   await expect(page.getByText('Tarea creada.')).toBeVisible();
   expect(insertedTasks).toHaveLength(3);
@@ -250,7 +250,7 @@ test('mock-authenticated task creation uses the signed-in profile and Havana tim
   await page.getByLabel('Ordenar tareas').selectOption('priority');
   await expect(taskNames).toHaveText(['Revisar el plan semanal', 'Preparar reunión', 'Comprar arroz']);
   await page.getByLabel('Ordenar tareas').selectOption('due');
-  await expect(taskNames).toHaveText(['Revisar el plan semanal', 'Preparar reunión', 'Comprar arroz']);
+  await expect(taskNames).toHaveText(['Preparar reunión', 'Revisar el plan semanal', 'Comprar arroz']);
   await page.getByLabel('Ordenar tareas').selectOption('recent');
   await expect(taskNames).toHaveText(['Preparar reunión', 'Comprar arroz', 'Revisar el plan semanal']);
 
