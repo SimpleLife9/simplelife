@@ -745,16 +745,10 @@ test('Objectives create areas and goals through separate floating forms', async 
 
   await page.locator('.side-nav').getByRole('button', { name: /Objetivos/ }).click();
   await expect(page.getByRole('heading', { name: 'Tus áreas de vida' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Nueva Meta' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Nueva Área' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Nueva Meta', exact: true })).toHaveCount(0);
   await expect(page.getByRole('dialog', { name: 'Nueva área' })).toHaveCount(0);
   await expect(page.getByRole('dialog', { name: 'Nueva meta' })).toHaveCount(0);
-
-  await page.getByRole('button', { name: 'Nueva Meta' }).click();
-  const disabledGoalDialog = page.getByRole('dialog', { name: 'Nueva meta' });
-  await expect(disabledGoalDialog.getByRole('button', { name: 'Crear meta' })).toBeDisabled();
-  await disabledGoalDialog.getByRole('button', { name: 'Cancelar' }).click();
-  await expect(disabledGoalDialog).toBeHidden();
 
   await page.getByRole('button', { name: 'Nueva Área' }).click();
   const areaDialog = page.getByRole('dialog', { name: 'Nueva área' });
@@ -765,6 +759,8 @@ test('Objectives create areas and goals through separate floating forms', async 
   expect(insertedAreas).toHaveLength(1);
   expect(insertedAreas[0]).toMatchObject({ owner_user_id: profile.id, created_by_user_id: profile.id, title: 'Finanzas' });
 
+  await page.getByRole('button', { name: 'Metas', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Nueva Meta' })).toBeVisible();
   await page.getByRole('button', { name: 'Nueva Meta' }).click();
   const goalDialog = page.getByRole('dialog', { name: 'Nueva meta' });
   await goalDialog.getByLabel('Área de vida').selectOption({ label: 'Finanzas' });
