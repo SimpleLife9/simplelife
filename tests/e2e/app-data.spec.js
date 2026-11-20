@@ -92,6 +92,24 @@ async function mockSupabaseSession(page, initialData = {}) {
   const updatedCaptures = [];
   const insertedCaptures = [];
   const insertedCaptureParts = [];
+  const captureParts = [...(initialData.captureParts || captures.map((capture, index) => ({
+    id: '00000000-0000-7000-8000-00000000020' + (index + 1),
+    capture_id: capture.id,
+    part_index: 0,
+    original_fragment: capture.content_original,
+    interpretation: null,
+    category: null,
+    review_status: 'unreviewed',
+  })))];
+  const updatedCaptureParts = [];
+  const captureLinks = [...(initialData.captureLinks || [])];
+  const insertedCaptureLinks = [];
+  const noteIdeas = [...(initialData.noteIdeas || [])];
+  const insertedNoteIdeas = [];
+  const lists = [...(initialData.lists || [])];
+  const insertedLists = [];
+  const listItems = [...(initialData.listItems || [])];
+  const insertedListItems = [];
   let createdCount = 0;
 
   await page.route(`${projectUrl}/**`, async (route) => {
@@ -209,7 +227,9 @@ async function mockSupabaseSession(page, initialData = {}) {
     }
 
     if (url.pathname === '/rest/v1/task' && method === 'GET') {
-      await json(200, taskRows.filter((task) => !task.deleted_at));
+      const idFilter = url.searchParams.get('id') || '';
+      const rows = taskRows.filter((task) => !task.deleted_at && (!idFilter || idFilter === 'eq.' + task.id));
+      await json(200, rows);
       return;
     }
 
@@ -271,6 +291,90 @@ async function mockSupabaseSession(page, initialData = {}) {
       return;
     }
 
+    if (url.pathname === '/rest/v1/capture_part' && method === 'GET') {
+      const idFilter = url.searchParams.get('id') || '';
+      const captureFilter = url.searchParams.get('capture_id') || '';
+      const rows = captureParts.filter((row) => (!idFilter || idFilter === 'eq.' + row.id) && (!captureFilter || captureFilter === 'eq.' + row.capture_id));
+      await json(200, rows);
+      return;
+    }
+    if (url.pathname === '/rest/v1/capture_part' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const rows = Array.isArray(payload) ? payload : [payload];
+      captureParts.push(...rows);
+      insertedCaptureParts.push(...rows);
+      await json(201, rows, { 'content-range': '0-0/*' });
+      return;
+    }
+    if (url.pathname === '/rest/v1/capture_part' && method === 'PATCH') {
+      const payload = request.postDataJSON();
+      const idFilter = url.searchParams.get('id') || '';
+      const row = captureParts.find((item) => idFilter === 'eq.' + item.id);
+      if (!row) { await json(200, []); return; }
+      Object.assign(row, payload);
+      updatedCaptureParts.push({ id: row.id, ...payload });
+      await json(200, [{ id: row.id }], { 'content-range': '0-0/*' });
+      return;
+    }
+
+    if (url.pathname === '/rest/v1/capture_link' && method === 'GET') {
+      const idFilter = url.searchParams.get('id') || '';
+      const rows = captureLinks.filter((row) => !idFilter || idFilter === 'eq.' + row.id);
+      await json(200, rows);
+      return;
+    }
+    if (url.pathname === '/rest/v1/capture_link' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const rows = Array.isArray(payload) ? payload : [payload];
+      captureLinks.push(...rows);
+      insertedCaptureLinks.push(...rows);
+      await json(201, rows, { 'content-range': '0-0/*' });
+      return;
+    }
+
+    if (url.pathname === '/rest/v1/note_idea' && method === 'GET') {
+      const idFilter = url.searchParams.get('id') || '';
+      await json(200, noteIdeas.filter((row) => !row.deleted_at && (!idFilter || idFilter === 'eq.' + row.id)));
+      return;
+    }
+    if (url.pathname === '/rest/v1/note_idea' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const rows = Array.isArray(payload) ? payload : [payload];
+      noteIdeas.push(...rows);
+      insertedNoteIdeas.push(...rows);
+      await json(201, rows, { 'content-range': '0-0/*' });
+      return;
+    }
+
+    if (url.pathname === '/rest/v1/user_list' && method === 'GET') {
+      const idFilter = url.searchParams.get('id') || '';
+      const rows = lists.filter((row) => !row.deleted_at && !row.archived_at && row.status === 'active' && (!idFilter || idFilter === 'eq.' + row.id));
+      await json(200, rows);
+      return;
+    }
+    if (url.pathname === '/rest/v1/user_list' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const rows = Array.isArray(payload) ? payload : [payload];
+      lists.push(...rows);
+      insertedLists.push(...rows);
+      await json(201, rows, { 'content-range': '0-0/*' });
+      return;
+    }
+
+    if (url.pathname === '/rest/v1/list_item' && method === 'GET') {
+      const idFilter = url.searchParams.get('id') || '';
+      await json(200, listItems.filter((row) => !idFilter || idFilter === 'eq.' + row.id));
+      return;
+    }
+    if (url.pathname === '/rest/v1/list_item' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const rows = Array.isArray(payload) ? payload : [payload];
+      listItems.push(...rows);
+      insertedListItems.push(...rows);
+      await json(201, rows, { 'content-range': '0-0/*' });
+      return;
+    }
+
     if (url.pathname === '/rest/v1/capture' && method === 'GET') {
       await json(200, captures.filter((capture) => !capture.deleted_at));
       return;
@@ -308,14 +412,6 @@ async function mockSupabaseSession(page, initialData = {}) {
       return;
     }
 
-    if (url.pathname === '/rest/v1/capture_part' && method === 'POST') {
-      const payload = request.postDataJSON();
-      const rows = Array.isArray(payload) ? payload : [payload];
-      insertedCaptureParts.push(...rows);
-      await route.fulfill({ status: 201, headers: corsHeaders, body: '' });
-      return;
-    }
-
     if (url.pathname === '/rest/v1/task' && method === 'POST') {
       const payload = request.postDataJSON();
       const rows = Array.isArray(payload) ? payload : [payload];
@@ -325,7 +421,7 @@ async function mockSupabaseSession(page, initialData = {}) {
       }));
       insertedTasks.push(...createdRows);
       taskRows.push(...createdRows);
-      await route.fulfill({ status: 201, headers: corsHeaders, body: '' });
+      await json(201, createdRows, { 'content-range': '0-0/*' });
       return;
     }
 
@@ -352,7 +448,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     await json(404, { message: `Unexpected mocked Supabase request: ${method} ${url.pathname}` });
   });
 
-  return { insertedTasks, updatedTasks, taskRows, projects, insertedProjects, updatedProjects, projectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, insertedCaptureParts };
+  return { insertedTasks, updatedTasks, taskRows, projects, insertedProjects, updatedProjects, projectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems };
 }
 
 test('mock-authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
@@ -923,4 +1019,161 @@ test('Objetivos permite editar áreas, metas y submetas, gestionar estados y cre
   await expect(page.getByText('Submeta creada.')).toBeVisible();
   expect(result.insertedSubgoals).toHaveLength(1);
   expect(result.insertedSubgoals[0]).toMatchObject({ goal_id: goals[2].id, title: 'Tercera meta sin límite', status: 'active', created_by_user_id: profile.id });
+});
+
+
+test('Inbox converts a capture into a task and preserves its source link', async ({ page }) => {
+  const { captures, captureParts, insertedTasks, captureLinks, insertedCaptureLinks, updatedCaptureParts, updatedCaptures } = await mockSupabaseSession(page);
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  const original = captures[0].content_original;
+  await page.getByRole('button', { name: 'Organizar captura: ' + original }).click();
+  await page.getByLabel('Tipo de destino').selectOption('task');
+  await page.getByLabel('Título de la tarea').fill('Llamar al proveedor');
+  await page.getByLabel('Prioridad de la tarea').selectOption('2');
+  await page.getByLabel('Fecha objetivo').fill('2026-11-27');
+  await page.getByRole('button', { name: 'Confirmar y organizar' }).click();
+
+  await expect(page.getByText('Captura organizada como tarea.')).toBeVisible();
+  expect(insertedTasks).toHaveLength(1);
+  expect(insertedTasks[0]).toMatchObject({
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    action: 'Llamar al proveedor',
+    description: original,
+    priority: 2,
+    due_date: '2026-11-27',
+    status: 'todo',
+  });
+  expect(insertedCaptureLinks).toHaveLength(1);
+  expect(insertedCaptureLinks[0]).toMatchObject({
+    capture_part_id: captureParts[0].id,
+    task_id: insertedTasks[0].id,
+    link_status: 'confirmed',
+  });
+  expect(updatedCaptureParts.at(-1)).toMatchObject({ category: 'task', review_status: 'accepted' });
+  expect(updatedCaptures.at(-1)).toMatchObject({ id: captures[0].id, attention_status: 'reviewed' });
+  expect(captures[0].content_original).toBe(original);
+
+  await page.getByLabel('Filtrar capturas por revisión').selectOption('organized');
+  await expect(page.getByText('Organizada · Tarea')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Organizar captura: ' + original })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Archivar captura: ' + original }).click();
+  await expect(page.getByText('Organizada · Tarea · Archivada')).toBeVisible();
+  expect(updatedCaptures.at(-1)).toMatchObject({ id: captures[0].id, attention_status: 'archived' });
+  await page.getByRole('button', { name: 'Restaurar captura: ' + original }).click();
+  expect(updatedCaptures.at(-1)).toMatchObject({ id: captures[0].id, attention_status: 'needs_review' });
+  await page.getByLabel('Filtrar capturas por revisión').selectOption('organized');
+  await expect(page.getByText('Organizada · Tarea')).toBeVisible();
+  await page.getByRole('button', { name: 'Abrir tareas →' }).click();
+  await expect(page.getByRole('heading', { name: 'Tareas', exact: true })).toBeVisible();
+});
+
+test('Inbox converts a capture into an idea without changing the original capture', async ({ page }) => {
+  const { captures, insertedNoteIdeas, insertedCaptureLinks, captureParts, updatedCaptureParts } = await mockSupabaseSession(page);
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  const original = captures[1].content_original;
+  await page.getByLabel('Filtrar capturas por revisión').selectOption('all');
+  await page.getByRole('button', { name: 'Organizar captura: ' + original }).click();
+  await page.getByLabel('Tipo de destino').selectOption('idea');
+  await page.getByLabel('Título (opcional)').fill('Mejora del negocio');
+  await page.getByRole('button', { name: 'Confirmar y organizar' }).click();
+
+  await expect(page.getByText('Captura guardada como idea.')).toBeVisible();
+  expect(insertedNoteIdeas).toHaveLength(1);
+  expect(insertedNoteIdeas[0]).toMatchObject({
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    kind: 'idea',
+    title: 'Mejora del negocio',
+    content: original,
+  });
+  expect(insertedCaptureLinks).toHaveLength(1);
+  expect(insertedCaptureLinks[0]).toMatchObject({
+    capture_part_id: captureParts[1].id,
+    note_idea_id: insertedNoteIdeas[0].id,
+    link_status: 'confirmed',
+  });
+  expect(updatedCaptureParts.at(-1)).toMatchObject({ category: 'note_idea', review_status: 'accepted' });
+  expect(captures[1].content_original).toBe(original);
+  await page.getByLabel('Filtrar capturas por revisión').selectOption('organized');
+  await expect(page.getByText('Organizada · Nota o idea')).toBeVisible();
+});
+
+test('Inbox turns a capture into a new list with its first item and provenance', async ({ page }) => {
+  const { captures, insertedLists, insertedListItems, insertedCaptureLinks } = await mockSupabaseSession(page);
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  const original = captures[0].content_original;
+  await page.getByRole('button', { name: 'Organizar captura: ' + original }).click();
+  await page.getByLabel('Tipo de destino').selectOption('list');
+  await page.getByLabel('Nombre de la nueva lista').fill('Pendientes del proveedor');
+  await page.getByRole('button', { name: 'Confirmar y organizar' }).click();
+
+  await expect(page.getByText('Captura añadida a una lista.')).toBeVisible();
+  expect(insertedLists).toHaveLength(1);
+  expect(insertedLists[0]).toMatchObject({ owner_user_id: profile.id, name: 'Pendientes del proveedor' });
+  expect(insertedListItems).toHaveLength(1);
+  expect(insertedListItems[0]).toMatchObject({
+    list_id: insertedLists[0].id,
+    content: original,
+    is_checked: false,
+  });
+  expect(insertedCaptureLinks).toHaveLength(1);
+  expect(insertedCaptureLinks[0]).toMatchObject({
+    capture_part_id: '00000000-0000-7000-8000-000000000201',
+    list_item_id: insertedListItems[0].id,
+    link_status: 'confirmed',
+  });
+  expect(captures[0].content_original).toBe(original);
+});
+
+test('Inbox adds a capture to an existing list as a linked list item', async ({ page }) => {
+  const existingList = {
+    id: '00000000-0000-7000-8000-000000000301',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    name: 'Compras',
+    status: 'active',
+    archived_at: null,
+    deleted_at: null,
+  };
+  const { captures, insertedListItems, insertedCaptureLinks } = await mockSupabaseSession(page, { lists: [existingList] });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  const original = captures[0].content_original;
+  await page.getByRole('button', { name: 'Organizar captura: ' + original }).click();
+  await page.getByLabel('Tipo de destino').selectOption('list');
+  await page.getByLabel('Acción de lista').selectOption('existing');
+  await page.getByLabel('Lista existente').selectOption(existingList.id);
+  await page.getByLabel('Texto del elemento').fill('Llamar al proveedor');
+  await page.getByRole('button', { name: 'Confirmar y organizar' }).click();
+
+  await expect(page.getByText('Captura añadida a una lista.')).toBeVisible();
+  expect(insertedListItems).toHaveLength(1);
+  expect(insertedListItems[0]).toMatchObject({ list_id: existingList.id, content: 'Llamar al proveedor' });
+  expect(insertedCaptureLinks).toHaveLength(1);
+  expect(insertedCaptureLinks[0]).toMatchObject({
+    capture_part_id: '00000000-0000-7000-8000-000000000201',
+    list_item_id: insertedListItems[0].id,
+    link_status: 'confirmed',
+  });
+  expect(captures[0].content_original).toBe(original);
 });
