@@ -385,9 +385,10 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 | #21 | Shared data hook `src/shared/hooks/useRows.js` | #110 PASS | #111 PASS | `1434b060177b205f91ad488d51f2f7b19ff9d29c` |
 | #22 | Tasks open-state domain rule `src/features/tasks/domain/task-status.js` | #112 PASS | #113 PASS | `bc24b679a835671ed960264c9dac9d61d5d24495` |
 | #23 | Shared UI `SectionTitle` and `EmptyState` components | #114 PASS | #115 PASS | `5cc05352727d5106aed8b18959ac669b52809cca` |
-| #24 | Today page and owner-scoped task operations | #118 PASS | #119 PENDING AT THIS DOCUMENT UPDATE | `84f849ed761217cf9e69ed445e9536dd6da24c2e` |
+| #24 | Today page and owner-scoped task operations | #118 PASS | #119 PASS | `84f849ed761217cf9e69ed445e9536dd6da24c2e` |
+| #25 | Inbox page `src/features/inbox/InboxPage.jsx` | #120 PASS | #121 PASS | `1835738d467abba2db96489f9fe4cb1558190673` |
 
-- The extractions from PRs #19–#24 preserve existing APIs or behavior; the existing Playwright suite remained at 19 scenarios and passed for completed PR checks.
+- The extractions from PRs #19–#25 preserve existing APIs or behavior; the existing Playwright suite remained at 19 scenarios and passed for completed PR checks.
 - No new framework/dependency, schema migration, RLS/grant, auth, secret, Service Worker or deployment change was made in these batches.
 - This is incremental boundary work, not a completed rewrite. `src/App.jsx` remains a legacy composition file and additional page/service extraction is still required before Phase 0 closes.
 - The real authenticated Supabase browser test and physical-device validation remain open; mocked E2E is not evidence of real persistence.
