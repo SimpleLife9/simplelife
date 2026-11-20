@@ -253,6 +253,6 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 - Para reintentos dentro de la misma ventana, el ID estable y la comprobación de existencia permiten recuperar la creación de la tarea antes de completar el vínculo sin duplicar la fila.
 - Playwright cubre creación, contenido original, prioridad/fecha, vínculo, estado visible, acceso a Tareas y prevención de segunda conversión tras navegar y volver.
 - Se reutilizan tablas, columnas, grants y política RLS existentes. Sin migraciones, cambios de esquema, RLS, grants, permisos ni secretos. QA con mocks y sin escrituras en datos reales.
-- CI post-merge #72: EN EJECUCIÓN al momento de este registro.
+- CI post-merge #73 (commit documental `59a7dacd69ac4595aa82de543f88eb0e2bc3c19d`): PASS — pruebas unitarias, Playwright y build de producción: https://github.com/SimpleLife9/simplelife/actions/runs/44738010979.
 - Validación manual de Robert en localhost: PENDIENTE.
 - Sin despliegue público ni preview.
