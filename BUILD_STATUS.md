@@ -271,7 +271,8 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 - Playwright cubre captura/edición de duración, filtros por fecha, completar en bloque, reprogramar, quitar fecha y recuperar tareas atrasadas. Las pruebas usan mocks; no escriben datos reales.
 - Reutiliza columnas, política RLS, grants y permisos existentes. Sin migraciones, cambios de esquema, RLS, grants, permisos o secretos.
 - Validación manual de Robert en localhost: PASS (20/11/2026). Confirmó que el lote funciona correctamente; aclaró que la duración estimada representa tiempo previsto, no un cronómetro. Anexo 136 cerrado manualmente.
-- Sin despliegue público ni preview. Estado de CI post-merge: no confirmado en la consulta actual; no se marca PASS por inferencia.
+- CI posterior a la fusión: PASS — run #78 sobre el commit `96b8faf65cf5ddb5361a7bd9c0ea22f1c61b2a33`, posterior al merge y con el cambio de PR #13 integrado: https://github.com/SimpleLife9/simplelife/actions/runs/44743176433.
+- Sin despliegue público ni preview.
 
 
 
