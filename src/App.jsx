@@ -637,10 +637,9 @@ function GoalsPage({ profile, refreshKey, runAction, busy }) {
   }, status === 'completed' ? 'Submeta completada.' : status === 'active' ? 'Submeta reactivada.' : status === 'paused' ? 'Submeta pausada.' : 'Estado de la submeta actualizado.');
 
   const openNewSubgoal = (goalId) => {
-    setNewSubgoalGoalId(goalId || (goals[0]?.id || ''));
+    setNewSubgoalGoalId(goalId || (subgoalGoalFilter !== 'all' ? subgoalGoalFilter : (goals[0]?.id || '')));
     setShowSubgoalModal(true);
   };
-  const goalsForSubgoals = subgoalGoalFilter === 'all' ? goals : goals.filter((goal) => goal.id === subgoalGoalFilter);
   const visibleSubgoals = subgoals.filter((subgoal) => subgoalGoalFilter === 'all' || subgoal.goal_id === subgoalGoalFilter);
   const viewHeading = activeView === 'areas' ? 'Tus áreas de vida' : activeView === 'goals' ? 'Tus metas' : 'Tus submetas';
 
@@ -694,7 +693,7 @@ function GoalsPage({ profile, refreshKey, runAction, busy }) {
 
           {activeView === 'subgoals' && (goals.length ? <>
             <div className="subgoal-toolbar">
-              <label className="goal-filter-field"><span>Mostrar submetas de</span><select aria-label="Filtrar submetas por meta" value={subgoalGoalFilter} onChange={(event) => setSubgoalGoalFilter(event.target.value)}><option value="all">Todas las metas</option>{goalsForSubgoals.filter((goal) => subgoalGoalFilter === 'all' || goal.id === subgoalGoalFilter).map((goal) => <option key={goal.id} value={goal.id}>{goal.title}</option>)}</select></label>
+              <label className="goal-filter-field"><span>Mostrar submetas de</span><select aria-label="Filtrar submetas por meta" value={subgoalGoalFilter} onChange={(event) => setSubgoalGoalFilter(event.target.value)}><option value="all">Todas las metas</option>{goals.map((goal) => <option key={goal.id} value={goal.id}>{goal.title}</option>)}</select></label>
             </div>
             {visibleSubgoals.length ? <div className="subgoal-catalog-grid">{visibleSubgoals.map((subgoal, subgoalIndex) => {
               const parentGoal = goals.find((goal) => goal.id === subgoal.goal_id);
