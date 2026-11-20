@@ -6,6 +6,7 @@ import { buildDashboardSnapshot } from './lib/dashboard.js';
 import { todayInHavana, addDaysToDateKey, formatDuration, formatDate } from './lib/date-time.js';
 import { TaskRow } from './features/today/components/TaskRow.jsx';
 import { useRows } from './shared/hooks/useRows.js';
+import { isOpenTask } from './features/tasks/domain/task-status.js';
 
 const NAV = [
   { id: 'today', label: 'Hoy', icon: '☀️' },
@@ -15,7 +16,6 @@ const NAV = [
   { id: 'more', label: 'Más', icon: '•••' },
 ];
 
-const isOpenTask = (task) => !['completed', 'cancelled'].includes(task.status);
 
 function App() {
   const [session, setSession] = useState(null);
