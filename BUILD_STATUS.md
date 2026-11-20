@@ -311,7 +311,7 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 - Las tarjetas de Metas y Submetas muestran las tareas contribuyentes y sus estados.
 - Se reutiliza `public.contribution_relation`, sus índices únicos, restricciones, políticas RLS y grants existentes. Se verificaron las políticas y permisos en modo lectura; no se modificaron esquema, migraciones, RLS, grants, permisos ni secretos.
 - Playwright utiliza mocks de Auth/PostgREST; no realiza escrituras de QA en datos reales de Supabase.
-- Validación manual de Robert en localhost: PENDIENTE. No declarar cierre manual hasta confirmación del usuario.
+- Revisión general de Robert en localhost (20/11/2026): FAVORABLE A NIVEL GENERAL. Indicó que probó aproximadamente el flujo y que funcionó bastante bien. No se registra PASS exhaustivo porque no confirmó cada caso de la lista individualmente.
 - Sin despliegue público ni preview.
 
 ### Sesión de validación manual — Lote 11
@@ -321,3 +321,29 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 3. Vincula otra tarea únicamente a una Submeta y comprueba que aparece al filtrar por la Meta principal.
 4. Desvincula la relación directa con la Meta y restáurala desde el mismo diálogo; confirma que no se crea otra relación.
 5. En Objetivos → Metas y Submetas, comprueba que aparecen las tareas contribuyentes y sus estados.
+
+
+## Lote 12 — Gestión de tareas dentro de proyectos (20/11/2026)
+
+- PR #16 integrado: https://github.com/SimpleLife9/simplelife/pull/16.
+- SHA squash integrado en main: `2cb3ed2b7b002d2463221289d6ae69f6bbe7265e`.
+- SHA de la rama validada: `21174606fae84b5da222b1192b0f26d81eb9c129`.
+- CI PR #94: PASS — 3 pruebas unitarias, 18 escenarios Playwright E2E y build de producción: https://github.com/SimpleLife9/simplelife/actions/runs/44819984262.
+- CI post-merge #95: PASS sobre el SHA exacto integrado en main — 3 pruebas unitarias, 18 escenarios Playwright E2E y build de producción: https://github.com/SimpleLife9/simplelife/actions/runs/44820234401.
+- Tareas permite gestionar asociaciones con proyectos después de crear la tarea.
+- Una tarea puede tener un proyecto principal y varios proyectos adicionales. Al cambiar el principal, el anterior pasa a adicional; no se elimina el vínculo.
+- Cada fila de tarea muestra proyectos asociados y su rol. El filtro permite elegir un proyecto o «Sin proyecto».
+- El detalle de cada proyecto muestra sus tareas y distingue si la asociación es principal o adicional.
+- Auditoría de solo lectura de `public.task_project_link`: la tabla ya existía, con RLS, unicidad por pareja tarea/proyecto e índice para un único principal. `authenticated` tiene SELECT/INSERT y UPDATE únicamente sobre `relation_role`; no tiene DELETE. La interfaz no ofrece desvincular ni borrar relaciones porque el permiso no existe. Los vínculos se conservan.
+- Sin cambios de esquema, migraciones, RLS, grants, permisos o secretos. E2E usa mocks de Auth/PostgREST; no se escribieron datos de QA en Supabase real.
+- Validación manual de Robert en localhost: PENDIENTE.
+- Sin despliegue público ni preview.
+
+### Sesión de validación manual — Lote 12
+
+1. En Más → Tareas, abre una tarea existente y pulsa «Vincular proyecto».
+2. Añade un proyecto activo y comprueba que queda como principal cuando es el primero.
+3. Añade un segundo proyecto y comprueba que aparece como adicional.
+4. Pulsa «Hacer principal» en el segundo proyecto y confirma que el anterior pasa a adicional y ninguno desaparece.
+5. Filtra tareas por cada proyecto y por «Sin proyecto».
+6. Abre Proyectos y entra en ambos detalles; confirma que la misma tarea aparece en ambos y que el rol principal/adicional coincide.
