@@ -238,3 +238,21 @@ Robert confirmó que la corrección funciona correctamente en localhost y autori
 ## Cierre manual — Lote 7 y corrección de descubribilidad (20/11/2026)
 
 Robert confirmó PASS en localhost: puede encontrar y consultar correctamente las notas/ideas y listas creadas desde Inbox. Quedan cerrados el Lote 7 (PR #10) y la corrección de navegación/renderizado del PR #11. La persistencia de destino, el acceso visible en escritorio/móvil y la apertura desde Inbox están cubiertos por E2E; la comprobación de lectura real de sus datos quedó validada manualmente.
+
+
+## Lote 8 — Convertir elementos de listas en tareas (20/11/2026)
+
+- PR #12 integrado: https://github.com/SimpleLife9/simplelife/pull/12.
+- SHA squash: `e3ec37f6a589a8cb38ae3ad8616eb6da0cf023af`.
+- CI del PR #71: PASS — pruebas unitarias, Playwright E2E y build de producción: https://github.com/SimpleLife9/simplelife/actions/runs/44737793897.
+- En Más → Listas, cada elemento sin tarea vinculada ofrece «Convertir en tarea».
+- El formulario permite ajustar título, prioridad y fecha objetivo opcional.
+- La tarea conserva el contenido original completo del elemento en su descripción y registra la lista de origen.
+- El elemento original permanece dentro de la lista y se vincula mediante el campo existente `list_item.task_id`.
+- Las listas muestran el estado de la tarea vinculada; el acceso «Abrir tareas» lleva al módulo correspondiente. Un elemento ya vinculado no permite crear otra tarea desde la misma acción.
+- Para reintentos dentro de la misma ventana, el ID estable y la comprobación de existencia permiten recuperar la creación de la tarea antes de completar el vínculo sin duplicar la fila.
+- Playwright cubre creación, contenido original, prioridad/fecha, vínculo, estado visible, acceso a Tareas y prevención de segunda conversión tras navegar y volver.
+- Se reutilizan tablas, columnas, grants y política RLS existentes. Sin migraciones, cambios de esquema, RLS, grants, permisos ni secretos. QA con mocks y sin escrituras en datos reales.
+- CI post-merge #72: EN EJECUCIÓN al momento de este registro.
+- Validación manual de Robert en localhost: PENDIENTE.
+- Sin despliegue público ni preview.
