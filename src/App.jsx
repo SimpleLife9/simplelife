@@ -1440,7 +1440,13 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
       if (objectiveFilter === 'none') objectiveMatches = taskObjectives.length === 0;
       else if (!objectiveMatches && objectiveFilter.includes(':')) {
         const [kind, targetId] = objectiveFilter.split(':');
-        objectiveMatches = taskObjectives.some((relation) => kind === 'goal' ? relation.goal_id === targetId : relation.subgoal_id === targetId);
+        objectiveMatches = taskObjectives.some((relation) => {
+          if (kind === 'goal') {
+            if (relation.goal_id === targetId) return true;
+            return Boolean(relation.subgoal_id && subgoals.some((subgoal) => subgoal.id === relation.subgoal_id && subgoal.goal_id === targetId));
+          }
+          return kind === 'subgoal' && relation.subgoal_id === targetId;
+        });
       }
       const priorityMatches = priorityFilter === 'all' || String(task.priority) === priorityFilter;
       const dateMatches = dateFilter === 'all'
@@ -1600,6 +1606,7 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
           .update({ relation_status: 'confirmed' })
           .eq('id', relationExisting.id)
           .eq('task_id', relationTask.id)
+          .eq('relation_status', relationExisting.relation_status)
           .select('id');
         if (error) throw error;
         if (!data?.length) throw new Error('No se pudo restaurar el vínculo. Actualiza la vista e inténtalo de nuevo.');
