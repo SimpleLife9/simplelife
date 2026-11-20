@@ -10,6 +10,7 @@ Esta es la primera interfaz de desarrollo sobre el proyecto Supabase `Simplelife
 - Creación del perfil personal y preferencias (`America/Havana`) después de autenticar.
 - Identificadores UUIDv7 generados en el cliente.
 - Pantalla Hoy con tareas abiertas y tareas con fecha de hoy.
+- Panel Hoy con progreso verificable de metas/proyectos, ritmo de los últimos siete días, bloqueos e hitos cercanos.
 - Inbox que conserva la captura original y sus fragmentos, con búsqueda, revisión, archivo y restauración manual.
 - Áreas de vida, metas y submetas.
 - Proyectos con búsqueda por nombre/propósito, filtros por estado y archivo, ordenación, edición de datos/fechas/estado, archivo/restauración reversible y detalle de tareas vinculadas.
