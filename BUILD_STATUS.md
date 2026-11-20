@@ -200,3 +200,22 @@ Robert confirmó que la corrección funciona correctamente en localhost y autori
 - CI del commit documental de `BUILD_STATUS.md`: PASS — pruebas unitarias, Playwright y build de producción: https://github.com/SimpleLife9/simplelife/actions/runs/44723410417.
 - El comportamiento de desvincular/restaurar y el bloqueo en proyectos archivados cuenta con cobertura E2E; la validación manual comunicada cubre la vinculación y su persistencia.
 - Sin despliegue público ni preview.
+
+
+## Lote 7 — Organización manual del Inbox
+
+- PR #10 integrado en main: https://github.com/SimpleLife9/simplelife/pull/10.
+- SHA squash integrado: e9c1abb75b711112059b4124d6230b393718c61b.
+- CI PR #61: PASS — pruebas unitarias, Playwright E2E y build de producción: https://github.com/SimpleLife9/simplelife/actions/runs/44726879142.
+- Desde una captura guardada se puede confirmar manualmente su conversión en Tarea, Nota, Idea, una Lista nueva con su primer elemento o un elemento dentro de una Lista existente.
+- Tareas: título editable, prioridad, fecha opcional; el contenido original completo también se conserva en la descripción.
+- Notas/Ideas: el contenido original completo se conserva; el título es opcional.
+- Listas: se puede crear una lista con el contenido como primer elemento o añadirlo a una lista existente. El texto del elemento puede editarse respetando el límite existente de 500 caracteres; el original completo no se trunca en Inbox.
+- Se registra procedencia mediante capture_part y capture_link; el vínculo confirmado permite identificar las capturas organizadas desde Inbox. El texto original de capture.content_original no se modifica.
+- Inbox separa Por organizar, Organizadas, Revisadas sin organizar y Archivadas; muestra conteos y permite abrir el módulo destino.
+- Archivar/restaurar una captura organizada conserva la relación confirmada y no elimina el elemento destino.
+- La clasificación es manual y explícita. No se afirma que IA interprete o procese automáticamente las capturas.
+- Playwright cubre conversión a tarea, idea, lista nueva, lista existente, procedencia, conservación del original y archivo/restauración de una captura organizada.
+- Se reutilizan tablas, columnas, RLS, restricciones y grants existentes. Sin migraciones, cambios de esquema, RLS, grants, permisos o secretos; sin escrituras de prueba en datos reales.
+- Validación manual de Robert en localhost: PENDIENTE.
+- Sin despliegue público ni preview.
