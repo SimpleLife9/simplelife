@@ -1600,7 +1600,7 @@ test('Tasks link to goals and subgoals, filter by objective, and restore removed
   await thirdDialog.getByRole('button', { name: 'Vincular meta o submeta' }).click();
   await expect(page.getByText('Objetivo vinculado a la tarea.')).toBeVisible();
   expect(result.insertedContributionRelations).toHaveLength(3);
-  await thirdDialog.getByRole('button', { name: 'Cerrar' }).click();
+  await thirdDialog.getByRole('button', { name: 'Cerrar', exact: true }).click();
 
   await objectiveFilter.selectOption('goal:' + goal.id);
   await expect(page.getByText('Preparar propuesta comercial', { exact: true })).toBeVisible();
