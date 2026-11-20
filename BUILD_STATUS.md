@@ -254,5 +254,5 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 - Playwright cubre creación, contenido original, prioridad/fecha, vínculo, estado visible, acceso a Tareas y prevención de segunda conversión tras navegar y volver.
 - Se reutilizan tablas, columnas, grants y política RLS existentes. Sin migraciones, cambios de esquema, RLS, grants, permisos ni secretos. QA con mocks y sin escrituras en datos reales.
 - CI post-merge #73 (commit documental `59a7dacd69ac4595aa82de543f88eb0e2bc3c19d`): PASS — pruebas unitarias, Playwright y build de producción: https://github.com/SimpleLife9/simplelife/actions/runs/44738010979.
-- Validación manual de Robert en localhost: PENDIENTE.
+- Validación manual de Robert en localhost: PASS (20/11/2026). Confirmó «funciona perfecto» tras probar la conversión de elementos de lista en tareas; Anexo 135 cerrado.
 - Sin despliegue público ni preview.
