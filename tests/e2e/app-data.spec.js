@@ -1629,7 +1629,7 @@ test('Tasks link to goals and subgoals, filter by objective, and restore removed
   await dialog.getByRole('button', { name: 'Vincular meta o submeta' }).click();
   await expect(page.getByText('Vínculo restaurado.')).toBeVisible();
   await dialog.getByRole('button', { name: 'Cerrar' }).click();
-  expect(result.insertedContributionRelations).toHaveLength(2);
+  expect(result.insertedContributionRelations).toHaveLength(3);
   expect(goalRelation.relation_status).toBe('confirmed');
   expect(result.updatedContributionRelations).toContainEqual({ id: goalRelation.id, relation_status: 'confirmed' });
 
