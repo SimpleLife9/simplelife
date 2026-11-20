@@ -113,8 +113,10 @@ function App() {
       await operation();
       setRefreshKey((key) => key + 1);
       if (successMessage) showNotice(successMessage);
+      return true;
     } catch (actionError) {
       showError(actionError?.message || 'No se pudo completar la operación.');
+      return false;
     } finally {
       setBusy(false);
     }
@@ -529,7 +531,7 @@ function GoalsPage({ profile, refreshKey, runAction, busy }) {
     event.preventDefault();
     const title = areaTitle.trim();
     if (!title) return;
-    await runAction(async () => {
+    const saved = await runAction(async () => {
       const payload = { title, description: areaDescription.trim() || null };
       if (editingArea) {
         const { data, error } = await supabase.from('life_area').update(payload).eq('id', editingArea.id).eq('owner_user_id', profile.id).is('deleted_at', null).select('id');
@@ -540,6 +542,7 @@ function GoalsPage({ profile, refreshKey, runAction, busy }) {
         if (error) throw error;
       }
     }, editingArea ? 'Área actualizada.' : 'Área creada.');
+    if (!saved) return;
     setShowAreaModal(false);
     setEditingArea(null);
     setAreaTitle('');
@@ -572,7 +575,7 @@ function GoalsPage({ profile, refreshKey, runAction, busy }) {
   const saveGoal = async (event) => {
     event.preventDefault();
     if (!selectedArea || !goalTitle.trim()) return;
-    await runAction(async () => {
+    const saved = await runAction(async () => {
       const payload = { life_area_id: selectedArea, title: goalTitle.trim(), reason: goalReason.trim() || null, expected_result: expectedResult.trim() || null, target_date: targetDate || null };
       if (editingGoal) {
         const { data, error } = await supabase.from('goal').update(payload).eq('id', editingGoal.id).eq('owner_user_id', profile.id).is('deleted_at', null).select('id');
@@ -583,6 +586,7 @@ function GoalsPage({ profile, refreshKey, runAction, busy }) {
         if (error) throw error;
       }
     }, editingGoal ? 'Meta actualizada.' : 'Meta creada.');
+    if (!saved) return;
     setShowGoalModal(false);
     setEditingGoal(null);
     setSelectedArea('');
