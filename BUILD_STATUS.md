@@ -196,5 +196,7 @@ Robert confirmó que la corrección funciona correctamente en localhost y autori
 - Un proyecto archivado no permite crear, restaurar ni quitar relaciones desde el modal.
 - Se reutiliza `contribution_relation`, sus restricciones y la política RLS existente. No se crearon tablas, columnas ni migraciones y no se cambiaron RLS, grants, permisos o secretos.
 - E2E usa mocks de Auth/PostgREST y cubre creación, desvinculación, restauración, vínculo directo a meta y visualización recíproca. No se escribieron datos reales de Supabase durante QA.
-- Validación manual del usuario en localhost: PENDIENTE.
+- Validación manual de Robert en localhost: PASS. Confirmó que puede vincular proyectos con metas y submetas, y verificó que los vínculos persisten después de recargar la aplicación.
+- CI del commit documental de `BUILD_STATUS.md`: PASS — pruebas unitarias, Playwright y build de producción: https://github.com/SimpleLife9/simplelife/actions/runs/44723410417.
+- El comportamiento de desvincular/restaurar y el bloqueo en proyectos archivados cuenta con cobertura E2E; la validación manual comunicada cubre la vinculación y su persistencia.
 - Sin despliegue público ni preview.
