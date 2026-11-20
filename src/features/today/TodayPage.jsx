@@ -8,7 +8,7 @@ import { SectionTitle } from '../../shared/components/SectionTitle.jsx';
 import { EmptyState } from '../../shared/components/EmptyState.jsx';
 import { completeTodayTask, rescheduleTodayTask } from './services/today-tasks.js';
 
-function TodayPage({ profile, refreshKey, runAction, busy, setActivePage, setMorePage }) {
+export function TodayPage({ profile, refreshKey, runAction, busy, setActivePage, setMorePage }) {
   const { rows: tasks, loading, localError } = useRows('task', profile, refreshKey, (query) => query
     .is('deleted_at', null)
     .order('priority', { ascending: true }).order('created_at', { ascending: false }));
