@@ -1396,7 +1396,6 @@ test('Today separates overdue tasks, allows moving them to today and totals esti
   await expect(page.getByRole('heading', { name: 'Atrasadas', exact: true })).toHaveCount(0);
   await expect(page.getByText('2 h 15 min', { exact: true })).toBeVisible();
 });
-\n
 test('Today dashboard derives goal and project progress, weekly execution, blockers and milestones', async ({ page }) => {
   const today = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/Havana', year: 'numeric', month: '2-digit', day: '2-digit',
