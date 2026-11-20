@@ -1580,6 +1580,8 @@ test('Tasks link to goals and subgoals, filter by objective, and restore removed
     task_id: first.id, goal_id: goal.id,
     relation_status: 'confirmed', created_by_user_id: profile.id,
   });
+  // The task correctly leaves the "Sin objetivo" filter as soon as the link is saved.
+  await objectiveFilter.selectOption('all');
   await expect(page.getByText('Meta: Aumentar ventas')).toBeVisible();
 
   await dialog.getByLabel('Seleccionar meta o submeta').selectOption('subgoal:' + subgoal.id);
