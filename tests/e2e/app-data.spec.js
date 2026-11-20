@@ -1107,6 +1107,9 @@ test('Inbox converts a capture into an idea without changing the original captur
   expect(captures[1].content_original).toBe(original);
   await page.getByLabel('Filtrar capturas por revisión').selectOption('organized');
   await expect(page.getByText('Organizada · Nota o idea')).toBeVisible();
+  await page.getByRole('button', { name: 'Abrir notas e ideas →' }).click();
+  await expect(page.getByRole('heading', { name: 'Tu biblioteca' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Mejora del negocio' })).toBeVisible();
 });
 
 test('Inbox turns a capture into a new list with its first item and provenance', async ({ page }) => {
@@ -1139,6 +1142,11 @@ test('Inbox turns a capture into a new list with its first item and provenance',
     link_status: 'confirmed',
   });
   expect(captures[0].content_original).toBe(original);
+  await page.getByLabel('Filtrar capturas por revisión').selectOption('organized');
+  await page.getByRole('button', { name: 'Abrir listas →' }).click();
+  await expect(page.getByRole('heading', { name: 'Tus listas' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Pendientes del proveedor' })).toBeVisible();
+  await expect(page.getByText(original)).toBeVisible();
 });
 
 test('Inbox adds a capture to an existing list as a linked list item', async ({ page }) => {
@@ -1176,4 +1184,23 @@ test('Inbox adds a capture to an existing list as a linked list item', async ({ 
     link_status: 'confirmed',
   });
   expect(captures[0].content_original).toBe(original);
+});
+
+
+test('More modules remain directly accessible from the mobile navigation', async ({ page }) => {
+  await mockSupabaseSession(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+
+  await page.locator('.mobile-nav').getByRole('button', { name: /Más/ }).click();
+  const sectionNav = page.getByRole('navigation', { name: 'Secciones de Más' });
+  await expect(sectionNav).toBeVisible();
+  await expect(sectionNav.getByRole('button', { name: 'Tareas' })).toBeVisible();
+  await sectionNav.getByRole('button', { name: 'Notas e ideas' }).click();
+  await expect(page.getByRole('heading', { name: 'Tu biblioteca' })).toBeVisible();
+  await sectionNav.getByRole('button', { name: 'Listas' }).click();
+  await expect(page.getByRole('heading', { name: 'Tus listas' })).toBeVisible();
 });
