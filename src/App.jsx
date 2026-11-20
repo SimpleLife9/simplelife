@@ -1470,7 +1470,7 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
       return (a.priority ?? 3) - (b.priority ?? 3) || compareDueDate(a, b) || String(b.created_at || '').localeCompare(String(a.created_at || ''));
     });
     return filtered;
-  }, [tasks, contributionRelations, taskSearch, statusFilter, archiveFilter, objectiveFilter, priorityFilter, dateFilter, taskSort, today, nextWeek]);
+  }, [tasks, subgoals, contributionRelations, taskSearch, statusFilter, archiveFilter, objectiveFilter, priorityFilter, dateFilter, taskSort, today, nextWeek]);
 
   const openEditor = (task) => {
     setEditingTask(task);
