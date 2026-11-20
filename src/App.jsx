@@ -7,6 +7,8 @@ import { todayInHavana, addDaysToDateKey, formatDuration, formatDate } from './l
 import { TaskRow } from './features/today/components/TaskRow.jsx';
 import { useRows } from './shared/hooks/useRows.js';
 import { isOpenTask } from './features/tasks/domain/task-status.js';
+import { SectionTitle } from './shared/components/SectionTitle.jsx';
+import { EmptyState } from './shared/components/EmptyState.jsx';
 
 const NAV = [
   { id: 'today', label: 'Hoy', icon: '☀️' },
@@ -304,8 +306,6 @@ function Field({ label, name, type = 'text', placeholder, required = false, auto
 function TextAreaField({ label, name, placeholder, required = false, rows = 3, value, onChange }) {
   return <label className="field"><span>{label}</span><textarea name={name} placeholder={placeholder} required={required} rows={rows} value={value} onChange={onChange} /></label>;
 }
-function SectionTitle({ children, detail }) { return <div className="section-title"><h2>{children}</h2>{detail && <span>{detail}</span>}</div>; }
-function EmptyState({ title, detail, icon = '✳' }) { return <div className="empty-state"><div>{icon}</div><strong>{title}</strong><p>{detail}</p></div>; }
 function FormCard({ title, children, onSubmit, submitLabel = 'Guardar', busy = false, className = '' }) {
   return <form className={`form-card ${className}`} onSubmit={onSubmit}><div className="form-card-title">{title}</div>{children}<button className="button button-primary" type="submit" disabled={busy}>{busy ? 'Guardando…' : submitLabel} <span>→</span></button></form>;
 }
