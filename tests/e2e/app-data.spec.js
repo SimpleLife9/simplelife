@@ -588,7 +588,7 @@ test('mock-authenticated task creation uses the signed-in profile and Havana tim
     completed_at: null,
     completion_outcome: null,
   });
-  await expect(page.getByLabel('Cambiar estado: Revisar el plan del día')).toHaveValue('todo');
+  await expect(page.getByLabel('Cambiar estado: Revisar el plan semanal')).toHaveValue('todo');
 
   // Create two more tasks to exercise search, filters and sorting as a single batch.
   await page.getByRole('button', { name: 'Nueva Tarea' }).click();
