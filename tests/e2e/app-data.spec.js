@@ -1062,6 +1062,13 @@ test('Inbox converts a capture into a task and preserves its source link', async
   await page.getByLabel('Filtrar capturas por revisión').selectOption('organized');
   await expect(page.getByText('Organizada · Tarea')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Organizar captura: ' + original })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Archivar captura: ' + original }).click();
+  await expect(page.getByText('Organizada · Tarea · Archivada')).toBeVisible();
+  expect(updatedCaptures.at(-1)).toMatchObject({ id: captures[0].id, attention_status: 'archived' });
+  await page.getByRole('button', { name: 'Restaurar captura: ' + original }).click();
+  expect(updatedCaptures.at(-1)).toMatchObject({ id: captures[0].id, attention_status: 'needs_review' });
+  await page.getByLabel('Filtrar capturas por revisión').selectOption('organized');
+  await expect(page.getByText('Organizada · Tarea')).toBeVisible();
   await page.getByRole('button', { name: 'Abrir tareas →' }).click();
   await expect(page.getByRole('heading', { name: 'Tareas', exact: true })).toBeVisible();
 });
