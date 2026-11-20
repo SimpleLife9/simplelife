@@ -177,3 +177,8 @@ No `service_role` key or database password is present in the frontend. `.env.exa
 - Playwright cubre navegación entre las tres vistas, creación/edición de metas y submetas, estados, nuevas submetas y reordenamiento con posiciones NULL.
 - Sin cambios de esquema, migraciones, RLS, grants, secretos ni escrituras de prueba en datos reales de Supabase. Sin despliegue público.
 - Validación manual de Robert en localhost con su cuenta: PENDIENTE.
+
+
+## Cierre manual — Anexo 131 (20/11/2026)
+
+Robert confirmó que la corrección funciona correctamente en localhost y autorizó continuar. Se registra VALIDACIÓN MANUAL REAL: PASS para el orden de áreas, navegación independiente, edición de metas y submetas, creación de submetas y persistencia tras recargar. Anexo 131 cerrado. Próxima etapa: iniciar el siguiente lote funcional, revisando las capacidades actuales antes de definir alcance.
