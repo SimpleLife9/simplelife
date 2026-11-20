@@ -297,3 +297,27 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 3. Seleccionar dos tareas activas y archivarlas en bloque.
 4. Archivar y restaurar una tarea completada; confirmar que sigue completada.
 5. Revisar el nuevo texto de duración estimada al crear y editar una tarea.
+
+## Lote 11 — Conectar tareas con metas y submetas (20/11/2026)
+
+- PR #15 integrado: https://github.com/SimpleLife9/simplelife/pull/15.
+- SHA squash integrado en main: `3b98fb660fbd40c70e48ea0a9ea8710b4c2494de`.
+- SHA validado en la rama del PR: `f3dfca243c2550f69a057c7aa8563163a161c157`.
+- CI PR #90: PASS — 3 pruebas unitarias, 17 escenarios Playwright E2E y build de producción: https://github.com/SimpleLife9/simplelife/actions/runs/44813982093.
+- CI post-merge #91: PASS sobre el SHA exacto integrado en main; pruebas unitarias, Playwright E2E y build de producción: https://github.com/SimpleLife9/simplelife/actions/runs/44816117392.
+- Las tareas pueden vincularse a una o varias Metas y/o Submetas. Cada tarea muestra sus objetivos y permite filtrar por Meta, Submeta o «Sin objetivo».
+- El filtro de una Meta incluye tareas vinculadas directamente a ella y tareas vinculadas solamente a cualquiera de sus Submetas.
+- La gestión de vínculos permite desvincular mediante el estado `removed` y restaurar el mismo registro a `confirmed`, sin borrado físico ni duplicados.
+- Las tarjetas de Metas y Submetas muestran las tareas contribuyentes y sus estados.
+- Se reutiliza `public.contribution_relation`, sus índices únicos, restricciones, políticas RLS y grants existentes. Se verificaron las políticas y permisos en modo lectura; no se modificaron esquema, migraciones, RLS, grants, permisos ni secretos.
+- Playwright utiliza mocks de Auth/PostgREST; no realiza escrituras de QA en datos reales de Supabase.
+- Validación manual de Robert en localhost: PENDIENTE. No declarar cierre manual hasta confirmación del usuario.
+- Sin despliegue público ni preview.
+
+### Sesión de validación manual — Lote 11
+
+1. En Más → Tareas, vincula una tarea a una Meta y después también a una Submeta.
+2. Filtra por esa Meta y por esa Submeta; comprueba que ambas muestran la tarea correspondiente.
+3. Vincula otra tarea únicamente a una Submeta y comprueba que aparece al filtrar por la Meta principal.
+4. Desvincula la relación directa con la Meta y restáurala desde el mismo diálogo; confirma que no se crea otra relación.
+5. En Objetivos → Metas y Submetas, comprueba que aparecen las tareas contribuyentes y sus estados.
