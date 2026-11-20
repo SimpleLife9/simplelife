@@ -365,3 +365,27 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 - Solo consultas de lectura a tablas existentes con RLS. Sin tablas, columnas, migraciones, políticas RLS, grants, permisos, secretos ni escrituras reales de QA.
 - Sin despliegue público ni preview.
 - Validación manual de Robert en localhost: PASS (20/11/2026). Confirmó que revisó el nuevo panel y que está todo bien. Anexo 140 / Lote 13 cerrado manualmente.
+
+
+## Phase readiness and Phase 0 modularization — 20 Nov 2026
+
+### Phase preparation
+- PR #18 integrated: https://github.com/SimpleLife9/simplelife/pull/18.
+- Phase playbook, verified architecture baseline, complete phase roadmap and Phase 1 Agenda specification added under `docs/`.
+- PR CI #104 PASS: https://github.com/SimpleLife9/simplelife/actions/runs/44828223680.
+- Post-merge CI #105 PASS on main SHA `c8b0d5b1355a6eb9a54250c565781421d9f042f0`: https://github.com/SimpleLife9/simplelife/actions/runs/44832866169.
+- Notion continuity record: Anexo 142 — https://app.notion.com/p/41efeb355ec18137a1a0edb81f229554.
+
+### Phase 0 — behavior-preserving modularization
+
+| PR | Extracted boundary | PR CI | Post-merge CI | Integrated SHA |
+|---|---|---|---|---|
+| #19 | Shared date/time/duration utilities `src/lib/date-time.js` | #106 PASS | #107 PASS | `e4c02318944cff369224768d7d4eb7591969a1a7` |
+| #20 | Today task row `src/features/today/components/TaskRow.jsx` | #108 PASS (19/19 Playwright) | #109 PASS | `b778587d29785d63f7d48b4fdb09588497372314` |
+| #21 | Shared data hook `src/shared/hooks/useRows.js` | #110 PASS | #111 PASS | `1434b060177b205f91ad488d51f2f7b19ff9d29c` |
+| #22 | Tasks open-state domain rule `src/features/tasks/domain/task-status.js` | #112 PASS | #113 PENDING AT THIS DOCUMENT UPDATE | `bc24b679a835671ed960264c9dac9d61d5d24495` |
+
+- The four extracts preserve existing APIs or behavior; the existing Playwright suite remained at 19 scenarios and passed for completed PR checks.
+- No new framework/dependency, schema migration, RLS/grant, auth, secret, Service Worker or deployment change was made in these batches.
+- This is incremental boundary work, not a completed rewrite. `src/App.jsx` remains a legacy composition file and additional page/service extraction is still required before Phase 0 closes.
+- The real authenticated Supabase browser test and physical-device validation remain open; mocked E2E is not evidence of real persistence.
