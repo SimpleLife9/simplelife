@@ -115,3 +115,25 @@
 .status-archived{background:#eef1ee;color:#728078;border:1px solid #e0e6e0}
 .project-toolbar-field select:disabled{background:#f0f2ef;color:#9aa49d;cursor:not-allowed}
 @media(max-width:600px){.section-heading-row{align-items:flex-start;flex-direction:column;gap:12px}.section-create-actions{width:100%;justify-content:flex-start}.section-create-button{flex:1}.section-heading-row .section-title{width:100%}}
+
+
+/* Life areas, goals and subgoals management */
+.area-heading-edit{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+.area-heading-edit h3{margin:15px 0 7px}
+.area-heading-edit p{font-size:.75rem;color:#88968d;line-height:1.5;margin:0 0 6px}
+.area-inline-actions,.goal-inline-actions{display:flex;align-items:center;justify-content:space-between;gap:9px;margin-top:8px}
+.goal-inline-actions{padding:0 0 8px 18px}
+.goal-status-control{display:flex;align-items:center;gap:7px;font-size:.63rem;color:#8b9990}
+.goal-status-control select,.subgoal-controls select{border:1px solid #e5ebe4;border-radius:7px;background:#fbfcfa;color:#607167;padding:5px 7px;font-size:.63rem;max-width:125px}
+.goal-subgoal-count{font-size:.62rem;color:#9aa69e}
+.subgoal-mini{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0 6px 18px;border-top:1px solid #f5f6f3;font-size:.69rem;color:#75867b}
+.subgoal-mini .subgoal-done{text-decoration:line-through;color:#a0aaa2}
+.subgoal-controls{display:flex;align-items:center;gap:5px}
+.subgoal-controls .task-edit-button{padding:5px 7px;font-size:.61rem}
+.goal-mini .task-edit-button{padding:5px 7px;font-size:.61rem}
+.area-card .subgoal-form{margin:8px 0 3px;padding-left:18px}
+.area-card .subgoal-form input{font-size:.68rem}
+@media(max-width:600px){.goal-mini{flex-wrap:wrap}.goal-mini>div{min-width:calc(100% - 60px)}.goal-mini .task-edit-button{margin-left:auto}.subgoal-mini{align-items:flex-start}.subgoal-controls{flex-wrap:wrap;justify-content:flex-end}}
+
+.area-management-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.area-management-actions .text-button:disabled{opacity:.35;cursor:not-allowed}

@@ -113,8 +113,10 @@ function App() {
       await operation();
       setRefreshKey((key) => key + 1);
       if (successMessage) showNotice(successMessage);
+      return true;
     } catch (actionError) {
       showError(actionError?.message || 'No se pudo completar la operación.');
+      return false;
     } finally {
       setBusy(false);
     }
@@ -503,126 +505,198 @@ function GoalsPage({ profile, refreshKey, runAction, busy }) {
   const { rows: goals } = useRows('goal', profile, refreshKey, (query) => query.is('deleted_at', null).order('created_at', { ascending: false }));
   const { rows: subgoals } = useRows('subgoal', profile, refreshKey, (query) => query.is('deleted_at', null).order('created_at'));
   const [areaTitle, setAreaTitle] = useState('');
+  const [areaDescription, setAreaDescription] = useState('');
+  const [editingArea, setEditingArea] = useState(null);
   const [selectedArea, setSelectedArea] = useState('');
   const [goalTitle, setGoalTitle] = useState('');
   const [goalReason, setGoalReason] = useState('');
+  const [expectedResult, setExpectedResult] = useState('');
   const [targetDate, setTargetDate] = useState('');
+  const [editingGoal, setEditingGoal] = useState(null);
   const [subgoalDraft, setSubgoalDraft] = useState({});
+  const [editingSubgoal, setEditingSubgoal] = useState(null);
+  const [subgoalTitle, setSubgoalTitle] = useState('');
+  const [subgoalExpectedResult, setSubgoalExpectedResult] = useState('');
+  const [subgoalTargetDate, setSubgoalTargetDate] = useState('');
   const [showAreaModal, setShowAreaModal] = useState(false);
   const [showGoalModal, setShowGoalModal] = useState(false);
 
-  const closeAreaModal = () => {
-    if (busy) return;
-    setShowAreaModal(false);
-    setAreaTitle('');
-  };
-  const closeGoalModal = () => {
-    if (busy) return;
-    setShowGoalModal(false);
-    setSelectedArea('');
-    setGoalTitle('');
-    setGoalReason('');
-    setTargetDate('');
-  };
+  const closeAreaModal = () => { if (busy) return; setShowAreaModal(false); setEditingArea(null); setAreaTitle(''); setAreaDescription(''); };
+  const closeGoalModal = () => { if (busy) return; setShowGoalModal(false); setEditingGoal(null); setSelectedArea(''); setGoalTitle(''); setGoalReason(''); setExpectedResult(''); setTargetDate(''); };
+  const openAreaEditor = (area) => { setEditingArea(area); setAreaTitle(area.title || ''); setAreaDescription(area.description || ''); setShowAreaModal(true); };
+  const openGoalEditor = (goal) => { setEditingGoal(goal); setSelectedArea(goal.life_area_id || ''); setGoalTitle(goal.title || ''); setGoalReason(goal.reason || ''); setExpectedResult(goal.expected_result || ''); setTargetDate(goal.target_date || ''); setShowGoalModal(true); };
+  const openSubgoalEditor = (subgoal) => { setEditingSubgoal(subgoal); setSubgoalTitle(subgoal.title || ''); setSubgoalExpectedResult(subgoal.expected_result || ''); setSubgoalTargetDate(subgoal.target_date || ''); };
 
-  const addArea = async (event) => {
+  const saveArea = async (event) => {
     event.preventDefault();
     const title = areaTitle.trim();
     if (!title) return;
-    await runAction(async () => {
-      const { error: insertError } = await supabase.from('life_area').insert({ id: uuidv7(), owner_user_id: profile.id, created_by_user_id: profile.id, title });
-      if (insertError) throw insertError;
-      setAreaTitle('');
-      setShowAreaModal(false);
-    }, 'Área creada.');
+    const saved = await runAction(async () => {
+      const payload = { title, description: areaDescription.trim() || null };
+      if (editingArea) {
+        const { data, error } = await supabase.from('life_area').update(payload).eq('id', editingArea.id).eq('owner_user_id', profile.id).is('deleted_at', null).select('id');
+        if (error) throw error;
+        if (!data?.length) throw new Error('No se pudo actualizar el área. Actualiza la vista e inténtalo de nuevo.');
+      } else {
+        const { error } = await supabase.from('life_area').insert({ id: uuidv7(), owner_user_id: profile.id, created_by_user_id: profile.id, title, description: payload.description });
+        if (error) throw error;
+      }
+    }, editingArea ? 'Área actualizada.' : 'Área creada.');
+    if (!saved) return;
+    setShowAreaModal(false);
+    setEditingArea(null);
+    setAreaTitle('');
+    setAreaDescription('');
   };
 
-  const addGoal = async (event) => {
+  const setAreaStatus = (area) => runAction(async () => {
+    const nextStatus = area.status === 'paused' ? 'active' : 'paused';
+    const { data, error } = await supabase.from('life_area').update({ status: nextStatus }).eq('id', area.id).eq('owner_user_id', profile.id).is('deleted_at', null).select('id');
+    if (error) throw error;
+    if (!data?.length) throw new Error('No se pudo cambiar el estado del área.');
+  }, area.status === 'paused' ? 'Área reactivada.' : 'Área pausada.');
+
+  const moveArea = (area, direction) => runAction(async () => {
+    const currentIndex = areas.findIndex((item) => item.id === area.id);
+    const neighbor = areas[currentIndex + direction];
+    if (!neighbor) return;
+    const updates = [
+      { id: area.id, position: neighbor.position ?? currentIndex + direction },
+      { id: neighbor.id, position: area.position ?? currentIndex },
+    ];
+    for (const update of updates) {
+      const { data, error } = await supabase.from('life_area').update({ position: update.position })
+        .eq('id', update.id).eq('owner_user_id', profile.id).is('deleted_at', null).select('id');
+      if (error) throw error;
+      if (!data?.length) throw new Error('No se pudo reordenar el área. Actualiza la vista e inténtalo de nuevo.');
+    }
+  }, direction < 0 ? 'Área movida hacia arriba.' : 'Área movida hacia abajo.');
+
+  const saveGoal = async (event) => {
     event.preventDefault();
     if (!selectedArea || !goalTitle.trim()) return;
-    await runAction(async () => {
-      const { error: insertError } = await supabase.from('goal').insert({
-        id: uuidv7(), owner_user_id: profile.id, created_by_user_id: profile.id,
-        life_area_id: selectedArea, title: goalTitle.trim(), reason: goalReason.trim() || null,
-        target_date: targetDate || null, status: 'active',
-      });
-      if (insertError) throw insertError;
-      setSelectedArea('');
-      setGoalTitle('');
-      setGoalReason('');
-      setTargetDate('');
-      setShowGoalModal(false);
-    }, 'Meta creada.');
+    const saved = await runAction(async () => {
+      const payload = { life_area_id: selectedArea, title: goalTitle.trim(), reason: goalReason.trim() || null, expected_result: expectedResult.trim() || null, target_date: targetDate || null };
+      if (editingGoal) {
+        const { data, error } = await supabase.from('goal').update(payload).eq('id', editingGoal.id).eq('owner_user_id', profile.id).is('deleted_at', null).select('id');
+        if (error) throw error;
+        if (!data?.length) throw new Error('No se pudo actualizar la meta. Actualiza la vista e inténtalo de nuevo.');
+      } else {
+        const { error } = await supabase.from('goal').insert({ id: uuidv7(), owner_user_id: profile.id, created_by_user_id: profile.id, ...payload, status: 'active' });
+        if (error) throw error;
+      }
+    }, editingGoal ? 'Meta actualizada.' : 'Meta creada.');
+    if (!saved) return;
+    setShowGoalModal(false);
+    setEditingGoal(null);
+    setSelectedArea('');
+    setGoalTitle('');
+    setGoalReason('');
+    setExpectedResult('');
+    setTargetDate('');
   };
+
+  const setGoalStatus = (goal, status) => runAction(async () => {
+    const { data, error } = await supabase.from('goal').update({ status }).eq('id', goal.id).eq('owner_user_id', profile.id).is('deleted_at', null).select('id');
+    if (error) throw error;
+    if (!data?.length) throw new Error('No se pudo actualizar el estado de la meta.');
+  }, status === 'completed' ? 'Meta completada.' : status === 'paused' ? 'Meta pausada.' : status === 'active' ? 'Meta reactivada.' : 'Estado de la meta actualizado.');
 
   const addSubgoal = async (goalId) => {
     const title = (subgoalDraft[goalId] || '').trim();
     if (!title) return;
     await runAction(async () => {
-      const { error: insertError } = await supabase.from('subgoal').insert({ id: uuidv7(), goal_id: goalId, created_by_user_id: profile.id, title, status: 'active' });
-      if (insertError) throw insertError;
+      const { error } = await supabase.from('subgoal').insert({ id: uuidv7(), goal_id: goalId, created_by_user_id: profile.id, title, status: 'active' });
+      if (error) throw error;
       setSubgoalDraft((current) => ({ ...current, [goalId]: '' }));
     }, 'Submeta creada.');
   };
+
+  const saveSubgoal = async (event) => {
+    event.preventDefault();
+    if (!editingSubgoal || !subgoalTitle.trim()) return;
+    await runAction(async () => {
+      const payload = { title: subgoalTitle.trim(), expected_result: subgoalExpectedResult.trim() || null, target_date: subgoalTargetDate || null };
+      const { data, error } = await supabase.from('subgoal').update(payload).eq('id', editingSubgoal.id).eq('goal_id', editingSubgoal.goal_id).is('deleted_at', null).select('id');
+      if (error) throw error;
+      if (!data?.length) throw new Error('No se pudo actualizar la submeta.');
+      setEditingSubgoal(null);
+    }, 'Submeta actualizada.');
+  };
+
+  const setSubgoalStatus = (subgoal, status) => runAction(async () => {
+    const { data, error } = await supabase.from('subgoal').update({ status }).eq('id', subgoal.id).eq('goal_id', subgoal.goal_id).is('deleted_at', null).select('id');
+    if (error) throw error;
+    if (!data?.length) throw new Error('No se pudo actualizar el estado de la submeta.');
+  }, status === 'completed' ? 'Submeta completada.' : status === 'active' ? 'Submeta reactivada.' : status === 'paused' ? 'Submeta pausada.' : 'Estado de la submeta actualizado.');
 
   return <>
     <div className="management-layout management-layout-single">
       <div className="content-main">
         <div className="section-heading-row">
-          <SectionTitle detail={`${areas.length} áreas`}>Tus áreas de vida</SectionTitle>
+          <SectionTitle detail={`${areas.length} áreas · ${goals.length} metas`}>Tus áreas de vida</SectionTitle>
           <div className="section-create-actions">
             <button type="button" className="section-create-button" onClick={() => setShowGoalModal(true)}>Nueva Meta</button>
-            <button type="button" className="section-create-button" onClick={() => setShowAreaModal(true)}>Nueva Area</button>
+            <button type="button" className="section-create-button" onClick={() => setShowAreaModal(true)}>Nueva Área</button>
           </div>
         </div>
-        {loading ? <p className="muted">Cargando…</p> : localError ? <div className="form-error">{localError}</div> : areas.length ? <div className="area-grid">{areas.map((area) => {
+        {loading ? <p className="muted">Cargando…</p> : localError ? <div className="form-error">{localError}</div> : areas.length ? <div className="area-grid">{areas.map((area, areaIndex) => {
           const areaGoals = goals.filter((goal) => goal.life_area_id === area.id);
-          return <div className="area-card" key={area.id}><div className="area-card-top"><span className="area-symbol">◎</span><span className="area-count">{areaGoals.length} metas</span></div><h3>{area.title}</h3>{area.description && <p>{area.description}</p>}<div className="goal-mini-list">{areaGoals.map((goal) => <div className="goal-mini-wrap" key={goal.id}><div className="goal-mini"><span>↳</span><div><strong>{goal.title}</strong><small>{goal.target_date ? `Objetivo: ${formatDate(goal.target_date)}` : 'Sin fecha objetivo'}</small></div><StatusTag status={goal.status} /></div>{subgoals.filter((subgoal) => subgoal.goal_id === goal.id).map((subgoal) => <div className="subgoal-mini" key={subgoal.id}>· {subgoal.title}</div>)}</div>)}</div>
-            {areaGoals.length > 0 && <div className="subgoal-entry">{areaGoals.slice(0, 2).map((goal) => <div className="subgoal-form" key={goal.id}><input value={subgoalDraft[goal.id] || ''} onChange={(event) => setSubgoalDraft((current) => ({ ...current, [goal.id]: event.target.value }))} placeholder={`Submeta para: ${goal.title}`} /><button onClick={() => addSubgoal(goal.id)} disabled={busy || !(subgoalDraft[goal.id] || '').trim()}>+</button></div>)}</div>}
+          return <div className="area-card" key={area.id}>
+            <div className="area-card-top"><span className="area-symbol">◎</span><span className="area-count">{areaGoals.length} metas</span></div>
+            <div className="area-heading-edit"><div><h3>{area.title}</h3>{area.description && <p>{area.description}</p>}</div><button type="button" className="task-edit-button" onClick={() => openAreaEditor(area)} aria-label={`Editar área: ${area.title}`}>Editar</button></div>
+            <div className="area-inline-actions"><span className={`status-tag status-${area.status || 'active'}`}>{area.status === 'paused' ? 'En pausa' : 'Activa'}</span><div className="area-management-actions"><button type="button" className="text-button" disabled={busy || areaIndex === 0} onClick={() => moveArea(area, -1)} aria-label={`Mover área arriba: ${area.title}`}>↑ Subir</button><button type="button" className="text-button" disabled={busy || areaIndex === areas.length - 1} onClick={() => moveArea(area, 1)} aria-label={`Mover área abajo: ${area.title}`}>↓ Bajar</button><button type="button" className="text-button" disabled={busy} onClick={() => setAreaStatus(area)}>{area.status === 'paused' ? 'Reactivar área' : 'Pausar área'}</button></div></div>
+            <div className="goal-mini-list">{areaGoals.map((goal) => {
+              const goalSubgoals = subgoals.filter((subgoal) => subgoal.goal_id === goal.id);
+              return <div className="goal-mini-wrap" key={goal.id}>
+                <div className="goal-mini"><span>↳</span><div><strong>{goal.title}</strong><small>{goal.target_date ? `Objetivo: ${formatDate(goal.target_date)}` : 'Sin fecha objetivo'}</small></div><StatusTag status={goal.status} /><button type="button" className="task-edit-button" onClick={() => openGoalEditor(goal)} aria-label={`Editar meta: ${goal.title}`}>Editar</button></div>
+                <div className="goal-inline-actions"><label className="goal-status-control"><span>Estado</span><select aria-label={`Estado de meta: ${goal.title}`} value={goal.status} disabled={busy} onChange={(event) => setGoalStatus(goal, event.target.value)}><option value="draft">Borrador</option><option value="active">Activa</option><option value="paused">En pausa</option><option value="completed">Completada</option><option value="cancelled">Cancelada</option></select></label><span className="goal-subgoal-count">{goalSubgoals.length} submetas</span></div>
+                {goalSubgoals.map((subgoal) => <div className="subgoal-mini" key={subgoal.id}><span className={subgoal.status === 'completed' ? 'subgoal-done' : ''}>· {subgoal.title}</span><div className="subgoal-controls"><select aria-label={`Estado de submeta: ${subgoal.title}`} value={subgoal.status} disabled={busy} onChange={(event) => setSubgoalStatus(subgoal, event.target.value)}><option value="draft">Borrador</option><option value="active">Activa</option><option value="paused">En pausa</option><option value="completed">Completada</option><option value="cancelled">Cancelada</option></select><button type="button" className="task-edit-button" onClick={() => openSubgoalEditor(subgoal)} aria-label={`Editar submeta: ${subgoal.title}`}>Editar</button></div></div>)}
+                <div className="subgoal-form"><input aria-label={`Nueva submeta para: ${goal.title}`} value={subgoalDraft[goal.id] || ''} onChange={(event) => setSubgoalDraft((current) => ({ ...current, [goal.id]: event.target.value }))} placeholder="Añadir una submeta…" onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addSubgoal(goal.id); } }} /><button type="button" aria-label={`Añadir submeta a: ${goal.title}`} onClick={() => addSubgoal(goal.id)} disabled={busy || !(subgoalDraft[goal.id] || '').trim()}>+</button></div>
+              </div>;
+            })}</div>
           </div>;
         })}</div> : <EmptyState title="Empieza por tus áreas" detail="Crea ámbitos para ordenar lo que importa en tu vida." />}
       </div>
     </div>
 
-    {showAreaModal && (
-      <div className="task-editor-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) closeAreaModal(); }} onKeyDown={(event) => { if (event.key === 'Escape' && !busy) closeAreaModal(); }}>
-        <section className="task-editor-dialog floating-form-dialog" role="dialog" aria-modal="true" aria-labelledby="area-create-title">
-          <div className="task-editor-heading">
-            <div><div className="eyebrow">ORGANIZA TU VIDA</div><h2 id="area-create-title">Nueva área</h2></div>
-            <button type="button" className="task-editor-close" onClick={closeAreaModal} disabled={busy} aria-label="Cerrar nueva área">×</button>
-          </div>
-          <form className="task-editor-form" onSubmit={addArea}>
-            <Field label="Nombre del área" name="area" value={areaTitle} onChange={(event) => setAreaTitle(event.target.value)} placeholder="Ej. Finanzas, físico, familia…" required autoFocus />
-            <div className="task-editor-actions">
-              <button type="button" className="button task-editor-cancel" onClick={closeAreaModal} disabled={busy}>Cancelar</button>
-              <button type="submit" className="button button-primary" disabled={busy || !areaTitle.trim()}>{busy ? 'Guardando…' : 'Crear área'} <span>→</span></button>
-            </div>
-          </form>
-        </section>
-      </div>
-    )}
+    {showAreaModal && <div className="task-editor-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) closeAreaModal(); }} onKeyDown={(event) => { if (event.key === 'Escape' && !busy) closeAreaModal(); }}>
+      <section className="task-editor-dialog floating-form-dialog" role="dialog" aria-modal="true" aria-labelledby="area-editor-title">
+        <div className="task-editor-heading"><div><div className="eyebrow">ORGANIZA TU VIDA</div><h2 id="area-editor-title">{editingArea ? 'Editar área' : 'Nueva área'}</h2></div><button type="button" className="task-editor-close" onClick={closeAreaModal} disabled={busy} aria-label="Cerrar área">×</button></div>
+        <form className="task-editor-form" onSubmit={saveArea}>
+          <Field label="Nombre del área" name="area" value={areaTitle} onChange={(event) => setAreaTitle(event.target.value)} placeholder="Ej. Finanzas, físico, familia…" required />
+          <Field label="Descripción (opcional)" name="areaDescription" value={areaDescription} onChange={(event) => setAreaDescription(event.target.value)} placeholder="Qué representa esta área…" />
+          <div className="task-editor-actions"><button type="button" className="button task-editor-cancel" onClick={closeAreaModal} disabled={busy}>Cancelar</button><button type="submit" className="button button-primary" disabled={busy || !areaTitle.trim()}>{busy ? 'Guardando…' : editingArea ? 'Guardar cambios' : 'Crear área'} <span>→</span></button></div>
+        </form>
+      </section>
+    </div>}
 
-    {showGoalModal && (
-      <div className="task-editor-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) closeGoalModal(); }} onKeyDown={(event) => { if (event.key === 'Escape' && !busy) closeGoalModal(); }}>
-        <section className="task-editor-dialog floating-form-dialog" role="dialog" aria-modal="true" aria-labelledby="goal-create-title">
-          <div className="task-editor-heading">
-            <div><div className="eyebrow">DEFINE LO QUE BUSCAS</div><h2 id="goal-create-title">Nueva meta</h2></div>
-            <button type="button" className="task-editor-close" onClick={closeGoalModal} disabled={busy} aria-label="Cerrar nueva meta">×</button>
-          </div>
-          <form className="task-editor-form" onSubmit={addGoal}>
-            <label className="field"><span>Área de vida</span><select required value={selectedArea} onChange={(event) => setSelectedArea(event.target.value)}><option value="">Selecciona un área</option>{areas.map((area) => <option key={area.id} value={area.id}>{area.title}</option>)}</select></label>
-            {areas.length === 0 && <p className="task-editor-note">Primero crea un área de vida para poder asociar esta meta.</p>}
-            <Field label="Resultado que buscas" name="goal" value={goalTitle} onChange={(event) => setGoalTitle(event.target.value)} placeholder="Ej. Ahorrar 2.000 €" required autoFocus />
-            <Field label="Motivo (opcional)" name="reason" value={goalReason} onChange={(event) => setGoalReason(event.target.value)} placeholder="¿Por qué es importante?" />
-            <Field label="Fecha objetivo (opcional)" name="targetDate" type="date" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} />
-            <div className="task-editor-actions">
-              <button type="button" className="button task-editor-cancel" onClick={closeGoalModal} disabled={busy}>Cancelar</button>
-              <button type="submit" className="button button-primary" disabled={busy || areas.length === 0 || !selectedArea || !goalTitle.trim()}>{busy ? 'Guardando…' : 'Crear meta'} <span>→</span></button>
-            </div>
-          </form>
-        </section>
-      </div>
-    )}
+    {showGoalModal && <div className="task-editor-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) closeGoalModal(); }} onKeyDown={(event) => { if (event.key === 'Escape' && !busy) closeGoalModal(); }}>
+      <section className="task-editor-dialog floating-form-dialog" role="dialog" aria-modal="true" aria-labelledby="goal-editor-title">
+        <div className="task-editor-heading"><div><div className="eyebrow">DEFINE LO QUE BUSCAS</div><h2 id="goal-editor-title">{editingGoal ? 'Editar meta' : 'Nueva meta'}</h2></div><button type="button" className="task-editor-close" onClick={closeGoalModal} disabled={busy} aria-label="Cerrar meta">×</button></div>
+        <form className="task-editor-form" onSubmit={saveGoal}>
+          <label className="field"><span>Área de vida</span><select required value={selectedArea} onChange={(event) => setSelectedArea(event.target.value)}><option value="">Selecciona un área</option>{areas.map((area) => <option key={area.id} value={area.id}>{area.title}</option>)}</select></label>
+          {areas.length === 0 && <p className="task-editor-note">Primero crea un área de vida para poder asociar esta meta.</p>}
+          <Field label="Resultado que buscas" name="goal" value={goalTitle} onChange={(event) => setGoalTitle(event.target.value)} placeholder="Ej. Ahorrar 2.000 €" required />
+          <Field label="Resultado esperado (opcional)" name="expectedResult" value={expectedResult} onChange={(event) => setExpectedResult(event.target.value)} placeholder="Cómo sabrás que lo lograste…" />
+          <Field label="Motivo (opcional)" name="reason" value={goalReason} onChange={(event) => setGoalReason(event.target.value)} placeholder="¿Por qué es importante?" />
+          <Field label="Fecha objetivo (opcional)" name="targetDate" type="date" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} />
+          <div className="task-editor-actions"><button type="button" className="button task-editor-cancel" onClick={closeGoalModal} disabled={busy}>Cancelar</button><button type="submit" className="button button-primary" disabled={busy || areas.length === 0 || !selectedArea || !goalTitle.trim()}>{busy ? 'Guardando…' : editingGoal ? 'Guardar cambios' : 'Crear meta'} <span>→</span></button></div>
+        </form>
+      </section>
+    </div>}
+
+    {editingSubgoal && <div className="task-editor-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setEditingSubgoal(null); }} onKeyDown={(event) => { if (event.key === 'Escape' && !busy) setEditingSubgoal(null); }}>
+      <section className="task-editor-dialog floating-form-dialog" role="dialog" aria-modal="true" aria-labelledby="subgoal-editor-title">
+        <div className="task-editor-heading"><div><div className="eyebrow">DESGLOSA TU META</div><h2 id="subgoal-editor-title">Editar submeta</h2></div><button type="button" className="task-editor-close" onClick={() => setEditingSubgoal(null)} disabled={busy} aria-label="Cerrar submeta">×</button></div>
+        <form className="task-editor-form" onSubmit={saveSubgoal}>
+          <Field label="Nombre de la submeta" name="subgoalTitle" value={subgoalTitle} onChange={(event) => setSubgoalTitle(event.target.value)} required />
+          <Field label="Resultado esperado (opcional)" name="subgoalExpectedResult" value={subgoalExpectedResult} onChange={(event) => setSubgoalExpectedResult(event.target.value)} />
+          <Field label="Fecha objetivo (opcional)" name="subgoalTargetDate" type="date" value={subgoalTargetDate} onChange={(event) => setSubgoalTargetDate(event.target.value)} />
+          <div className="task-editor-actions"><button type="button" className="button task-editor-cancel" onClick={() => setEditingSubgoal(null)} disabled={busy}>Cancelar</button><button type="submit" className="button button-primary" disabled={busy || !subgoalTitle.trim()}>Guardar cambios <span>→</span></button></div>
+        </form>
+      </section>
+    </div>}
   </>;
 }
 

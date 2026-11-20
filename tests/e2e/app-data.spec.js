@@ -41,6 +41,11 @@ async function mockSupabaseSession(page, initialData = {}) {
   const insertedAreas = [];
   const goals = [...(initialData.goals || [])];
   const insertedGoals = [];
+  const subgoals = [...(initialData.subgoals || [])];
+  const insertedSubgoals = [];
+  const updatedAreas = [];
+  const updatedGoals = [];
+  const updatedSubgoals = [];
   const updatedProjects = [];
   const projectLinks = [...(initialData.links || [])];
   const captures = [
@@ -137,7 +142,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     }
 
     if (url.pathname === '/rest/v1/life_area' && method === 'GET') {
-      await json(200, areas.filter((area) => !area.deleted_at));
+      await json(200, areas.filter((area) => !area.deleted_at).sort((a, b) => (a.position ?? 0) - (b.position ?? 0)));
       return;
     }
     if (url.pathname === '/rest/v1/life_area' && method === 'POST') {
@@ -145,6 +150,16 @@ async function mockSupabaseSession(page, initialData = {}) {
       const rows = Array.isArray(payload) ? payload : [payload];
       areas.unshift(...rows); insertedAreas.push(...rows);
       await route.fulfill({ status: 201, headers: corsHeaders, body: '' });
+      return;
+    }
+    if (url.pathname === '/rest/v1/life_area' && method === 'PATCH') {
+      const payload = request.postDataJSON();
+      const idFilter = url.searchParams.get('id') || '';
+      const ownerFilter = url.searchParams.get('owner_user_id') || '';
+      const row = areas.find((item) => idFilter === `eq.${item.id}` && ownerFilter === `eq.${item.owner_user_id}` && !item.deleted_at);
+      if (!row) { await json(200, []); return; }
+      Object.assign(row, payload); updatedAreas.push({ id: row.id, ...payload });
+      await json(200, [{ id: row.id }], { 'content-range': '0-0/*' });
       return;
     }
     if (url.pathname === '/rest/v1/goal' && method === 'GET') {
@@ -156,6 +171,37 @@ async function mockSupabaseSession(page, initialData = {}) {
       const rows = Array.isArray(payload) ? payload : [payload];
       goals.unshift(...rows); insertedGoals.push(...rows);
       await route.fulfill({ status: 201, headers: corsHeaders, body: '' });
+      return;
+    }
+    if (url.pathname === '/rest/v1/goal' && method === 'PATCH') {
+      const payload = request.postDataJSON();
+      const idFilter = url.searchParams.get('id') || '';
+      const ownerFilter = url.searchParams.get('owner_user_id') || '';
+      const row = goals.find((item) => idFilter === `eq.${item.id}` && ownerFilter === `eq.${item.owner_user_id}` && !item.deleted_at);
+      if (!row) { await json(200, []); return; }
+      Object.assign(row, payload); updatedGoals.push({ id: row.id, ...payload });
+      await json(200, [{ id: row.id }], { 'content-range': '0-0/*' });
+      return;
+    }
+    if (url.pathname === '/rest/v1/subgoal' && method === 'GET') {
+      await json(200, subgoals.filter((row) => !row.deleted_at));
+      return;
+    }
+    if (url.pathname === '/rest/v1/subgoal' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const rows = Array.isArray(payload) ? payload : [payload];
+      subgoals.unshift(...rows); insertedSubgoals.push(...rows);
+      await route.fulfill({ status: 201, headers: corsHeaders, body: '' });
+      return;
+    }
+    if (url.pathname === '/rest/v1/subgoal' && method === 'PATCH') {
+      const payload = request.postDataJSON();
+      const idFilter = url.searchParams.get('id') || '';
+      const goalFilter = url.searchParams.get('goal_id') || '';
+      const row = subgoals.find((item) => idFilter === `eq.${item.id}` && goalFilter === `eq.${item.goal_id}` && !item.deleted_at);
+      if (!row) { await json(200, []); return; }
+      Object.assign(row, payload); updatedSubgoals.push({ id: row.id, ...payload });
+      await json(200, [{ id: row.id }], { 'content-range': '0-0/*' });
       return;
     }
 
@@ -279,7 +325,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     await json(404, { message: `Unexpected mocked Supabase request: ${method} ${url.pathname}` });
   });
 
-  return { insertedTasks, updatedTasks, taskRows, projects, insertedProjects, updatedProjects, projectLinks, areas, insertedAreas, goals, insertedGoals, captures, updatedCaptures, insertedCaptures, insertedCaptureParts };
+  return { insertedTasks, updatedTasks, taskRows, projects, insertedProjects, updatedProjects, projectLinks, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, insertedCaptureParts };
 }
 
 test('mock-authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
@@ -700,7 +746,7 @@ test('Objectives create areas and goals through separate floating forms', async 
   await page.locator('.side-nav').getByRole('button', { name: /Objetivos/ }).click();
   await expect(page.getByRole('heading', { name: 'Tus áreas de vida' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Nueva Meta' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Nueva Area' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Nueva Área' })).toBeVisible();
   await expect(page.getByRole('dialog', { name: 'Nueva área' })).toHaveCount(0);
   await expect(page.getByRole('dialog', { name: 'Nueva meta' })).toHaveCount(0);
 
@@ -710,7 +756,7 @@ test('Objectives create areas and goals through separate floating forms', async 
   await disabledGoalDialog.getByRole('button', { name: 'Cancelar' }).click();
   await expect(disabledGoalDialog).toBeHidden();
 
-  await page.getByRole('button', { name: 'Nueva Area' }).click();
+  await page.getByRole('button', { name: 'Nueva Área' }).click();
   const areaDialog = page.getByRole('dialog', { name: 'Nueva área' });
   await areaDialog.getByLabel('Nombre del área').fill('Finanzas');
   await areaDialog.getByRole('button', { name: 'Crear área' }).click();
@@ -735,4 +781,66 @@ test('Objectives create areas and goals through separate floating forms', async 
     life_area_id: insertedAreas[0].id, title: 'Crear un fondo de emergencia',
     reason: 'Tener estabilidad financiera', target_date: '2027-06-30', status: 'active',
   });
+});
+
+
+test('Objetivos permite editar áreas, metas y submetas, gestionar estados y crear submetas en todas las metas', async ({ page }) => {
+  const area = { id: '00000000-0000-7000-8000-000000000201', owner_user_id: profile.id, created_by_user_id: profile.id, title: 'Finanzas', description: null, position: 0, status: 'active', deleted_at: null };
+  const secondArea = { id: '00000000-0000-7000-8000-000000000211', owner_user_id: profile.id, created_by_user_id: profile.id, title: 'Salud', description: null, position: 1, status: 'active', deleted_at: null };
+  const goals = Array.from({ length: 3 }, (_, index) => ({ id: `00000000-0000-7000-8000-00000000020${index + 2}`, owner_user_id: profile.id, created_by_user_id: profile.id, life_area_id: area.id, title: `Meta ${index + 1}`, reason: null, expected_result: null, target_date: null, status: 'active', deleted_at: null }));
+  const subgoal = { id: '00000000-0000-7000-8000-000000000209', goal_id: goals[0].id, created_by_user_id: profile.id, title: 'Ahorrar cada mes', expected_result: null, target_date: null, status: 'active', deleted_at: null };
+  const result = await mockSupabaseSession(page, { areas: [area, secondArea], goals, subgoals: [subgoal] });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+  await page.locator('.side-nav').getByRole('button', { name: /Objetivos/ }).click();
+  await expect(page.getByRole('heading', { name: 'Tus áreas de vida' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Finanzas' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Editar área: Finanzas' }).click();
+  const areaDialog = page.getByRole('dialog', { name: 'Editar área' });
+  await areaDialog.getByLabel('Nombre del área').fill('Finanzas personales');
+  await areaDialog.getByLabel('Descripción (opcional)').fill('Control y crecimiento del dinero.');
+  await areaDialog.getByRole('button', { name: 'Guardar cambios' }).click();
+  await expect(page.getByText('Área actualizada.')).toBeVisible();
+  expect(result.updatedAreas.at(-1)).toMatchObject({ title: 'Finanzas personales', description: 'Control y crecimiento del dinero.' });
+
+  await page.getByRole('button', { name: 'Mover área abajo: Finanzas personales' }).click();
+  await expect(page.getByText('Área movida hacia abajo.')).toBeVisible();
+  expect(result.updatedAreas.some((update) => update.id === area.id && update.position === 1)).toBe(true);
+  expect(result.updatedAreas.some((update) => update.id === secondArea.id && update.position === 0)).toBe(true);
+  await expect(page.getByRole('button', { name: 'Mover área arriba: Finanzas personales' })).toBeEnabled();
+
+  await page.getByRole('button', { name: 'Editar meta: Meta 1' }).click();
+  const goalDialog = page.getByRole('dialog', { name: 'Editar meta' });
+  await goalDialog.getByLabel('Resultado que buscas').fill('Crear fondo de emergencia');
+  await goalDialog.getByLabel('Resultado esperado (opcional)').fill('Seis meses de gastos.');
+  await goalDialog.getByLabel('Motivo (opcional)').fill('Seguridad financiera.');
+  await goalDialog.getByLabel('Fecha objetivo (opcional)').fill('2027-06-30');
+  await goalDialog.getByRole('button', { name: 'Guardar cambios' }).click();
+  await expect(page.getByText('Meta actualizada.')).toBeVisible();
+  expect(result.updatedGoals.at(-1)).toMatchObject({ title: 'Crear fondo de emergencia', expected_result: 'Seis meses de gastos.', reason: 'Seguridad financiera.', target_date: '2027-06-30' });
+
+  await page.getByLabel('Estado de meta: Crear fondo de emergencia').selectOption('paused');
+  await expect(page.getByText('Meta pausada.')).toBeVisible();
+  await page.getByLabel('Estado de meta: Crear fondo de emergencia').selectOption('active');
+  await expect(page.getByText('Meta reactivada.')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Editar submeta: Ahorrar cada mes' }).click();
+  const subgoalDialog = page.getByRole('dialog', { name: 'Editar submeta' });
+  await subgoalDialog.getByLabel('Nombre de la submeta').fill('Ahorrar el 20% mensual');
+  await subgoalDialog.getByLabel('Resultado esperado (opcional)').fill('Ahorro automático.');
+  await subgoalDialog.getByRole('button', { name: 'Guardar cambios' }).click();
+  await expect(page.getByText('Submeta actualizada.')).toBeVisible();
+  expect(result.updatedSubgoals.at(-1)).toMatchObject({ title: 'Ahorrar el 20% mensual', expected_result: 'Ahorro automático.' });
+  await page.getByLabel('Estado de submeta: Ahorrar el 20% mensual').selectOption('completed');
+  await expect(page.getByText('Submeta completada.')).toBeVisible();
+
+  await page.getByLabel('Nueva submeta para: Meta 3').fill('Tercera meta sin límite');
+  await page.getByRole('button', { name: 'Añadir submeta a: Meta 3' }).click();
+  await expect(page.getByText('Submeta creada.')).toBeVisible();
+  expect(result.insertedSubgoals).toHaveLength(1);
+  expect(result.insertedSubgoals[0]).toMatchObject({ goal_id: goals[2].id, title: 'Tercera meta sin límite', status: 'active', created_by_user_id: profile.id });
 });
