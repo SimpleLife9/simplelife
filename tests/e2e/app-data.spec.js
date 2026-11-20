@@ -809,8 +809,8 @@ test('Objetivos permite editar áreas, metas y submetas, gestionar estados y cre
 
   await page.getByRole('button', { name: 'Mover área abajo: Finanzas personales' }).click();
   await expect(page.getByText('Área movida hacia abajo.')).toBeVisible();
-  expect(result.updatedAreas.some((update) => update.id === area.id && update.position === secondArea.position)).toBe(true);
-  expect(result.updatedAreas.some((update) => update.id === secondArea.id && update.position === area.position)).toBe(true);
+  expect(result.updatedAreas.some((update) => update.id === area.id && update.position === 1)).toBe(true);
+  expect(result.updatedAreas.some((update) => update.id === secondArea.id && update.position === 0)).toBe(true);
   await expect(page.getByRole('button', { name: 'Mover área arriba: Finanzas personales' })).toBeEnabled();
 
   await page.getByRole('button', { name: 'Editar meta: Meta 1' }).click();
