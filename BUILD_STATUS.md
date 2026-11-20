@@ -217,7 +217,7 @@ Robert confirmó que la corrección funciona correctamente en localhost y autori
 - La clasificación es manual y explícita. No se afirma que IA interprete o procese automáticamente las capturas.
 - Playwright cubre conversión a tarea, idea, lista nueva, lista existente, procedencia, conservación del original y archivo/restauración de una captura organizada.
 - Se reutilizan tablas, columnas, RLS, restricciones y grants existentes. Sin migraciones, cambios de esquema, RLS, grants, permisos o secretos; sin escrituras de prueba en datos reales.
-- Validación manual de Robert en localhost: PENDIENTE.
+- Validación manual de Robert en localhost: PASS (20/11/2026). Confirmó que puede consultar las notas/ideas y listas guardadas desde Inbox; la navegación visible y los elementos aparecen correctamente.
 - Sin despliegue público ni preview.
 
 
@@ -232,4 +232,9 @@ Robert confirmó que la corrección funciona correctamente en localhost y autori
 - Playwright valida el recorrido desde Inbox hasta «Tu biblioteca» para una idea creada, la consulta de una lista recién creada y acceso móvil a los tres módulos.
 - La clasificación manual, la conservación del original y la procedencia del Inbox permanecen sin cambios.
 - Sin migraciones, cambios de esquema, RLS, grants, permisos ni secretos; sin escrituras de QA en datos reales. Sin despliegue público ni preview.
-- Validación manual de Robert en localhost: PENDIENTE. Comprobar «Más → Notas e ideas» y «Más → Listas» y confirmar que aparecen los registros guardados anteriormente desde Inbox.
+- Validación manual de Robert en localhost: PASS (20/11/2026). Confirmó que «Más → Notas e ideas» y «Más → Listas» muestran correctamente los registros organizados previamente desde Inbox. Anexo 134 cerrado.
+
+
+## Cierre manual — Lote 7 y corrección de descubribilidad (20/11/2026)
+
+Robert confirmó PASS en localhost: puede encontrar y consultar correctamente las notas/ideas y listas creadas desde Inbox. Quedan cerrados el Lote 7 (PR #10) y la corrección de navegación/renderizado del PR #11. La persistencia de destino, el acceso visible en escritorio/móvil y la apertura desde Inbox están cubiertos por E2E; la comprobación de lectura real de sus datos quedó validada manualmente.
