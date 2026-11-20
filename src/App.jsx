@@ -5,6 +5,7 @@ import { uuidv7 } from './lib/uuidv7.js';
 import { buildDashboardSnapshot } from './lib/dashboard.js';
 import { todayInHavana, addDaysToDateKey, formatDuration, formatDate } from './lib/date-time.js';
 import { TaskRow } from './features/today/components/TaskRow.jsx';
+import { useRows } from './shared/hooks/useRows.js';
 
 const NAV = [
   { id: 'today', label: 'Hoy', icon: '☀️' },
@@ -309,32 +310,6 @@ function FormCard({ title, children, onSubmit, submitLabel = 'Guardar', busy = f
   return <form className={`form-card ${className}`} onSubmit={onSubmit}><div className="form-card-title">{title}</div>{children}<button className="button button-primary" type="submit" disabled={busy}>{busy ? 'Guardando…' : submitLabel} <span>→</span></button></form>;
 }
 
-function useRows(table, profile, refreshKey, configure = null) {
-  const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [localError, setLocalError] = useState('');
-  useEffect(() => {
-    let alive = true;
-    const load = async () => {
-      setLoading(true);
-      setLocalError('');
-      try {
-        let query = supabase.from(table).select('*');
-        query = configure ? configure(query) : query;
-        const { data, error: queryError } = await query;
-        if (queryError) throw queryError;
-        if (alive) setRows(data || []);
-      } catch (queryError) {
-        if (alive) setLocalError(queryError.message || 'No se pudieron cargar los datos.');
-      } finally {
-        if (alive) setLoading(false);
-      }
-    };
-    if (profile?.id) void load();
-    return () => { alive = false; };
-  }, [table, profile?.id, refreshKey]);
-  return { rows, loading, localError, setRows };
-}
 
 function TodayPage({ profile, refreshKey, runAction, busy, setActivePage, setMorePage }) {
   const { rows: tasks, loading, localError } = useRows('task', profile, refreshKey, (query) => query
