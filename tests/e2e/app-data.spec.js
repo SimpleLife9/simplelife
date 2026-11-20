@@ -756,7 +756,7 @@ test('Objectives create areas and goals through separate floating forms', async 
   await disabledGoalDialog.getByRole('button', { name: 'Cancelar' }).click();
   await expect(disabledGoalDialog).toBeHidden();
 
-  await page.getByRole('button', { name: 'Nueva Area' }).click();
+  await page.getByRole('button', { name: 'Nueva Área' }).click();
   const areaDialog = page.getByRole('dialog', { name: 'Nueva área' });
   await areaDialog.getByLabel('Nombre del área').fill('Finanzas');
   await areaDialog.getByRole('button', { name: 'Crear área' }).click();
@@ -809,8 +809,8 @@ test('Objetivos permite editar áreas, metas y submetas, gestionar estados y cre
 
   await page.getByRole('button', { name: 'Mover área abajo: Finanzas personales' }).click();
   await expect(page.getByText('Área movida hacia abajo.')).toBeVisible();
-  expect(result.updatedAreas).toContainEqual({ id: area.id, position: secondArea.position });
-  expect(result.updatedAreas).toContainEqual({ id: secondArea.id, position: area.position });
+  expect(result.updatedAreas.some((update) => update.id === area.id && update.position === secondArea.position)).toBe(true);
+  expect(result.updatedAreas.some((update) => update.id === secondArea.id && update.position === area.position)).toBe(true);
   await expect(page.getByRole('button', { name: 'Mover área arriba: Finanzas personales' })).toBeEnabled();
 
   await page.getByRole('button', { name: 'Editar meta: Meta 1' }).click();
