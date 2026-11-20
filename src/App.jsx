@@ -2035,7 +2035,6 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
         </section>
       </div>
     )}
-  </>;
     {projectTask && (
       <div className="task-editor-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) closeTaskProjects(); }} onKeyDown={(event) => { if (event.key === 'Escape' && !busy) closeTaskProjects(); }}>
         <section className="task-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="task-project-title">
@@ -2067,7 +2066,7 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
         </section>
       </div>
     )}
-
+  </>;
 }
 function NotesPage({ profile, refreshKey, runAction, busy }) {
   const { rows, loading, localError } = useRows('note_idea', profile, refreshKey, (query) => query.is('deleted_at', null).order('created_at', { ascending: false }));
