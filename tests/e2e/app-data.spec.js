@@ -1396,6 +1396,79 @@ test('Today separates overdue tasks, allows moving them to today and totals esti
   await expect(page.getByRole('heading', { name: 'Atrasadas', exact: true })).toHaveCount(0);
   await expect(page.getByText('2 h 15 min', { exact: true })).toBeVisible();
 });
+\n
+test('Today dashboard derives goal and project progress, weekly execution, blockers and milestones', async ({ page }) => {
+  const today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Havana', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
+  const dateOffset = (offset) => {
+    const [year, month, day] = today.split('-').map(Number);
+    const next = new Date(Date.UTC(year, month - 1, day + offset));
+    return [next.getUTCFullYear(), String(next.getUTCMonth() + 1).padStart(2, '0'), String(next.getUTCDate()).padStart(2, '0')].join('-');
+  };
+  const goal = {
+    id: '00000000-0000-7000-8000-000000000901', owner_user_id: profile.id, created_by_user_id: profile.id,
+    life_area_id: '00000000-0000-7000-8000-000000000902', title: 'Meta de prueba', status: 'active',
+    target_date: dateOffset(5), archived_at: null, deleted_at: null,
+  };
+  const subgoal = {
+    id: '00000000-0000-7000-8000-000000000903', goal_id: goal.id, created_by_user_id: profile.id,
+    title: 'Submeta de prueba', status: 'active', archived_at: null, deleted_at: null,
+  };
+  const project = {
+    id: '00000000-0000-7000-8000-000000000904', owner_user_id: profile.id, created_by_user_id: profile.id,
+    name: 'Proyecto de prueba', status: 'active', target_date: dateOffset(3), archived_at: null, deleted_at: null,
+  };
+  const completedTask = {
+    id: '00000000-0000-7000-8000-000000000905', owner_user_id: profile.id, created_by_user_id: profile.id,
+    action: 'Tarea completada esta semana', status: 'completed', priority: 2, due_date: null,
+    completed_at: new Date(Date.now() - 60 * 60 * 1000).toISOString(), archived_at: null, deleted_at: null,
+  };
+  const activeTask = {
+    id: '00000000-0000-7000-8000-000000000906', owner_user_id: profile.id, created_by_user_id: profile.id,
+    action: 'Tarea vinculada pendiente', status: 'in_progress', priority: 2, due_date: today,
+    estimated_duration_minutes: 30, archived_at: null, deleted_at: null,
+  };
+  const blockedTask = {
+    id: '00000000-0000-7000-8000-000000000907', owner_user_id: profile.id, created_by_user_id: profile.id,
+    action: 'Esperando respuesta externa', status: 'blocked', priority: 1, due_date: today,
+    archived_at: null, deleted_at: null,
+  };
+  await mockSupabaseSession(page, {
+    tasks: [completedTask, activeTask, blockedTask],
+    goals: [goal],
+    subgoals: [subgoal],
+    projects: [project],
+    contributionRelations: [
+      { id: '00000000-0000-7000-8000-000000000908', task_id: completedTask.id, goal_id: goal.id, relation_status: 'confirmed' },
+      { id: '00000000-0000-7000-8000-000000000909', task_id: activeTask.id, subgoal_id: subgoal.id, relation_status: 'confirmed' },
+    ],
+    links: [
+      { id: '00000000-0000-7000-8000-000000000910', task_id: completedTask.id, project_id: project.id, relation_role: 'primary' },
+      { id: '00000000-0000-7000-8000-000000000911', task_id: activeTask.id, project_id: project.id, relation_role: 'primary' },
+    ],
+  });
+
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+
+  await expect(page.getByRole('heading', { name: 'Metas y proyectos en marcha' })).toBeVisible();
+  const goalProgress = page.locator('.today-progress-row').filter({ hasText: 'Meta de prueba' });
+  const projectProgress = page.locator('.today-progress-row').filter({ hasText: 'Proyecto de prueba' });
+  await expect(goalProgress).toContainText('50% · 1 de 2');
+  await expect(projectProgress).toContainText('50% · 1 de 2');
+  await expect(page.locator('.today-week-stat')).toContainText('1');
+  await expect(page.locator('.today-watch-row').filter({ hasText: 'Esperando respuesta externa' })).toContainText('Bloqueada');
+  await expect(page.locator('.today-watch-row').filter({ hasText: 'Meta de prueba' })).toContainText('Meta');
+  await expect(page.locator('.today-watch-row').filter({ hasText: 'Proyecto de prueba' })).toContainText('Proyecto');
+  await expect(page.getByText('Tarea vinculada pendiente')).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
+  expect(horizontalOverflow).toBe(false);
+});
 
 test('Tasks filter by due date and support bulk complete, reschedule and clear date', async ({ page }) => {
   const today = new Intl.DateTimeFormat('en-CA', {
