@@ -4,6 +4,7 @@ import { ensureUserProfile } from './lib/profile.js';
 import { uuidv7 } from './lib/uuidv7.js';
 import { buildDashboardSnapshot } from './lib/dashboard.js';
 import { todayInHavana, addDaysToDateKey, formatDuration, formatDate } from './lib/date-time.js';
+import { TaskRow } from './features/today/components/TaskRow.jsx';
 
 const NAV = [
   { id: 'today', label: 'Hoy', icon: '☀️' },
@@ -460,17 +461,6 @@ function TodayPage({ profile, refreshKey, runAction, busy, setActivePage, setMor
   </>;
 }
 
-function TaskRow({ task, onComplete, onReschedule, busy }) {
-  return <div className="task-row">
-    <button className="task-check" onClick={onComplete} disabled={busy} aria-label={`Completar tarea: ${task.action}`} />
-    <div className="task-row-copy">
-      <strong>{task.action}</strong>
-      <small>{task.due_date ? `Para ${formatDate(task.due_date)}` : 'Sin fecha definida'} {task.estimated_duration_minutes ? `· ${formatDuration(task.estimated_duration_minutes)}` : ''}</small>
-    </div>
-    {onReschedule && <button type="button" className="task-row-action" onClick={onReschedule} disabled={busy} aria-label={`Pasar a hoy: ${task.action}`}>Pasar a hoy</button>}
-    <span className={`priority priority-${task.priority}`}>{task.priority <= 2 ? 'Alta' : task.priority === 3 ? 'Normal' : 'Baja'}</span>
-  </div>;
-}
 
 function InboxPage({ profile, refreshKey, runAction, busy, setActivePage, setMorePage }) {
   const { rows, loading, localError } = useRows('capture', profile, refreshKey, (query) => query
