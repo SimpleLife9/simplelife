@@ -1109,7 +1109,9 @@ test('Inbox converts a capture into an idea without changing the original captur
   await expect(page.getByText('Organizada · Nota o idea')).toBeVisible();
   await page.locator('.side-nav').getByRole('button', { name: /Más/ }).click();
   const moduleNav = page.getByRole('navigation', { name: 'Secciones de Más' });
+  await expect(moduleNav).toBeVisible();
   await moduleNav.getByRole('button', { name: 'Notas e ideas' }).click();
+  console.log('DEBUG_NOTES_NAV', await page.locator('.page-heading').innerText(), await page.locator('.more-page-tabs').innerText(), await page.locator('.more-page-tabs button.selected').innerText());
   await expect(page.getByRole('heading', { name: 'Tu biblioteca' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Mejora del negocio' })).toBeVisible();
 });
