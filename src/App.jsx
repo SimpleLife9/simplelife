@@ -540,7 +540,10 @@ function GoalsPage({ profile, refreshKey, runAction, busy }) {
         if (error) throw error;
       }
     }, editingArea ? 'Área actualizada.' : 'Área creada.');
-    closeAreaModal();
+    setShowAreaModal(false);
+    setEditingArea(null);
+    setAreaTitle('');
+    setAreaDescription('');
   };
 
   const setAreaStatus = (area) => runAction(async () => {
@@ -564,7 +567,13 @@ function GoalsPage({ profile, refreshKey, runAction, busy }) {
         if (error) throw error;
       }
     }, editingGoal ? 'Meta actualizada.' : 'Meta creada.');
-    closeGoalModal();
+    setShowGoalModal(false);
+    setEditingGoal(null);
+    setSelectedArea('');
+    setGoalTitle('');
+    setGoalReason('');
+    setExpectedResult('');
+    setTargetDate('');
   };
 
   const setGoalStatus = (goal, status) => runAction(async () => {
