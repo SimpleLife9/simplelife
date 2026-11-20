@@ -3,6 +3,7 @@ import { isSupabaseConfigured, supabase } from './lib/supabase.js';
 import { ensureUserProfile } from './lib/profile.js';
 import { uuidv7 } from './lib/uuidv7.js';
 import { buildDashboardSnapshot } from './lib/dashboard.js';
+import { todayInHavana, addDaysToDateKey, formatDuration, formatDate } from './lib/date-time.js';
 
 const NAV = [
   { id: 'today', label: 'Hoy', icon: '☀️' },
@@ -12,38 +13,7 @@ const NAV = [
   { id: 'more', label: 'Más', icon: '•••' },
 ];
 
-const todayInHavana = () => new Intl.DateTimeFormat('en-CA', {
-  timeZone: 'America/Havana', year: 'numeric', month: '2-digit', day: '2-digit',
-}).format(new Date());
-
-const addDaysToDateKey = (value, days) => {
-  if (!value) return '';
-  const [year, month, day] = value.split('-').map(Number);
-  const next = new Date(Date.UTC(year, month - 1, day + days));
-  return [
-    next.getUTCFullYear(),
-    String(next.getUTCMonth() + 1).padStart(2, '0'),
-    String(next.getUTCDate()).padStart(2, '0'),
-  ].join('-');
-};
-
-const formatDuration = (minutes) => {
-  const value = Number(minutes);
-  if (!Number.isFinite(value) || value <= 0) return '';
-  const hours = Math.floor(value / 60);
-  const rest = value % 60;
-  if (hours && rest) return `${hours} h ${rest} min`;
-  if (hours) return `${hours} h`;
-  return `${rest} min`;
-};
-
 const isOpenTask = (task) => !['completed', 'cancelled'].includes(task.status);
-
-const formatDate = (value) => {
-  if (!value) return 'Sin fecha';
-  const date = new Date(`${value}T12:00:00`);
-  return new Intl.DateTimeFormat('es', { day: 'numeric', month: 'short' }).format(date);
-};
 
 function App() {
   const [session, setSession] = useState(null);
