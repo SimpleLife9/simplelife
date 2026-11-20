@@ -48,6 +48,9 @@ async function mockSupabaseSession(page, initialData = {}) {
   const updatedSubgoals = [];
   const updatedProjects = [];
   const projectLinks = [...(initialData.links || [])];
+  const contributionRelations = [...(initialData.contributionRelations || [])];
+  const insertedContributionRelations = [];
+  const updatedContributionRelations = [];
   const captures = [
     {
       id: '00000000-0000-7000-8000-000000000101',
@@ -244,6 +247,30 @@ async function mockSupabaseSession(page, initialData = {}) {
       return;
     }
 
+    if (url.pathname === '/rest/v1/contribution_relation' && method === 'GET') {
+      await json(200, contributionRelations);
+      return;
+    }
+    if (url.pathname === '/rest/v1/contribution_relation' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const rows = Array.isArray(payload) ? payload : [payload];
+      contributionRelations.unshift(...rows);
+      insertedContributionRelations.push(...rows);
+      await json(201, rows, { 'content-range': '0-0/*' });
+      return;
+    }
+    if (url.pathname === '/rest/v1/contribution_relation' && method === 'PATCH') {
+      const payload = request.postDataJSON();
+      const idFilter = url.searchParams.get('id') || '';
+      const projectFilter = url.searchParams.get('project_id') || '';
+      const relation = contributionRelations.find((row) => idFilter === 'eq.' + row.id && projectFilter === 'eq.' + row.project_id);
+      if (!relation) { await json(200, []); return; }
+      Object.assign(relation, payload);
+      updatedContributionRelations.push({ id: relation.id, ...payload });
+      await json(200, [{ id: relation.id }], { 'content-range': '0-0/*' });
+      return;
+    }
+
     if (url.pathname === '/rest/v1/capture' && method === 'GET') {
       await json(200, captures.filter((capture) => !capture.deleted_at));
       return;
@@ -325,7 +352,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     await json(404, { message: `Unexpected mocked Supabase request: ${method} ${url.pathname}` });
   });
 
-  return { insertedTasks, updatedTasks, taskRows, projects, insertedProjects, updatedProjects, projectLinks, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, insertedCaptureParts };
+  return { insertedTasks, updatedTasks, taskRows, projects, insertedProjects, updatedProjects, projectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, insertedCaptureParts };
 }
 
 test('mock-authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
