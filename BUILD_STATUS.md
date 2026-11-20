@@ -182,3 +182,19 @@ No `service_role` key or database password is present in the frontend. `.env.exa
 ## Cierre manual — Anexo 131 (20/11/2026)
 
 Robert confirmó que la corrección funciona correctamente en localhost y autorizó continuar. Se registra VALIDACIÓN MANUAL REAL: PASS para el orden de áreas, navegación independiente, edición de metas y submetas, creación de submetas y persistencia tras recargar. Anexo 131 cerrado. Próxima etapa: iniciar el siguiente lote funcional, revisando las capacidades actuales antes de definir alcance.
+
+
+## Lote 6 — Relaciones entre metas/submetas y proyectos
+
+- PR #9 integrado en main: https://github.com/SimpleLife9/simplelife/pull/9.
+- SHA integrado: `f66c0521cdb033735d7548648ffc88c16ccf51a9`.
+- CI del PR: PASS — 3/3 pruebas unitarias, Playwright E2E y build de producción: https://github.com/SimpleLife9/simplelife/actions/runs/44723035715.
+- CI post-merge: PASS — 3/3 pruebas unitarias, Playwright E2E y build de producción: https://github.com/SimpleLife9/simplelife/actions/runs/44723207284.
+- Proyectos: el detalle ahora permite vincular una Meta o Submeta; la relación se crea con estado `confirmed`.
+- Desvincular cambia el estado a `removed`, sin DELETE físico. Si se vuelve a vincular el mismo objetivo, se reactiva la fila existente en lugar de duplicarla.
+- Metas y Submetas muestran los proyectos asociados que tienen relación confirmada.
+- Un proyecto archivado no permite crear, restaurar ni quitar relaciones desde el modal.
+- Se reutiliza `contribution_relation`, sus restricciones y la política RLS existente. No se crearon tablas, columnas ni migraciones y no se cambiaron RLS, grants, permisos o secretos.
+- E2E usa mocks de Auth/PostgREST y cubre creación, desvinculación, restauración, vínculo directo a meta y visualización recíproca. No se escribieron datos reales de Supabase durante QA.
+- Validación manual del usuario en localhost: PENDIENTE.
+- Sin despliegue público ni preview.
