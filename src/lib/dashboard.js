@@ -1,5 +1,6 @@
 const isVisible = (row) => row && !row.deleted_at && !row.archived_at;
-const isCountableTask = (task) => task && !task.deleted_at && task.status !== 'cancelled';
+const isCountableTask = (task) => task && !task.deleted_at && task.status !== 'cancelled'
+  && (!task.archived_at || task.status === 'completed');
 const isOpen = (task) => isVisible(task) && !['completed', 'cancelled'].includes(task.status);
 
 function shiftDateKey(value, days) {
