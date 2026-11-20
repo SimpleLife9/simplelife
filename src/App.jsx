@@ -15,6 +15,29 @@ const todayInHavana = () => new Intl.DateTimeFormat('en-CA', {
   timeZone: 'America/Havana', year: 'numeric', month: '2-digit', day: '2-digit',
 }).format(new Date());
 
+const addDaysToDateKey = (value, days) => {
+  if (!value) return '';
+  const [year, month, day] = value.split('-').map(Number);
+  const next = new Date(Date.UTC(year, month - 1, day + days));
+  return [
+    next.getUTCFullYear(),
+    String(next.getUTCMonth() + 1).padStart(2, '0'),
+    String(next.getUTCDate()).padStart(2, '0'),
+  ].join('-');
+};
+
+const formatDuration = (minutes) => {
+  const value = Number(minutes);
+  if (!Number.isFinite(value) || value <= 0) return '';
+  const hours = Math.floor(value / 60);
+  const rest = value % 60;
+  if (hours && rest) return `${hours} h ${rest} min`;
+  if (hours) return `${hours} h`;
+  return `${rest} min`;
+};
+
+const isOpenTask = (task) => !['completed', 'cancelled'].includes(task.status);
+
 const formatDate = (value) => {
   if (!value) return 'Sin fecha';
   const date = new Date(`${value}T12:00:00`);
@@ -302,8 +325,8 @@ function ConfigurationScreen() {
 }
 function LoadingScreen({ label }) { return <div className="center-screen"><div className="loading-mark">✳</div><p>{label}</p></div>; }
 
-function Field({ label, name, type = 'text', placeholder, required = false, autoComplete, minLength, value, onChange, autoFocus = false }) {
-  return <label className="field"><span>{label}</span><input name={name} type={type} placeholder={placeholder} required={required} autoComplete={autoComplete} minLength={minLength} value={value} onChange={onChange} autoFocus={autoFocus} /></label>;
+function Field({ label, name, type = 'text', placeholder, required = false, autoComplete, minLength, min, max, step, value, onChange, autoFocus = false }) {
+  return <label className="field"><span>{label}</span><input name={name} type={type} placeholder={placeholder} required={required} autoComplete={autoComplete} minLength={minLength} min={min} max={max} step={step} value={value} onChange={onChange} autoFocus={autoFocus} /></label>;
 }
 function TextAreaField({ label, name, placeholder, required = false, rows = 3, value, onChange }) {
   return <label className="field"><span>{label}</span><textarea name={name} placeholder={placeholder} required={required} rows={rows} value={value} onChange={onChange} /></label>;
@@ -348,12 +371,22 @@ function TodayPage({ profile, refreshKey, runAction, busy, setActivePage }) {
     .order('priority', { ascending: true }).order('created_at', { ascending: false }).limit(40));
   const today = todayInHavana();
   const dueToday = tasks.filter((task) => task.due_date === today);
-  const nextTasks = tasks.filter((task) => task.due_date !== today).slice(0, 6);
+  const overdue = tasks.filter((task) => task.due_date && task.due_date < today && isOpenTask(task));
+  const nextTasks = tasks.filter((task) => !task.due_date || task.due_date > today).slice(0, 6);
+  const estimatedTodayMinutes = dueToday.reduce((total, task) => total + (Number(task.estimated_duration_minutes) || 0), 0);
+  const estimatedTodayCount = dueToday.filter((task) => Number(task.estimated_duration_minutes) > 0).length;
 
   const completeTask = (task) => runAction(async () => {
-    const { error: updateError } = await supabase.from('task').update({ status: 'completed', completed_at: new Date().toISOString(), completion_outcome: 'complete' }).eq('id', task.id);
+    const { error: updateError } = await supabase.from('task').update({ status: 'completed', completed_at: new Date().toISOString(), completion_outcome: 'complete' }).eq('id', task.id).eq('owner_user_id', profile.id);
     if (updateError) throw updateError;
   }, 'Tarea completada.');
+
+  const rescheduleToday = (task) => runAction(async () => {
+    const { data, error: updateError } = await supabase.from('task').update({ due_date: today })
+      .eq('id', task.id).eq('owner_user_id', profile.id).select('id');
+    if (updateError) throw updateError;
+    if (!data?.length) throw new Error('No se pudo mover la tarea a hoy. Puede que ya no exista o no pertenezca a esta cuenta.');
+  }, 'Tarea movida a hoy.');
 
   return <>
     <div className="today-grid">
@@ -364,14 +397,21 @@ function TodayPage({ profile, refreshKey, runAction, busy, setActivePage }) {
         <button className="button button-light" onClick={() => setActivePage('inbox')}>Vaciar mi mente <span>↗</span></button>
         <div className="card-sprout">✳</div>
       </div>
-      <div className="daily-summary">
+      <div className="daily-summary daily-summary-four">
         <div className="summary-card"><span>EN TU LISTA</span><strong>{tasks.length}</strong><small>tareas abiertas</small></div>
-        <div className="summary-card summary-soft"><span>PARA HOY</span><strong>{dueToday.length}</strong><small>con fecha de hoy</small></div>
+        <div className="summary-card summary-soft"><span>ATRASADAS</span><strong>{overdue.length}</strong><small>requieren atención</small></div>
+        <div className="summary-card"><span>PARA HOY</span><strong>{dueToday.length}</strong><small>con fecha de hoy</small></div>
+        <div className="summary-card summary-soft"><span>TIEMPO ESTIMADO</span><strong>{estimatedTodayMinutes ? formatDuration(estimatedTodayMinutes) : '—'}</strong><small>{estimatedTodayCount} de {dueToday.length} con estimación</small></div>
       </div>
     </div>
 
     <div className="content-grid">
       <div className="content-main">
+        {overdue.length > 0 && <>
+          <SectionTitle detail={`${overdue.length} ${overdue.length === 1 ? 'tarea pendiente' : 'tareas pendientes'}`}>Atrasadas</SectionTitle>
+          <div className="task-list task-list-overdue">{overdue.map((task) => <TaskRow key={task.id} task={task} onComplete={() => completeTask(task)} onReschedule={() => rescheduleToday(task)} busy={busy} />)}</div>
+          <div className="section-spacer" />
+        </>}
         <SectionTitle detail={`${dueToday.length} ${dueToday.length === 1 ? 'elemento' : 'elementos'}`}>Para hoy</SectionTitle>
         {loading ? <p className="muted">Cargando tareas…</p> : localError ? <div className="form-error">{localError}</div> : dueToday.length ? <div className="task-list">{dueToday.map((task) => <TaskRow key={task.id} task={task} onComplete={() => completeTask(task)} busy={busy} />)}</div> : <EmptyState title="Tu día está despejado" detail="Las tareas que captures aparecerán aquí cuando tengan fecha de hoy." icon="☀️" />}
         <div className="section-spacer" />
@@ -386,8 +426,16 @@ function TodayPage({ profile, refreshKey, runAction, busy, setActivePage }) {
   </>;
 }
 
-function TaskRow({ task, onComplete, busy }) {
-  return <div className="task-row"><button className="task-check" onClick={onComplete} disabled={busy} aria-label="Completar tarea"/><div className="task-row-copy"><strong>{task.action}</strong><small>{task.due_date ? `Para ${formatDate(task.due_date)}` : 'Sin fecha definida'} {task.estimated_duration_minutes ? `· ${task.estimated_duration_minutes} min` : ''}</small></div><span className={`priority priority-${task.priority}`}>{task.priority <= 2 ? 'Alta' : task.priority === 3 ? 'Normal' : 'Baja'}</span></div>;
+function TaskRow({ task, onComplete, onReschedule, busy }) {
+  return <div className="task-row">
+    <button className="task-check" onClick={onComplete} disabled={busy} aria-label={`Completar tarea: ${task.action}`} />
+    <div className="task-row-copy">
+      <strong>{task.action}</strong>
+      <small>{task.due_date ? `Para ${formatDate(task.due_date)}` : 'Sin fecha definida'} {task.estimated_duration_minutes ? `· ${formatDuration(task.estimated_duration_minutes)}` : ''}</small>
+    </div>
+    {onReschedule && <button type="button" className="task-row-action" onClick={onReschedule} disabled={busy} aria-label={`Pasar a hoy: ${task.action}`}>Pasar a hoy</button>}
+    <span className={`priority priority-${task.priority}`}>{task.priority <= 2 ? 'Alta' : task.priority === 3 ? 'Normal' : 'Baja'}</span>
+  </div>;
 }
 
 function InboxPage({ profile, refreshKey, runAction, busy, setActivePage, setMorePage }) {
@@ -1323,21 +1371,28 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState('3');
   const [dueDate, setDueDate] = useState('');
+  const [estimatedDuration, setEstimatedDuration] = useState('');
   const [projectId, setProjectId] = useState('');
   const [editingTask, setEditingTask] = useState(null);
   const [editAction, setEditAction] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [editPriority, setEditPriority] = useState('3');
   const [editDueDate, setEditDueDate] = useState('');
+  const [editEstimatedDuration, setEditEstimatedDuration] = useState('');
   const [taskSearch, setTaskSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('open');
   const [priorityFilter, setPriorityFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('all');
   const [taskSort, setTaskSort] = useState('priority');
+  const [selectedTaskIds, setSelectedTaskIds] = useState([]);
+  const [bulkDueDate, setBulkDueDate] = useState('');
   const [showNewTask, setShowNewTask] = useState(false);
+  const today = todayInHavana();
+  const nextWeek = addDaysToDateKey(today, 7);
   const closeNewTask = () => {
     if (busy) return;
     setShowNewTask(false);
-    setAction(''); setDescription(''); setPriority('3'); setDueDate(''); setProjectId('');
+    setAction(''); setDescription(''); setPriority('3'); setDueDate(''); setEstimatedDuration(''); setProjectId('');
   };
 
   const visibleTasks = useMemo(() => {
@@ -1347,8 +1402,13 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
         || (statusFilter === 'open' && !['completed', 'cancelled'].includes(task.status))
         || (statusFilter === 'completed' && task.status === 'completed');
       const priorityMatches = priorityFilter === 'all' || String(task.priority) === priorityFilter;
+      const dateMatches = dateFilter === 'all'
+        || (dateFilter === 'overdue' && isOpenTask(task) && Boolean(task.due_date) && task.due_date < today)
+        || (dateFilter === 'today' && task.due_date === today)
+        || (dateFilter === 'next7' && task.due_date > today && task.due_date <= nextWeek)
+        || (dateFilter === 'no-date' && !task.due_date);
       const searchMatches = !term || `${task.action || ''} ${task.description || ''}`.toLocaleLowerCase('es').includes(term);
-      return statusMatches && priorityMatches && searchMatches;
+      return statusMatches && priorityMatches && dateMatches && searchMatches;
     });
 
     const compareDueDate = (a, b) => {
@@ -1363,7 +1423,7 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
       return (a.priority ?? 3) - (b.priority ?? 3) || compareDueDate(a, b) || String(b.created_at || '').localeCompare(String(a.created_at || ''));
     });
     return filtered;
-  }, [tasks, taskSearch, statusFilter, priorityFilter, taskSort]);
+  }, [tasks, taskSearch, statusFilter, priorityFilter, dateFilter, taskSort, today, nextWeek]);
 
   const openEditor = (task) => {
     setEditingTask(task);
@@ -1371,6 +1431,7 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
     setEditDescription(task.description || '');
     setEditPriority(String(task.priority ?? 3));
     setEditDueDate(task.due_date || '');
+    setEditEstimatedDuration(task.estimated_duration_minutes == null ? '' : String(task.estimated_duration_minutes));
   };
 
   const addTask = async (event) => {
@@ -1381,15 +1442,16 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
       const { error: insertError } = await supabase.from('task').insert({
         id: taskId, owner_user_id: profile.id, created_by_user_id: profile.id,
         action: action.trim(), description: description.trim() || null,
-        priority: Number(priority), due_date: dueDate || null, status: 'todo',
-        time_zone: 'America/Havana',
+        priority: Number(priority), due_date: dueDate || null,
+        estimated_duration_minutes: estimatedDuration.trim() ? Number(estimatedDuration) : null,
+        status: 'todo', time_zone: 'America/Havana',
       });
       if (insertError) throw insertError;
       if (projectId) {
         const { error: linkError } = await supabase.from('task_project_link').insert({ id: uuidv7(), task_id: taskId, project_id: projectId, created_by_user_id: profile.id, relation_role: 'primary' });
         if (linkError) throw new Error(`La tarea se creó, pero no se pudo vincular al proyecto: ${linkError.message}`);
       }
-      setAction(''); setDescription(''); setPriority('3'); setDueDate(''); setProjectId('');
+      setAction(''); setDescription(''); setPriority('3'); setDueDate(''); setEstimatedDuration(''); setProjectId('');
       setShowNewTask(false);
     }, 'Tarea creada.');
   };
@@ -1405,6 +1467,7 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
           description: editDescription.trim() || null,
           priority: Number(editPriority),
           due_date: editDueDate || null,
+          estimated_duration_minutes: editEstimatedDuration.trim() ? Number(editEstimatedDuration) : null,
         })
         .eq('id', editingTask.id)
         .eq('owner_user_id', profile.id)
@@ -1431,6 +1494,48 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
     if (!data?.length) throw new Error('No se pudo reabrir la tarea. Puede que ya no esté completada o no pertenezca a esta cuenta.');
   }, 'Tarea reabierta.');
 
+  const selectableTasks = visibleTasks.filter(isOpenTask);
+  const selectedVisibleTasks = selectableTasks.filter((task) => selectedTaskIds.includes(task.id));
+  const allVisibleSelected = selectableTasks.length > 0 && selectedVisibleTasks.length === selectableTasks.length;
+  const toggleVisibleSelection = () => {
+    const visibleIds = selectableTasks.map((task) => task.id);
+    setSelectedTaskIds((current) => allVisibleSelected
+      ? current.filter((id) => !visibleIds.includes(id))
+      : [...new Set([...current, ...visibleIds])]);
+  };
+  const toggleTaskSelection = (taskId, checked) => {
+    setSelectedTaskIds((current) => checked
+      ? [...new Set([...current, taskId])]
+      : current.filter((id) => id !== taskId));
+  };
+  const clearSelection = () => { setSelectedTaskIds([]); setBulkDueDate(''); };
+
+  const bulkComplete = () => {
+    const ids = selectedVisibleTasks.map((task) => task.id);
+    if (!ids.length) return;
+    return runAction(async () => {
+      const { data, error: updateError } = await supabase.from('task')
+        .update({ status: 'completed', completed_at: new Date().toISOString(), completion_outcome: 'complete' })
+        .in('id', ids).eq('owner_user_id', profile.id).in('status', ['todo', 'in_progress', 'blocked']).select('id');
+      if (updateError) throw updateError;
+      if ((data || []).length !== ids.length) throw new Error('No se pudieron completar todas las tareas seleccionadas. Actualiza la lista antes de reintentar.');
+      clearSelection();
+    }, `${ids.length} ${ids.length === 1 ? 'tarea completada' : 'tareas completadas'}.`);
+  };
+
+  const bulkReschedule = (nextDate) => {
+    const ids = selectedVisibleTasks.map((task) => task.id);
+    if (!ids.length) return;
+    return runAction(async () => {
+      const { data, error: updateError } = await supabase.from('task')
+        .update({ due_date: nextDate })
+        .in('id', ids).eq('owner_user_id', profile.id).in('status', ['todo', 'in_progress', 'blocked']).select('id');
+      if (updateError) throw updateError;
+      if ((data || []).length !== ids.length) throw new Error('No se pudo actualizar la fecha de todas las tareas seleccionadas.');
+      clearSelection();
+    }, nextDate ? 'Fecha actualizada en las tareas seleccionadas.' : 'Fechas eliminadas de las tareas seleccionadas.');
+  };
+
   return <>
     <div className="management-layout management-layout-single">
       <div className="content-main">
@@ -1441,11 +1546,11 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
         <div className="task-toolbar" aria-label="Buscar y organizar tareas">
           <label className="task-toolbar-field task-search-field">
             <span>Buscar</span>
-            <input aria-label="Buscar tareas" type="search" value={taskSearch} onChange={(event) => setTaskSearch(event.target.value)} placeholder="Nombre o detalles…" />
+            <input aria-label="Buscar tareas" type="search" value={taskSearch} onChange={(event) => { setTaskSearch(event.target.value); clearSelection(); }} placeholder="Nombre o detalles…" />
           </label>
           <label className="task-toolbar-field">
             <span>Estado</span>
-            <select aria-label="Filtrar por estado" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <select aria-label="Filtrar por estado" value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); clearSelection(); }}>
               <option value="open">Activas</option>
               <option value="completed">Completadas</option>
               <option value="all">Todas</option>
@@ -1453,7 +1558,7 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
           </label>
           <label className="task-toolbar-field">
             <span>Prioridad</span>
-            <select aria-label="Filtrar por prioridad" value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value)}>
+            <select aria-label="Filtrar por prioridad" value={priorityFilter} onChange={(event) => { setPriorityFilter(event.target.value); clearSelection(); }}>
               <option value="all">Todas</option>
               <option value="1">1 · Muy alta</option>
               <option value="2">2 · Alta</option>
@@ -1463,24 +1568,51 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
             </select>
           </label>
           <label className="task-toolbar-field">
+            <span>Fecha</span>
+            <select aria-label="Filtrar por fecha" value={dateFilter} onChange={(event) => { setDateFilter(event.target.value); clearSelection(); }}>
+              <option value="all">Todas las fechas</option>
+              <option value="overdue">Vencidas</option>
+              <option value="today">Para hoy</option>
+              <option value="next7">Próximos 7 días</option>
+              <option value="no-date">Sin fecha</option>
+            </select>
+          </label>
+          <label className="task-toolbar-field">
             <span>Ordenar</span>
-            <select aria-label="Ordenar tareas" value={taskSort} onChange={(event) => setTaskSort(event.target.value)}>
+            <select aria-label="Ordenar tareas" value={taskSort} onChange={(event) => { setTaskSort(event.target.value); clearSelection(); }}>
               <option value="priority">Por prioridad</option>
               <option value="due">Por fecha</option>
               <option value="recent">Más recientes</option>
             </select>
           </label>
         </div>
+        {!loading && !localError && selectableTasks.length > 0 && <div className="bulk-task-toolbar" aria-label="Acciones para tareas seleccionadas">
+          <label className="bulk-select-all">
+            <input type="checkbox" aria-label="Seleccionar todas las tareas visibles" checked={allVisibleSelected} onChange={toggleVisibleSelection} />
+            <span>Seleccionar visibles</span>
+          </label>
+          <span className="bulk-selection-count">{selectedVisibleTasks.length} seleccionadas</span>
+          {selectedVisibleTasks.length > 0 && <>
+            <button type="button" className="bulk-task-button" onClick={bulkComplete} disabled={busy}>Completar seleccionadas</button>
+            <label className="bulk-date-field"><span>Nueva fecha</span><input type="date" aria-label="Nueva fecha para selección" value={bulkDueDate} onChange={(event) => setBulkDueDate(event.target.value)} /></label>
+            <button type="button" className="bulk-task-button" onClick={() => bulkReschedule(bulkDueDate)} disabled={busy || !bulkDueDate}>Aplicar fecha</button>
+            <button type="button" className="bulk-task-button bulk-task-secondary" onClick={() => bulkReschedule(null)} disabled={busy}>Quitar fecha</button>
+            <button type="button" className="bulk-task-clear" onClick={clearSelection} disabled={busy}>Limpiar</button>
+          </>}
+        </div>}
         {loading ? <p className="muted">Cargando…</p> : localError ? <div className="form-error">{localError}</div> : tasks.length ? visibleTasks.length ? (
           <div className="task-list">
             {visibleTasks.map((task) => (
               <div className={`task-row ${task.status === 'completed' ? 'task-done' : ''}`} key={task.id}>
+                {isOpenTask(task)
+                  ? <input className="task-select-checkbox" type="checkbox" aria-label={`Seleccionar tarea: ${task.action}`} checked={selectedTaskIds.includes(task.id)} onChange={(event) => toggleTaskSelection(task.id, event.target.checked)} disabled={busy} />
+                  : <span className="task-select-spacer" />}
                 {task.status === 'completed'
                   ? <span className="task-check checked" aria-label="Tarea completada">✓</span>
                   : <button className="task-check" onClick={() => completeTask(task)} disabled={busy} aria-label={`Completar tarea: ${task.action}`} />}
                 <div className="task-row-copy">
                   <strong>{task.action}</strong>
-                  <small>{task.due_date ? `Fecha: ${formatDate(task.due_date)}` : 'Sin fecha'} · Prioridad {task.priority}</small>
+                  <small>{task.due_date ? `Fecha: ${formatDate(task.due_date)}` : 'Sin fecha'} · Prioridad {task.priority}{task.estimated_duration_minutes ? ` · ${formatDuration(task.estimated_duration_minutes)}` : ''}</small>
                 </div>
                 <StatusTag status={task.status} />
                 {task.status === 'completed' && (
@@ -1518,6 +1650,7 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
             <TextAreaField label="Detalles (opcional)" name="description" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Información que te ayude a ejecutarla…" rows={3} />
             <label className="field"><span>Prioridad</span><select aria-label="Prioridad" value={priority} onChange={(event) => setPriority(event.target.value)}><option value="1">1 · Muy alta</option><option value="2">2 · Alta</option><option value="3">3 · Normal</option><option value="4">4 · Baja</option><option value="5">5 · Flexible</option></select></label>
             <Field label="Fecha (opcional)" name="due" type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} />
+            <Field label="Tiempo estimado (min)" name="estimatedDuration" type="number" min="1" max="10080" step="1" value={estimatedDuration} onChange={(event) => setEstimatedDuration(event.target.value)} placeholder="Ej. 45" />
             <label className="field"><span>Proyecto (opcional)</span><select value={projectId} onChange={(event) => setProjectId(event.target.value)}><option value="">Sin proyecto</option>{projects.filter((project) => !project.archived_at).map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select></label>
             <div className="task-editor-actions">
               <button type="button" className="button task-editor-cancel" onClick={closeNewTask} disabled={busy}>Cancelar</button>
@@ -1549,6 +1682,7 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
               </select>
             </label>
             <Field label="Fecha (opcional)" name="editDue" type="date" value={editDueDate} onChange={(event) => setEditDueDate(event.target.value)} />
+            <Field label="Tiempo estimado (min)" name="editEstimatedDuration" type="number" min="1" max="10080" step="1" value={editEstimatedDuration} onChange={(event) => setEditEstimatedDuration(event.target.value)} placeholder="Ej. 45" />
             <p className="task-editor-note">El estado de la tarea y su asociación a proyectos se mantienen sin cambios.</p>
             <div className="task-editor-actions">
               <button type="button" className="button task-editor-cancel" onClick={() => setEditingTask(null)} disabled={busy}>Cancelar</button>
