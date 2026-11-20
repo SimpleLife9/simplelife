@@ -1552,8 +1552,9 @@ test('Tasks link to goals and subgoals, filter by objective, and restore removed
   });
   const first = task('00000000-0000-7000-8000-000000000704', 'Preparar propuesta comercial');
   const second = task('00000000-0000-7000-8000-000000000705', 'Actualizar métricas');
+  const third = task('00000000-0000-7000-8000-000000000706', 'Llamar a nuevos clientes');
   const result = await mockSupabaseSession(page, {
-    areas: [area], goals: [goal], subgoals: [subgoal], tasks: [first, second],
+    areas: [area], goals: [goal], subgoals: [subgoal], tasks: [first, second, third],
     contributionRelations: [],
   });
   await page.goto('/');
@@ -1576,7 +1577,7 @@ test('Tasks link to goals and subgoals, filter by objective, and restore removed
   await expect(page.getByText('Objetivo vinculado a la tarea.')).toBeVisible();
   expect(result.insertedContributionRelations).toHaveLength(1);
   expect(result.insertedContributionRelations[0]).toMatchObject({
-    task_id: first.id, goal_id: goal.id, subgoal_id: undefined,
+    task_id: first.id, goal_id: goal.id,
     relation_status: 'confirmed', created_by_user_id: profile.id,
   });
   await expect(page.getByText('Meta: Aumentar ventas')).toBeVisible();
@@ -1587,11 +1588,21 @@ test('Tasks link to goals and subgoals, filter by objective, and restore removed
   expect(result.insertedContributionRelations).toHaveLength(2);
   await expect(page.getByText('Submeta: Contactar nuevos clientes · Aumentar ventas')).toBeVisible();
 
+  // A task linked only to the subgoal must also contribute to the parent goal.
+  await page.getByRole('button', { name: 'Gestionar objetivos: Llamar a nuevos clientes' }).click();
+  const thirdDialog = page.getByRole('dialog', { name: 'Objetivos de la tarea' });
+  await thirdDialog.getByLabel('Seleccionar meta o submeta').selectOption('subgoal:' + subgoal.id);
+  await thirdDialog.getByRole('button', { name: 'Vincular meta o submeta' }).click();
+  await expect(page.getByText('Objetivo vinculado a la tarea.')).toBeVisible();
+  expect(result.insertedContributionRelations).toHaveLength(3);
+
   await objectiveFilter.selectOption('goal:' + goal.id);
   await expect(page.getByText('Preparar propuesta comercial', { exact: true })).toBeVisible();
+  await expect(page.getByText('Llamar a nuevos clientes', { exact: true })).toBeVisible();
   await expect(page.getByText('Actualizar métricas', { exact: true })).toHaveCount(0);
   await objectiveFilter.selectOption('subgoal:' + subgoal.id);
   await expect(page.getByText('Preparar propuesta comercial', { exact: true })).toBeVisible();
+  await expect(page.getByText('Llamar a nuevos clientes', { exact: true })).toBeVisible();
   await expect(page.getByText('Actualizar métricas', { exact: true })).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Gestionar objetivos: Preparar propuesta comercial' }).click();
@@ -1601,7 +1612,9 @@ test('Tasks link to goals and subgoals, filter by objective, and restore removed
   expect(goalRelation.relation_status).toBe('removed');
 
   await objectiveFilter.selectOption('goal:' + goal.id);
-  await expect(page.getByText('Preparar propuesta comercial', { exact: true })).toHaveCount(0);
+  // The parent-goal filter still includes tasks linked to its subgoal.
+  await expect(page.getByText('Preparar propuesta comercial', { exact: true })).toBeVisible();
+  await expect(page.getByText('Llamar a nuevos clientes', { exact: true })).toBeVisible();
   await objectiveFilter.selectOption('all');
   await page.getByRole('button', { name: 'Gestionar objetivos: Preparar propuesta comercial' }).click();
   await dialog.getByLabel('Seleccionar meta o submeta').selectOption('goal:' + goal.id);
@@ -1619,10 +1632,12 @@ test('Tasks link to goals and subgoals, filter by objective, and restore removed
   await page.locator('.side-nav').getByRole('button', { name: /Objetivos/ }).click();
   await page.getByRole('button', { name: 'Metas', exact: true }).click();
   const goalCard = page.locator('.goal-record-card').filter({ has: page.getByRole('heading', { name: goal.title }) });
-  await expect(goalCard.getByText('Tareas que contribuyen · 1')).toBeVisible();
+  await expect(goalCard.getByText('Tareas que contribuyen · 2')).toBeVisible();
   await expect(goalCard.getByText('Preparar propuesta comercial')).toBeVisible();
+  await expect(goalCard.getByText('Llamar a nuevos clientes')).toBeVisible();
   await page.getByRole('button', { name: 'Submetas', exact: true }).click();
   const subgoalCard = page.locator('.subgoal-record-card').filter({ has: page.getByRole('heading', { name: subgoal.title }) });
-  await expect(subgoalCard.getByText('Tareas que contribuyen · 1')).toBeVisible();
+  await expect(subgoalCard.getByText('Tareas que contribuyen · 2')).toBeVisible();
   await expect(subgoalCard.getByText('Preparar propuesta comercial')).toBeVisible();
+  await expect(subgoalCard.getByText('Llamar a nuevos clientes')).toBeVisible();
 });
