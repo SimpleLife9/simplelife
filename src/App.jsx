@@ -758,6 +758,7 @@ function GoalsPage({ profile, refreshKey, runAction, busy }) {
   const { rows: areas, loading, localError } = useRows('life_area', profile, refreshKey, (query) => query.is('deleted_at', null).order('position').order('created_at'));
   const { rows: goals } = useRows('goal', profile, refreshKey, (query) => query.is('deleted_at', null).order('created_at', { ascending: false }));
   const { rows: subgoals } = useRows('subgoal', profile, refreshKey, (query) => query.is('deleted_at', null).order('created_at'));
+  const { rows: tasks } = useRows('task', profile, refreshKey, (query) => query.is('deleted_at', null).order('created_at', { ascending: false }));
   const { rows: projects } = useRows('project', profile, refreshKey, (query) => query.is('deleted_at', null));
   const { rows: contributionRelations } = useRows('contribution_relation', profile, refreshKey);
   const [activeView, setActiveView] = useState('areas');
@@ -934,6 +935,7 @@ function GoalsPage({ profile, refreshKey, runAction, busy }) {
             const area = areas.find((item) => item.id === goal.life_area_id);
             const goalSubgoals = subgoals.filter((subgoal) => subgoal.goal_id === goal.id);
             const goalProjects = contributionRelations.filter((relation) => relation.goal_id === goal.id && relation.project_id && relation.relation_status === 'confirmed').map((relation) => projects.find((project) => project.id === relation.project_id)).filter(Boolean);
+            const goalTaskRows = tasks.filter((task) => contributionRelations.some((relation) => relation.task_id === task.id && relation.relation_status === 'confirmed' && (relation.goal_id === goal.id || goalSubgoals.some((subgoal) => relation.subgoal_id === subgoal.id))));
             return <article className="goal-record-card" key={goal.id}>
               <div className="goal-record-heading"><div><span className="record-eyebrow">META {goalIndex + 1}</span><h3>{goal.title}</h3><p>Área: {area?.title || 'Área no disponible'}</p></div><button type="button" className="task-edit-button" onClick={() => openGoalEditor(goal)} aria-label={'Editar meta: ' + goal.title}>Editar meta</button></div>
               <div className="goal-record-details">
@@ -942,6 +944,7 @@ function GoalsPage({ profile, refreshKey, runAction, busy }) {
                 <div><span>Fecha objetivo</span><p>{goal.target_date ? formatDate(goal.target_date) : 'Sin fecha'}</p></div>
               </div>
               <div className="goal-related-projects"><span>Proyectos vinculados</span>{goalProjects.length ? <div>{goalProjects.map((project) => <span className="goal-related-project-tag" key={project.id}>{project.name}</span>)}</div> : <small>Sin proyectos vinculados</small>}</div>
+              <div className="goal-related-tasks"><span>Tareas que contribuyen · {goalTaskRows.length}</span>{goalTaskRows.length ? <div>{goalTaskRows.slice(0, 4).map((task) => <span className="goal-related-task-tag" key={task.id}><strong>{task.action}</strong><small>{task.archived_at ? 'Archivada' : task.status === 'completed' ? 'Completada' : task.status === 'in_progress' ? 'En curso' : task.status === 'blocked' ? 'Bloqueada' : 'Pendiente'}</small></span>)}{goalTaskRows.length > 4 && <small>+{goalTaskRows.length - 4} tareas más</small>}</div> : <small>Sin tareas vinculadas</small>}</div>
               <div className="goal-record-footer">
                 <label className="record-status-field"><span>Estado de la meta</span><select aria-label={'Estado de meta: ' + goal.title} value={goal.status || 'active'} disabled={busy} onChange={(event) => setGoalStatus(goal, event.target.value)}><option value="draft">Borrador</option><option value="active">Activa</option><option value="paused">En pausa</option><option value="completed">Completada</option><option value="cancelled">Cancelada</option></select></label>
                 <button type="button" className="text-button" onClick={() => { setSubgoalGoalFilter(goal.id); setActiveView('subgoals'); }}>Ver {goalSubgoals.length} submetas →</button>
@@ -956,6 +959,7 @@ function GoalsPage({ profile, refreshKey, runAction, busy }) {
             {visibleSubgoals.length ? <div className="subgoal-catalog-grid">{visibleSubgoals.map((subgoal, subgoalIndex) => {
               const parentGoal = goals.find((goal) => goal.id === subgoal.goal_id);
               const subgoalProjects = contributionRelations.filter((relation) => relation.subgoal_id === subgoal.id && relation.project_id && relation.relation_status === 'confirmed').map((relation) => projects.find((project) => project.id === relation.project_id)).filter(Boolean);
+              const subgoalTaskRows = tasks.filter((task) => contributionRelations.some((relation) => relation.task_id === task.id && relation.subgoal_id === subgoal.id && relation.relation_status === 'confirmed'));
               return <article className="subgoal-record-card" key={subgoal.id}>
                 <div className="goal-record-heading"><div><span className="record-eyebrow">SUBMETA {subgoalIndex + 1}</span><h3>{subgoal.title}</h3><p>Meta: {parentGoal?.title || 'Meta no disponible'}</p></div><button type="button" className="task-edit-button" onClick={() => openSubgoalEditor(subgoal)} aria-label={'Editar submeta: ' + subgoal.title}>Editar submeta</button></div>
                 <div className="goal-record-details">
@@ -963,6 +967,7 @@ function GoalsPage({ profile, refreshKey, runAction, busy }) {
                   <div><span>Fecha objetivo</span><p>{subgoal.target_date ? formatDate(subgoal.target_date) : 'Sin fecha'}</p></div>
                 </div>
                 <div className="goal-related-projects"><span>Proyectos vinculados</span>{subgoalProjects.length ? <div>{subgoalProjects.map((project) => <span className="goal-related-project-tag" key={project.id}>{project.name}</span>)}</div> : <small>Sin proyectos vinculados</small>}</div>
+                <div className="goal-related-tasks"><span>Tareas que contribuyen · {subgoalTaskRows.length}</span>{subgoalTaskRows.length ? <div>{subgoalTaskRows.slice(0, 4).map((task) => <span className="goal-related-task-tag" key={task.id}><strong>{task.action}</strong><small>{task.archived_at ? 'Archivada' : task.status === 'completed' ? 'Completada' : task.status === 'in_progress' ? 'En curso' : task.status === 'blocked' ? 'Bloqueada' : 'Pendiente'}</small></span>)}{subgoalTaskRows.length > 4 && <small>+{subgoalTaskRows.length - 4} tareas más</small>}</div> : <small>Sin tareas vinculadas</small>}</div>
                 <div className="goal-record-footer"><label className="record-status-field"><span>Estado de la submeta</span><select aria-label={'Estado de submeta: ' + subgoal.title} value={subgoal.status || 'active'} disabled={busy} onChange={(event) => setSubgoalStatus(subgoal, event.target.value)}><option value="draft">Borrador</option><option value="active">Activa</option><option value="paused">En pausa</option><option value="completed">Completada</option><option value="cancelled">Cancelada</option></select></label></div>
               </article>;
             })}</div> : <EmptyState title="Esta meta todavía no tiene submetas" detail="Pulsa Nueva Submeta para desglosarla en acciones concretas." />}
@@ -1367,6 +1372,9 @@ function ProjectsPage({ profile, refreshKey, runAction, busy, setActivePage, set
 function TasksPage({ profile, refreshKey, runAction, busy }) {
   const { rows: tasks, loading, localError } = useRows('task', profile, refreshKey, (query) => query.is('deleted_at', null).order('priority', { ascending: true }).order('created_at', { ascending: false }));
   const { rows: projects } = useRows('project', profile, refreshKey, (query) => query.is('deleted_at', null).order('name'));
+  const { rows: goals } = useRows('goal', profile, refreshKey, (query) => query.is('deleted_at', null).order('created_at', { ascending: false }));
+  const { rows: subgoals } = useRows('subgoal', profile, refreshKey, (query) => query.is('deleted_at', null).order('created_at'));
+  const { rows: contributionRelations } = useRows('contribution_relation', profile, refreshKey);
   const [action, setAction] = useState('');
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState('3');
@@ -1388,8 +1396,30 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
   const [selectedTaskIds, setSelectedTaskIds] = useState([]);
   const [bulkDueDate, setBulkDueDate] = useState('');
   const [showNewTask, setShowNewTask] = useState(false);
+  const [objectiveFilter, setObjectiveFilter] = useState('all');
+  const [relationTask, setRelationTask] = useState(null);
+  const [relationTarget, setRelationTarget] = useState('');
   const today = todayInHavana();
   const nextWeek = addDaysToDateKey(today, 7);
+  const activeObjectiveGoals = goals.filter((goal) => !goal.archived_at);
+  const activeObjectiveSubgoals = subgoals.filter((subgoal) => !subgoal.archived_at && goals.some((goal) => goal.id === subgoal.goal_id && !goal.archived_at));
+  const getTaskObjectiveLabel = (relation) => {
+    const goal = relation.goal_id ? goals.find((row) => row.id === relation.goal_id) : null;
+    if (goal) return `Meta: ${goal.title}`;
+    const subgoal = relation.subgoal_id ? subgoals.find((row) => row.id === relation.subgoal_id) : null;
+    if (!subgoal) return 'Objetivo no disponible';
+    const parentGoal = goals.find((row) => row.id === subgoal.goal_id);
+    return parentGoal ? `Submeta: ${subgoal.title} · ${parentGoal.title}` : `Submeta: ${subgoal.title}`;
+  };
+  const relationTaskRows = relationTask ? contributionRelations.filter((relation) => relation.task_id === relationTask.id && relation.relation_status === 'confirmed') : [];
+  const relationTargetParts = relationTarget ? relationTarget.split(':') : [];
+  const relationTargetKind = relationTargetParts[0] || '';
+  const relationTargetId = relationTargetParts[1] || '';
+  const relationTargetField = relationTargetKind === 'goal' ? 'goal_id' : 'subgoal_id';
+  const relationExisting = relationTask && relationTargetId
+    ? contributionRelations.find((relation) => relation.task_id === relationTask.id && relation[relationTargetField] === relationTargetId && !relation[relationTargetKind === 'goal' ? 'subgoal_id' : 'goal_id'])
+    : null;
+  const relationTargetIsLinked = Boolean(relationExisting?.relation_status === 'confirmed');
   const closeNewTask = () => {
     if (busy) return;
     setShowNewTask(false);
@@ -1405,6 +1435,13 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
       const archiveMatches = archiveFilter === 'all'
         || (archiveFilter === 'active' && !task.archived_at)
         || (archiveFilter === 'archived' && Boolean(task.archived_at));
+      const taskObjectives = contributionRelations.filter((relation) => relation.task_id === task.id && relation.relation_status === 'confirmed');
+      let objectiveMatches = objectiveFilter === 'all';
+      if (objectiveFilter === 'none') objectiveMatches = taskObjectives.length === 0;
+      else if (!objectiveMatches && objectiveFilter.includes(':')) {
+        const [kind, targetId] = objectiveFilter.split(':');
+        objectiveMatches = taskObjectives.some((relation) => kind === 'goal' ? relation.goal_id === targetId : relation.subgoal_id === targetId);
+      }
       const priorityMatches = priorityFilter === 'all' || String(task.priority) === priorityFilter;
       const dateMatches = dateFilter === 'all'
         || (dateFilter === 'overdue' && isOpenTask(task) && Boolean(task.due_date) && task.due_date < today)
@@ -1412,7 +1449,7 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
         || (dateFilter === 'next7' && task.due_date > today && task.due_date <= nextWeek)
         || (dateFilter === 'no-date' && !task.due_date);
       const searchMatches = !term || `${task.action || ''} ${task.description || ''}`.toLocaleLowerCase('es').includes(term);
-      return statusMatches && archiveMatches && priorityMatches && dateMatches && searchMatches;
+      return statusMatches && archiveMatches && objectiveMatches && priorityMatches && dateMatches && searchMatches;
     });
 
     const compareDueDate = (a, b) => {
@@ -1427,7 +1464,7 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
       return (a.priority ?? 3) - (b.priority ?? 3) || compareDueDate(a, b) || String(b.created_at || '').localeCompare(String(a.created_at || ''));
     });
     return filtered;
-  }, [tasks, taskSearch, statusFilter, archiveFilter, priorityFilter, dateFilter, taskSort, today, nextWeek]);
+  }, [tasks, contributionRelations, taskSearch, statusFilter, archiveFilter, objectiveFilter, priorityFilter, dateFilter, taskSort, today, nextWeek]);
 
   const openEditor = (task) => {
     setEditingTask(task);
@@ -1541,6 +1578,58 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
     if (!data?.length) throw new Error('No se pudo restaurar la tarea. Actualiza la lista antes de reintentar.');
   }, 'Tarea restaurada.');
 
+  const openTaskRelations = (task) => { setRelationTask(task); setRelationTarget(''); };
+  const closeTaskRelations = () => {
+    if (busy) return;
+    setRelationTask(null);
+    setRelationTarget('');
+  };
+
+  const saveTaskRelation = async (event) => {
+    event.preventDefault();
+    if (!relationTask || relationTask.archived_at || !relationTargetId || !['goal', 'subgoal'].includes(relationTargetKind)) return;
+    const selectedGoal = relationTargetKind === 'goal'
+      ? goals.find((goal) => goal.id === relationTargetId)
+      : goals.find((goal) => goal.id === subgoals.find((subgoal) => subgoal.id === relationTargetId)?.goal_id);
+    const selectedSubgoal = relationTargetKind === 'subgoal' ? subgoals.find((subgoal) => subgoal.id === relationTargetId) : null;
+    if (!selectedGoal || selectedGoal.archived_at || (relationTargetKind === 'subgoal' && (!selectedSubgoal || selectedSubgoal.archived_at))) return;
+    const saved = await runAction(async () => {
+      if (relationExisting) {
+        if (relationExisting.relation_status === 'confirmed') throw new Error('Este objetivo ya está vinculado a esta tarea.');
+        const { data, error } = await supabase.from('contribution_relation')
+          .update({ relation_status: 'confirmed' })
+          .eq('id', relationExisting.id)
+          .eq('task_id', relationTask.id)
+          .select('id');
+        if (error) throw error;
+        if (!data?.length) throw new Error('No se pudo restaurar el vínculo. Actualiza la vista e inténtalo de nuevo.');
+      } else {
+        const payload = {
+          id: uuidv7(),
+          task_id: relationTask.id,
+          [relationTargetField]: relationTargetId,
+          relation_status: 'confirmed',
+          created_by_user_id: profile.id,
+        };
+        const { data, error } = await supabase.from('contribution_relation').insert(payload).select('id');
+        if (error) throw error;
+        if (!data?.length) throw new Error('No se pudo crear el vínculo entre la tarea y el objetivo.');
+      }
+    }, relationExisting ? 'Vínculo restaurado.' : 'Objetivo vinculado a la tarea.');
+    if (saved) setRelationTarget('');
+  };
+
+  const removeTaskRelation = (relation) => runAction(async () => {
+    const { data, error } = await supabase.from('contribution_relation')
+      .update({ relation_status: 'removed' })
+      .eq('id', relation.id)
+      .eq('task_id', relationTask.id)
+      .eq('relation_status', 'confirmed')
+      .select('id');
+    if (error) throw error;
+    if (!data?.length) throw new Error('No se pudo desvincular el objetivo. Actualiza la vista e inténtalo de nuevo.');
+  }, relation.goal_id ? 'Meta desvinculada de la tarea.' : 'Submeta desvinculada de la tarea.');
+
   const selectableTasks = visibleTasks.filter((task) => isOpenTask(task) && !task.archived_at);
   const selectedVisibleTasks = selectableTasks.filter((task) => selectedTaskIds.includes(task.id));
   const allVisibleSelected = selectableTasks.length > 0 && selectedVisibleTasks.length === selectableTasks.length;
@@ -1651,6 +1740,18 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
             </select>
           </label>
           <label className="task-toolbar-field">
+            <span>Meta o submeta</span>
+            <select aria-label="Filtrar por meta o submeta" value={objectiveFilter} onChange={(event) => { setObjectiveFilter(event.target.value); clearSelection(); }}>
+              <option value="all">Todos los objetivos</option>
+              <option value="none">Sin objetivo</option>
+              <optgroup label="Metas">{goals.map((goal) => <option key={goal.id} value={'goal:' + goal.id}>{goal.title}{goal.archived_at ? ' · Archivada' : ''}</option>)}</optgroup>
+              <optgroup label="Submetas">{subgoals.map((subgoal) => {
+                const parentGoal = goals.find((goal) => goal.id === subgoal.goal_id);
+                return <option key={subgoal.id} value={'subgoal:' + subgoal.id}>{subgoal.title} · {parentGoal?.title || 'Meta'}{subgoal.archived_at || parentGoal?.archived_at ? ' · Archivada' : ''}</option>;
+              })}</optgroup>
+            </select>
+          </label>
+          <label className="task-toolbar-field">
             <span>Ordenar</span>
             <select aria-label="Ordenar tareas" value={taskSort} onChange={(event) => { setTaskSort(event.target.value); clearSelection(); }}>
               <option value="priority">Por prioridad</option>
@@ -1676,7 +1777,9 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
         </div>}
         {loading ? <p className="muted">Cargando…</p> : localError ? <div className="form-error">{localError}</div> : tasks.length ? visibleTasks.length ? (
           <div className="task-list">
-            {visibleTasks.map((task) => (
+            {visibleTasks.map((task) => {
+              const taskObjectives = contributionRelations.filter((relation) => relation.task_id === task.id && relation.relation_status === 'confirmed');
+              return (
               <div className={`task-row ${task.status === 'completed' ? 'task-done' : ''} ${task.archived_at ? 'task-row-archived' : ''}`} key={task.id}>
                 {isOpenTask(task) && !task.archived_at
                   ? <input className="task-select-checkbox" type="checkbox" aria-label={`Seleccionar tarea: ${task.action}`} checked={selectedTaskIds.includes(task.id)} onChange={(event) => toggleTaskSelection(task.id, event.target.checked)} disabled={busy} />
@@ -1687,6 +1790,10 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
                 <div className="task-row-copy">
                   <strong>{task.action}</strong>
                   <small>{task.due_date ? `Fecha: ${formatDate(task.due_date)}` : 'Sin fecha'} · Prioridad {task.priority}{task.estimated_duration_minutes ? ` · ${formatDuration(task.estimated_duration_minutes)}` : ''}</small>
+                  <div className="task-objective-line">
+                    <span>{taskObjectives.length ? taskObjectives.map(getTaskObjectiveLabel).join(' · ') : 'Sin meta o submeta vinculada'}</span>
+                    <button type="button" onClick={() => openTaskRelations(task)} disabled={busy || Boolean(task.archived_at)} aria-label={`Gestionar objetivos: ${task.action}`}>{taskObjectives.length ? 'Gestionar' : 'Vincular objetivo'}</button>
+                  </div>
                 </div>
                 {!task.archived_at && isOpenTask(task) ? (
                   <select
@@ -1722,7 +1829,8 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
                   ? <button type="button" className="task-edit-button task-archive-button" onClick={() => restoreTask(task)} disabled={busy} aria-label={`Restaurar tarea: ${task.action}`}>Restaurar</button>
                   : <button type="button" className="task-edit-button task-archive-button" onClick={() => archiveTask(task)} disabled={busy} aria-label={`Archivar tarea: ${task.action}`}>Archivar</button>}
               </div>
-            ))}
+              );
+            })}
           </div>
         ) : <EmptyState title="No hay coincidencias" detail="Cambia la búsqueda o los filtros para ver otras tareas." icon="⌕" /> : <EmptyState title="No hay tareas todavía" detail="Añade una acción pequeña para empezar a moverte." />}
       </div>
@@ -1781,6 +1889,41 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
               <button type="submit" className="button button-primary" disabled={busy || !editAction.trim()}>{busy ? 'Guardando…' : 'Guardar cambios'} <span>→</span></button>
             </div>
           </form>
+        </section>
+      </div>
+    )}
+    {relationTask && (
+      <div className="task-editor-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) closeTaskRelations(); }} onKeyDown={(event) => { if (event.key === 'Escape' && !busy) closeTaskRelations(); }}>
+        <section className="task-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="task-objective-title">
+          <div className="task-editor-heading">
+            <div><div className="eyebrow">CONECTA ACCIONES CON RESULTADOS</div><h2 id="task-objective-title">Objetivos de la tarea</h2></div>
+            <button type="button" className="task-editor-close" onClick={closeTaskRelations} disabled={busy} aria-label="Cerrar objetivos de la tarea">×</button>
+          </div>
+          <div className="task-objective-selected"><strong>{relationTask.action}</strong><small>Esta tarea puede contribuir a una o varias metas o submetas.</small></div>
+          <div className="task-objective-current">
+            <span>Objetivos vinculados</span>
+            {relationTaskRows.length ? relationTaskRows.map((relation) => {
+              const label = getTaskObjectiveLabel(relation);
+              return <div className="project-relation-row" key={relation.id}>
+                <div><span>{relation.goal_id ? 'Meta' : 'Submeta'}</span><strong>{label.replace(/^Meta: |^Submeta: /, '')}</strong></div>
+                <button type="button" className="text-button" disabled={busy} onClick={() => removeTaskRelation(relation)} aria-label={`Desvincular ${relation.goal_id ? 'meta' : 'submeta'}: ${label.replace(/^Meta: |^Submeta: /, '')}`}>Desvincular</button>
+              </div>;
+            }) : <p className="muted">Esta tarea todavía no contribuye a ninguna meta o submeta.</p>}
+          </div>
+          <form className="project-relation-form" onSubmit={saveTaskRelation}>
+            <label className="field"><span>Meta o submeta</span><select aria-label="Seleccionar meta o submeta" required value={relationTarget} onChange={(event) => setRelationTarget(event.target.value)} disabled={busy}>
+              <option value="">Selecciona un objetivo</option>
+              <optgroup label="Metas">{activeObjectiveGoals.map((goal) => <option key={goal.id} value={'goal:' + goal.id}>{goal.title}</option>)}</optgroup>
+              <optgroup label="Submetas">{activeObjectiveSubgoals.map((subgoal) => {
+                const parentGoal = goals.find((goal) => goal.id === subgoal.goal_id);
+                return <option key={subgoal.id} value={'subgoal:' + subgoal.id}>{subgoal.title} — {parentGoal?.title || 'Meta'}</option>;
+              })}</optgroup>
+            </select></label>
+            {relationTargetIsLinked && <p className="task-editor-note">Este objetivo ya está vinculado a esta tarea.</p>}
+            {relationExisting && relationExisting.relation_status !== 'confirmed' && <p className="task-editor-note">Este vínculo existe en el historial y se restaurará sin crear otro registro.</p>}
+            <button type="submit" className="button button-primary" disabled={busy || !relationTarget || relationTargetIsLinked}>Vincular meta o submeta <span>→</span></button>
+          </form>
+          <div className="task-editor-actions"><button type="button" className="button task-editor-cancel" onClick={closeTaskRelations} disabled={busy}>Cerrar</button></div>
         </section>
       </div>
     )}
