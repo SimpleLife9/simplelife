@@ -208,3 +208,11 @@
 .capture-organizer-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;padding-top:12px;border-top:1px solid #edf1ec}
 .capture-organizer-actions .button{min-height:40px}
 @media(max-width:600px){.capture-organizer-dialog{padding:18px}.capture-organizer-two-col{grid-template-columns:minmax(0,1fr)}.capture-organizer-actions{align-items:stretch;flex-direction:column-reverse}.capture-organizer-actions>*{width:100%}}
+
+
+/* Subnavegación visible para los módulos de Más en escritorio y móvil */
+.more-page-tabs{display:flex;align-items:center;gap:5px;width:max-content;max-width:100%;margin:-13px 0 25px;padding:5px;border:1px solid #e4ebe3;border-radius:12px;background:#eef3ed;flex-wrap:wrap}
+.more-page-tabs button{border:0;border-radius:8px;background:transparent;padding:10px 15px;color:#718178;font-size:.78rem;font-weight:600;white-space:nowrap}
+.more-page-tabs button:hover{color:var(--green);background:rgba(255,255,255,.65)}
+.more-page-tabs button.selected{background:#fff;color:var(--green);font-weight:700;box-shadow:0 2px 8px rgba(26,52,42,.07)}
+@media(max-width:600px){.more-page-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));width:100%;gap:4px;margin:-7px 0 22px}.more-page-tabs button{padding:10px 5px;font-size:.72rem}}
