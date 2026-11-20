@@ -336,7 +336,7 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 - El detalle de cada proyecto muestra sus tareas y distingue si la asociación es principal o adicional.
 - Auditoría de solo lectura de `public.task_project_link`: la tabla ya existía, con RLS, unicidad por pareja tarea/proyecto e índice para un único principal. `authenticated` tiene SELECT/INSERT y UPDATE únicamente sobre `relation_role`; no tiene DELETE. La interfaz no ofrece desvincular ni borrar relaciones porque el permiso no existe. Los vínculos se conservan.
 - Sin cambios de esquema, migraciones, RLS, grants, permisos o secretos. E2E usa mocks de Auth/PostgREST; no se escribieron datos de QA en Supabase real.
-- Validación manual de Robert en localhost: PENDIENTE.
+- Validación manual de Robert en localhost: PASS (20/11/2026). Confirmó que probó todo el flujo y funciona correctamente.
 - Sin despliegue público ni preview.
 
 ### Sesión de validación manual — Lote 12
@@ -347,3 +347,20 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 4. Pulsa «Hacer principal» en el segundo proyecto y confirma que el anterior pasa a adicional y ninguno desaparece.
 5. Filtra tareas por cada proyecto y por «Sin proyecto».
 6. Abre Proyectos y entra en ambos detalles; confirma que la misma tarea aparece en ambos y que el rol principal/adicional coincide.
+
+
+## Lote 13 — Hoy como panel de ejecución (20/11/2026)
+
+- PR #17 integrado: https://github.com/SimpleLife9/simplelife/pull/17.
+- SHA squash en main: `d7063a0e11db297eecf9418a5ae4a15209611d38`.
+- SHA de la rama con CI aprobada: `8826c35b7a36a4e09078951dae5ccfe4a908c0f4`.
+- CI del PR #100: PASS — 6 pruebas unitarias, suite Playwright E2E y build de producción: https://github.com/SimpleLife9/simplelife/actions/runs/44823145193.
+- CI post-merge #101: PASS sobre el SHA exacto `d7063a0e11db297eecf9418a5ae4a15209611d38` — pruebas unitarias, Playwright E2E y build de producción: https://github.com/SimpleLife9/simplelife/actions/runs/44823379545.
+- Hoy incorpora avance de metas y proyectos a partir de tareas relacionadas realmente completadas, con vínculos directos a metas y a través de submetas. El porcentaje es tareas vinculadas completadas / tareas vinculadas contabilizables, con IDs deduplicados.
+- Las tareas eliminadas/canceladas y las abiertas archivadas no cuentan; las completadas archivadas conservan su aporte histórico.
+- Nuevo pulso semanal basado en los últimos siete días del calendario `America/Havana`, panel de tareas bloqueadas y metas/proyectos atrasados o con vencimiento dentro de siete días.
+- Accesos rápidos a Objetivos, Proyectos y Tareas, con diseño responsive. Playwright verifica el nuevo panel a 390 px sin desbordamiento horizontal.
+- Pruebas adicionales: 3 escenarios unitarios de cálculos y un E2E del panel completo.
+- Solo consultas de lectura a tablas existentes con RLS. Sin tablas, columnas, migraciones, políticas RLS, grants, permisos, secretos ni escrituras reales de QA.
+- Sin despliegue público ni preview.
+- Validación manual de Robert en localhost para el nuevo panel: PENDIENTE.
