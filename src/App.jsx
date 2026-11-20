@@ -539,8 +539,8 @@ function GoalsPage({ profile, refreshKey, runAction, busy }) {
         const { error } = await supabase.from('life_area').insert({ id: uuidv7(), owner_user_id: profile.id, created_by_user_id: profile.id, title, description: payload.description });
         if (error) throw error;
       }
-      closeAreaModal();
     }, editingArea ? 'Área actualizada.' : 'Área creada.');
+    closeAreaModal();
   };
 
   const setAreaStatus = (area) => runAction(async () => {
@@ -563,8 +563,8 @@ function GoalsPage({ profile, refreshKey, runAction, busy }) {
         const { error } = await supabase.from('goal').insert({ id: uuidv7(), owner_user_id: profile.id, created_by_user_id: profile.id, ...payload, status: 'active' });
         if (error) throw error;
       }
-      closeGoalModal();
     }, editingGoal ? 'Meta actualizada.' : 'Meta creada.');
+    closeGoalModal();
   };
 
   const setGoalStatus = (goal, status) => runAction(async () => {
