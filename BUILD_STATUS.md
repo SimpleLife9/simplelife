@@ -162,3 +162,18 @@ No `service_role` key or database password is present in the frontend. `.env.exa
 - No se añadieron columnas/tablas ni migraciones. Sin cambios de RLS/grants/políticas, sin DELETE físico y sin modificaciones de datos reales durante las pruebas (E2E usa mocks).
 - Validación manual en la cuenta local autenticada: PENDIENTE.
 - No se creó despliegue público ni preview.
+
+
+## Corrección de navegación y orden de áreas — PR #8 (20/11/2026)
+
+- PR integrado: https://github.com/SimpleLife9/simplelife/pull/8.
+- Merge SHA en main: `ea9e73671d7a3cef70e2d94a3ae01a093f321463`.
+- CI del PR, ejecución #48: PASS — 3/3 pruebas unitarias, Playwright E2E y build de producción: https://github.com/SimpleLife9/simplelife/actions/runs/44672546138.
+- CI post-merge, ejecución #49: PASS — 3/3 pruebas unitarias, Playwright E2E y build de producción: https://github.com/SimpleLife9/simplelife/actions/runs/44672685469.
+- Objetivos ahora tiene tres apartados separados y visibles: Áreas, Metas y Submetas. Las metas ya no se presentan como controles pequeños dentro de las tarjetas de áreas.
+- Metas: catálogo con área asociada, resultado esperado, motivo, fecha objetivo, estado y acción explícita Editar meta.
+- Submetas: catálogo independiente con meta padre, resultado esperado, fecha, estado y acción Editar submeta; filtro por todas las metas o por una meta; formulario Nueva Submeta con selección de meta.
+- Áreas: tarjetas independientes con conteo de metas, acceso a Metas, edición, pausa/reactivación y orden visible. Mover arriba/abajo normaliza y persiste las posiciones de todas las áreas, también cuando las posiciones anteriores eran NULL.
+- Playwright cubre navegación entre las tres vistas, creación/edición de metas y submetas, estados, nuevas submetas y reordenamiento con posiciones NULL.
+- Sin cambios de esquema, migraciones, RLS, grants, secretos ni escrituras de prueba en datos reales de Supabase. Sin despliegue público.
+- Validación manual de Robert en localhost con su cuenta: PENDIENTE.
