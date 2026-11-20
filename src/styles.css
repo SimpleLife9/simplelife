@@ -277,3 +277,25 @@
 .task-archived-tag{flex:0 0 auto;border:1px solid #e5e9e3;border-radius:7px;background:#f2f4f1;color:#758177;padding:5px 7px;font-size:.59rem;font-weight:700}
 .task-estimate-help{margin:-4px 0 5px;color:#849188;font-size:.68rem;line-height:1.45}
 @media(max-width:600px){.task-status-select{min-width:95px;max-width:105px;font-size:.6rem}.task-archived-tag{font-size:.56rem}}
+
+
+/* Lote 11 — vínculos de tareas con metas y submetas */
+.task-objective-line{display:flex;align-items:center;gap:9px;min-width:0;margin-top:5px}
+.task-objective-line>span{min-width:0;color:#789080;font-size:.62rem;line-height:1.35;overflow-wrap:anywhere}
+.task-objective-line button{flex:0 0 auto;border:0;background:transparent;color:#386a50;padding:0;font-size:.62rem;font-weight:750}
+.task-objective-line button:hover{text-decoration:underline}
+.task-objective-selected{display:grid;gap:4px;padding:12px 13px;border:1px solid #e7eee5;border-radius:10px;background:#f8faf7}
+.task-objective-selected strong{color:#3b5547;font-size:.82rem}
+.task-objective-selected small{color:#8c9a90;font-size:.66rem;line-height:1.4}
+.task-objective-current{display:grid;gap:8px;margin:15px 0}
+.task-objective-current>span{color:#819087;font-size:.67rem;font-weight:750}
+.task-objective-current .muted{margin:0;font-size:.72rem}
+.task-objective-current .project-relation-row{margin:0}
+.goal-related-tasks{display:grid;gap:7px;margin:0 0 14px;padding:11px 12px;border:1px solid #e8eee7;border-radius:10px;background:#fbfcfa}
+.goal-related-tasks>span{color:#819087;font-size:.63rem;font-weight:750}
+.goal-related-tasks>div{display:flex;gap:6px;flex-wrap:wrap}
+.goal-related-tasks>div>small{align-self:center;color:#9aa69e;font-size:.62rem}
+.goal-related-task-tag{display:inline-grid;gap:3px;max-width:100%;padding:6px 9px;border:1px solid #e1eae0;border-radius:9px;background:#f4f8f2}
+.goal-related-task-tag strong{color:#486352;font-size:.64rem;font-weight:700;overflow-wrap:anywhere}
+.goal-related-task-tag small{color:#8b9b8f;font-size:.58rem}
+@media(max-width:600px){.task-objective-line{align-items:flex-start;flex-direction:column;gap:3px}.task-objective-line button{font-size:.62rem}.task-objective-current .project-relation-row{align-items:flex-start}}
