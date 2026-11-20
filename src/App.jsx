@@ -640,10 +640,13 @@ function InboxPage({ profile, refreshKey, runAction, busy, setActivePage, setMor
               <small>{new Intl.DateTimeFormat('es', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Havana' }).format(new Date(capture.captured_at))}</small>
               <div className="capture-row-actions">
                 {confirmedLink
-                  ? <span className="capture-status capture-status-organized">Organizada · {label}</span>
+                  ? <span className="capture-status capture-status-organized">Organizada · {label}{capture.attention_status === 'archived' ? ' · Archivada' : ''}</span>
                   : <span className={'capture-status capture-status-' + capture.attention_status}>{attentionLabels[capture.attention_status] || 'Pendiente de revisión'}</span>}
                 {confirmedLink ? (
-                  <button type="button" className="capture-action-button" onClick={() => openOrganizedTarget(confirmedLink)}>Abrir {linkKind === 'task' ? 'tareas' : linkKind === 'note_idea' ? 'notas e ideas' : 'listas'} →</button>
+                  <>
+                    <button type="button" className="capture-action-button" onClick={() => openOrganizedTarget(confirmedLink)}>Abrir {linkKind === 'task' ? 'tareas' : linkKind === 'note_idea' ? 'notas e ideas' : 'listas'} →</button>
+                    <button type="button" className="capture-action-button capture-archive-button" disabled={busy} onClick={() => updateAttention(capture, capture.attention_status === 'archived' ? 'needs_review' : 'archived')} aria-label={capture.attention_status === 'archived' ? 'Restaurar captura: ' + capture.content_original : 'Archivar captura: ' + capture.content_original}>{capture.attention_status === 'archived' ? 'Restaurar' : 'Archivar'}</button>
+                  </>
                 ) : capture.attention_status !== 'archived' ? (
                   <>
                     <button type="button" className="capture-action-button" disabled={busy} onClick={() => openOrganizer(capture)} aria-label={'Organizar captura: ' + capture.content_original}>Organizar</button>
