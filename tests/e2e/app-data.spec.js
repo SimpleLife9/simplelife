@@ -48,6 +48,8 @@ async function mockSupabaseSession(page, initialData = {}) {
   const updatedSubgoals = [];
   const updatedProjects = [];
   const projectLinks = [...(initialData.links || [])];
+  const insertedProjectLinks = [];
+  const updatedProjectLinks = [];
   const contributionRelations = [...(initialData.contributionRelations || [])];
   const insertedContributionRelations = [];
   const updatedContributionRelations = [];
@@ -284,6 +286,32 @@ async function mockSupabaseSession(page, initialData = {}) {
       return;
     }
 
+    if (url.pathname === '/rest/v1/task_project_link' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const rows = Array.isArray(payload) ? payload : [payload];
+      const duplicate = rows.some((row) => projectLinks.some((existing) => existing.task_id === row.task_id && existing.project_id === row.project_id));
+      if (duplicate) { await json(409, { code: '23505', message: 'duplicate task/project link' }); return; }
+      projectLinks.unshift(...rows);
+      insertedProjectLinks.push(...rows);
+      await json(201, rows, { 'content-range': `0-${rows.length - 1}/*` });
+      return;
+    }
+
+    if (url.pathname === '/rest/v1/task_project_link' && method === 'PATCH') {
+      const payload = request.postDataJSON();
+      const idFilter = url.searchParams.get('id') || '';
+      const taskFilter = url.searchParams.get('task_id') || '';
+      const roleFilter = url.searchParams.get('relation_role') || '';
+      const link = projectLinks.find((row) => idFilter === 'eq.' + row.id
+        && (!taskFilter || taskFilter === 'eq.' + row.task_id)
+        && (!roleFilter || roleFilter === 'eq.' + row.relation_role));
+      if (!link) { await json(200, []); return; }
+      Object.assign(link, payload);
+      updatedProjectLinks.push({ id: link.id, ...payload });
+      await json(200, [{ id: link.id }], { 'content-range': '0-0/*' });
+      return;
+    }
+
     if (url.pathname === '/rest/v1/contribution_relation' && method === 'GET') {
       await json(200, contributionRelations);
       return;
@@ -496,7 +524,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     await json(404, { message: `Unexpected mocked Supabase request: ${method} ${url.pathname}` });
   });
 
-  return { insertedTasks, updatedTasks, taskRows, projects, insertedProjects, updatedProjects, projectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
+  return { insertedTasks, updatedTasks, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
 }
 
 test('mock-authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
@@ -1648,4 +1676,90 @@ test('Tasks link to goals and subgoals, filter by objective, and restore removed
   await expect(subgoalCard.getByText('Tareas que contribuyen · 2')).toBeVisible();
   await expect(subgoalCard.getByText('Preparar propuesta comercial')).toBeVisible();
   await expect(subgoalCard.getByText('Llamar a nuevos clientes')).toBeVisible();
+});
+
+
+test('Tasks can be linked to primary and additional projects and filtered by project', async ({ page }) => {
+  const projectA = {
+    id: '00000000-0000-7000-8000-000000000811', owner_user_id: profile.id, created_by_user_id: profile.id,
+    name: 'Proyecto principal', purpose: 'Iniciativa principal', status: 'active', archived_at: null, deleted_at: null,
+    created_at: '2026-11-19T12:00:00.000Z',
+  };
+  const projectB = {
+    id: '00000000-0000-7000-8000-000000000812', owner_user_id: profile.id, created_by_user_id: profile.id,
+    name: 'Proyecto relacionado', purpose: 'Iniciativa adicional', status: 'active', archived_at: null, deleted_at: null,
+    created_at: '2026-11-18T12:00:00.000Z',
+  };
+  const linkedTask = {
+    id: '00000000-0000-7000-8000-000000000813', owner_user_id: profile.id, created_by_user_id: profile.id,
+    action: 'Preparar propuesta', description: null, status: 'in_progress', priority: 2, due_date: '2026-11-25',
+    archived_at: null, deleted_at: null, created_at: '2026-11-19T10:00:00.000Z',
+  };
+  const unlinkedTask = {
+    id: '00000000-0000-7000-8000-000000000814', owner_user_id: profile.id, created_by_user_id: profile.id,
+    action: 'Ordenar escritorio', description: null, status: 'todo', priority: 3, due_date: null,
+    archived_at: null, deleted_at: null, created_at: '2026-11-19T09:00:00.000Z',
+  };
+  const primaryLink = {
+    id: '00000000-0000-7000-8000-000000000815', task_id: linkedTask.id, project_id: projectA.id,
+    relation_role: 'primary', created_by_user_id: profile.id,
+  };
+  const { projectLinks, insertedProjectLinks, updatedProjectLinks } = await mockSupabaseSession(page, {
+    projects: [projectA, projectB],
+    tasks: [linkedTask, unlinkedTask],
+    links: [primaryLink],
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Más' }).click();
+  await page.getByRole('button', { name: 'Tareas', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Tareas', exact: true })).toBeVisible();
+
+  const linkedRow = page.locator('.task-row').filter({ hasText: 'Preparar propuesta' });
+  await expect(linkedRow).toContainText('Proyecto principal (principal)');
+  await linkedRow.getByRole('button', { name: 'Gestionar proyectos: Preparar propuesta' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Proyectos de la tarea' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('.project-relation-row').filter({ hasText: 'Proyecto principal' })).toBeVisible();
+  await dialog.getByLabel('Seleccionar proyecto').selectOption(projectB.id);
+  await dialog.getByRole('button', { name: 'Vincular proyecto' }).click();
+  await expect(page.getByText('Proyecto adicional vinculado a la tarea.')).toBeVisible();
+  expect(insertedProjectLinks).toHaveLength(1);
+  expect(insertedProjectLinks[0]).toMatchObject({
+    task_id: linkedTask.id, project_id: projectB.id, relation_role: 'additional', created_by_user_id: profile.id,
+  });
+  await expect(dialog.locator('.project-relation-row').filter({ hasText: 'Proyecto relacionado' })).toBeVisible();
+
+  await dialog.getByRole('button', { name: 'Hacer principal: Proyecto relacionado' }).click();
+  await expect(page.getByText('Proyecto principal actualizado. El anterior se conserva como adicional.')).toBeVisible();
+  expect(updatedProjectLinks).toHaveLength(2);
+  expect(updatedProjectLinks).toEqual([
+    { id: primaryLink.id, relation_role: 'additional' },
+    { id: insertedProjectLinks[0].id, relation_role: 'primary' },
+  ]);
+  expect(projectLinks.find((link) => link.project_id === projectA.id)).toMatchObject({ relation_role: 'additional' });
+  expect(projectLinks.find((link) => link.project_id === projectB.id)).toMatchObject({ relation_role: 'primary' });
+
+  await dialog.getByRole('button', { name: 'Cerrar', exact: true }).click();
+  await page.getByLabel('Filtrar por proyecto').selectOption('project:' + projectA.id);
+  await expect(linkedRow).toBeVisible();
+  await page.getByLabel('Filtrar por proyecto').selectOption('project:' + projectB.id);
+  await expect(linkedRow).toBeVisible();
+  await page.getByLabel('Filtrar por proyecto').selectOption('none');
+  await expect(page.locator('.task-row').filter({ hasText: 'Ordenar escritorio' })).toBeVisible();
+  await expect(linkedRow).toHaveCount(0);
+
+  await page.locator('.side-nav').getByRole('button', { name: /Proyectos/ }).click();
+  await page.getByRole('button', { name: 'Ver proyecto: Proyecto principal' }).click();
+  const projectADetail = page.getByRole('dialog', { name: 'Proyecto principal' });
+  await expect(projectADetail.getByText('Preparar propuesta')).toBeVisible();
+  await expect(projectADetail.getByText('Proyecto adicional de esta tarea')).toBeVisible();
+  await projectADetail.getByRole('button', { name: 'Cerrar', exact: true }).click();
+  await page.getByRole('button', { name: 'Ver proyecto: Proyecto relacionado' }).click();
+  const projectBDetail = page.getByRole('dialog', { name: 'Proyecto relacionado' });
+  await expect(projectBDetail.getByText('Preparar propuesta')).toBeVisible();
+  await expect(projectBDetail.getByText('Proyecto principal de esta tarea')).toBeVisible();
 });

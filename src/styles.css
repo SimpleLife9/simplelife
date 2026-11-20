@@ -299,3 +299,8 @@
 .goal-related-task-tag strong{color:#486352;font-size:.64rem;font-weight:700;overflow-wrap:anywhere}
 .goal-related-task-tag small{color:#8b9b8f;font-size:.58rem}
 @media(max-width:600px){.task-objective-line{align-items:flex-start;flex-direction:column;gap:3px}.task-objective-line button{font-size:.62rem}.task-objective-current .project-relation-row{align-items:flex-start}}
+
+
+/* Task-to-project relationship controls */
+.task-project-line>span{color:#718976}
+.project-task-role{color:#66836f!important;font-weight:650}

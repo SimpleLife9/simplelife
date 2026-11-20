@@ -1361,7 +1361,10 @@ function ProjectsPage({ profile, refreshKey, runAction, busy, setActivePage, set
             </form>}
           </div>
           <div className="project-detail-section"><strong>Tareas del proyecto</strong>
-            {projectTaskRows.length ? <div className="project-detail-task-list">{projectTaskRows.map((task) => <div className="project-detail-task" key={task.id}><div><b>{task.action}</b><small>{task.due_date ? `Fecha: ${formatDate(task.due_date)}` : 'Sin fecha'}</small></div><StatusTag status={task.status} /></div>)}</div> : <p className="muted">Todavía no hay tareas vinculadas a este proyecto.</p>}
+            {projectTaskRows.length ? <div className="project-detail-task-list">{projectTaskRows.map((task) => {
+              const taskLink = links.find((link) => link.task_id === task.id && link.project_id === selectedProject.id);
+              return <div className="project-detail-task" key={task.id}><div><b>{task.action}</b><small>{task.due_date ? `Fecha: ${formatDate(task.due_date)}` : 'Sin fecha'}</small><small className="project-task-role">{taskLink?.relation_role === 'primary' ? 'Proyecto principal de esta tarea' : 'Proyecto adicional de esta tarea'}</small></div><StatusTag status={task.status} /></div>;
+            })}</div> : <p className="muted">Todavía no hay tareas vinculadas a este proyecto.</p>}
           </div>
           <div className="task-editor-actions"><button type="button" className="button task-editor-cancel" onClick={() => setSelectedProject(null)}>Cerrar</button><button type="button" className="button button-primary" onClick={() => { setSelectedProject(null); setActivePage('more'); setMorePage('tasks'); }}>Ir a Tareas <span>→</span></button></div>
         </section>
@@ -1372,6 +1375,7 @@ function ProjectsPage({ profile, refreshKey, runAction, busy, setActivePage, set
 function TasksPage({ profile, refreshKey, runAction, busy }) {
   const { rows: tasks, loading, localError } = useRows('task', profile, refreshKey, (query) => query.is('deleted_at', null).order('priority', { ascending: true }).order('created_at', { ascending: false }));
   const { rows: projects } = useRows('project', profile, refreshKey, (query) => query.is('deleted_at', null).order('name'));
+  const { rows: taskProjectLinks } = useRows('task_project_link', profile, refreshKey);
   const { rows: goals } = useRows('goal', profile, refreshKey, (query) => query.is('deleted_at', null).order('created_at', { ascending: false }));
   const { rows: subgoals } = useRows('subgoal', profile, refreshKey, (query) => query.is('deleted_at', null).order('created_at'));
   const { rows: contributionRelations } = useRows('contribution_relation', profile, refreshKey);
@@ -1397,12 +1401,17 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
   const [bulkDueDate, setBulkDueDate] = useState('');
   const [showNewTask, setShowNewTask] = useState(false);
   const [objectiveFilter, setObjectiveFilter] = useState('all');
+  const [projectFilter, setProjectFilter] = useState('all');
   const [relationTask, setRelationTask] = useState(null);
   const [relationTarget, setRelationTarget] = useState('');
+  const [projectTask, setProjectTask] = useState(null);
+  const [projectTarget, setProjectTarget] = useState('');
   const today = todayInHavana();
   const nextWeek = addDaysToDateKey(today, 7);
+  const activeObjectiveProjects = projects.filter((project) => !project.archived_at);
   const activeObjectiveGoals = goals.filter((goal) => !goal.archived_at);
   const activeObjectiveSubgoals = subgoals.filter((subgoal) => !subgoal.archived_at && goals.some((goal) => goal.id === subgoal.goal_id && !goal.archived_at));
+  const taskProjectRows = projectTask ? taskProjectLinks.filter((link) => link.task_id === projectTask.id) : [];
   const getTaskObjectiveLabel = (relation) => {
     const goal = relation.goal_id ? goals.find((row) => row.id === relation.goal_id) : null;
     if (goal) return `Meta: ${goal.title}`;
@@ -1436,6 +1445,13 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
         || (archiveFilter === 'active' && !task.archived_at)
         || (archiveFilter === 'archived' && Boolean(task.archived_at));
       const taskObjectives = contributionRelations.filter((relation) => relation.task_id === task.id && relation.relation_status === 'confirmed');
+      const taskProjects = taskProjectLinks.filter((link) => link.task_id === task.id);
+      let projectMatches = projectFilter === 'all';
+      if (projectFilter === 'none') projectMatches = taskProjects.length === 0;
+      else if (projectFilter.startsWith('project:')) {
+        const targetProjectId = projectFilter.slice('project:'.length);
+        projectMatches = taskProjects.some((link) => link.project_id === targetProjectId);
+      }
       let objectiveMatches = objectiveFilter === 'all';
       if (objectiveFilter === 'none') objectiveMatches = taskObjectives.length === 0;
       else if (!objectiveMatches && objectiveFilter.includes(':')) {
@@ -1455,7 +1471,7 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
         || (dateFilter === 'next7' && task.due_date > today && task.due_date <= nextWeek)
         || (dateFilter === 'no-date' && !task.due_date);
       const searchMatches = !term || `${task.action || ''} ${task.description || ''}`.toLocaleLowerCase('es').includes(term);
-      return statusMatches && archiveMatches && objectiveMatches && priorityMatches && dateMatches && searchMatches;
+      return statusMatches && archiveMatches && objectiveMatches && projectMatches && priorityMatches && dateMatches && searchMatches;
     });
 
     const compareDueDate = (a, b) => {
@@ -1470,7 +1486,7 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
       return (a.priority ?? 3) - (b.priority ?? 3) || compareDueDate(a, b) || String(b.created_at || '').localeCompare(String(a.created_at || ''));
     });
     return filtered;
-  }, [tasks, subgoals, contributionRelations, taskSearch, statusFilter, archiveFilter, objectiveFilter, priorityFilter, dateFilter, taskSort, today, nextWeek]);
+  }, [tasks, subgoals, contributionRelations, taskProjectLinks, taskSearch, statusFilter, archiveFilter, objectiveFilter, projectFilter, priorityFilter, dateFilter, taskSort, today, nextWeek]);
 
   const openEditor = (task) => {
     setEditingTask(task);
@@ -1637,6 +1653,75 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
     if (!data?.length) throw new Error('No se pudo desvincular el objetivo. Actualiza la vista e inténtalo de nuevo.');
   }, relation.goal_id ? 'Meta desvinculada de la tarea.' : 'Submeta desvinculada de la tarea.');
 
+  const openTaskProjects = (task) => { setProjectTask(task); setProjectTarget(''); };
+  const closeTaskProjects = () => {
+    if (busy) return;
+    setProjectTask(null);
+    setProjectTarget('');
+  };
+
+  const addTaskProject = async (event) => {
+    event.preventDefault();
+    if (!projectTask || projectTask.archived_at || !projectTarget) return;
+    const targetProject = activeObjectiveProjects.find((project) => project.id === projectTarget);
+    if (!targetProject || taskProjectRows.some((link) => link.project_id === projectTarget)) return;
+    const role = taskProjectRows.some((link) => link.relation_role === 'primary') ? 'additional' : 'primary';
+    const saved = await runAction(async () => {
+      const payload = {
+        id: uuidv7(),
+        task_id: projectTask.id,
+        project_id: targetProject.id,
+        relation_role: role,
+        created_by_user_id: profile.id,
+      };
+      const { data, error } = await supabase.from('task_project_link').insert(payload).select('id');
+      if (error) throw error;
+      if (!data?.length) throw new Error('No se pudo vincular el proyecto a esta tarea.');
+    }, role === 'primary' ? 'Proyecto principal vinculado a la tarea.' : 'Proyecto adicional vinculado a la tarea.');
+    if (saved) setProjectTarget('');
+  };
+
+  const setPrimaryTaskProject = (link) => {
+    if (!projectTask || projectTask.archived_at || link.relation_role === 'primary') return;
+    const linkedProject = projects.find((project) => project.id === link.project_id);
+    if (!linkedProject || linkedProject.archived_at) return;
+    return runAction(async () => {
+      const previousPrimary = taskProjectRows.find((row) => row.relation_role === 'primary');
+      if (previousPrimary) {
+        const { data, error } = await supabase.from('task_project_link')
+          .update({ relation_role: 'additional' })
+          .eq('id', previousPrimary.id)
+          .eq('task_id', projectTask.id)
+          .eq('relation_role', 'primary')
+          .select('id');
+        if (error) throw error;
+        if (!data?.length) throw new Error('No se pudo liberar el lugar de proyecto principal. Actualiza la lista e inténtalo de nuevo.');
+      }
+
+      const { data, error } = await supabase.from('task_project_link')
+        .update({ relation_role: 'primary' })
+        .eq('id', link.id)
+        .eq('task_id', projectTask.id)
+        .eq('relation_role', 'additional')
+        .select('id');
+      if (error || !data?.length) {
+        if (previousPrimary) {
+          const rollback = await supabase.from('task_project_link')
+            .update({ relation_role: 'primary' })
+            .eq('id', previousPrimary.id)
+            .eq('task_id', projectTask.id)
+            .eq('relation_role', 'additional')
+            .select('id');
+          if (rollback.error || !rollback.data?.length) {
+            throw new Error('No se pudo cambiar el proyecto principal y tampoco se pudo restaurar automáticamente el anterior. Los vínculos siguen conservados; actualiza la vista antes de reintentar.');
+          }
+        }
+        if (error) throw error;
+        throw new Error('No se pudo establecer el proyecto principal. Actualiza la lista e inténtalo de nuevo.');
+      }
+    }, 'Proyecto principal actualizado. El anterior se conserva como adicional.');
+  };
+
   const selectableTasks = visibleTasks.filter((task) => isOpenTask(task) && !task.archived_at);
   const selectedVisibleTasks = selectableTasks.filter((task) => selectedTaskIds.includes(task.id));
   const allVisibleSelected = selectableTasks.length > 0 && selectedVisibleTasks.length === selectableTasks.length;
@@ -1759,6 +1844,14 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
             </select>
           </label>
           <label className="task-toolbar-field">
+            <span>Proyecto</span>
+            <select aria-label="Filtrar por proyecto" value={projectFilter} onChange={(event) => { setProjectFilter(event.target.value); clearSelection(); }}>
+              <option value="all">Todos los proyectos</option>
+              <option value="none">Sin proyecto</option>
+              {projects.map((project) => <option key={project.id} value={'project:' + project.id}>{project.name}{project.archived_at ? ' · Archivado' : ''}</option>)}
+            </select>
+          </label>
+          <label className="task-toolbar-field">
             <span>Ordenar</span>
             <select aria-label="Ordenar tareas" value={taskSort} onChange={(event) => { setTaskSort(event.target.value); clearSelection(); }}>
               <option value="priority">Por prioridad</option>
@@ -1786,6 +1879,7 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
           <div className="task-list">
             {visibleTasks.map((task) => {
               const taskObjectives = contributionRelations.filter((relation) => relation.task_id === task.id && relation.relation_status === 'confirmed');
+              const taskProjects = taskProjectLinks.filter((link) => link.task_id === task.id);
               return (
               <div className={`task-row ${task.status === 'completed' ? 'task-done' : ''} ${task.archived_at ? 'task-row-archived' : ''}`} key={task.id}>
                 {isOpenTask(task) && !task.archived_at
@@ -1800,6 +1894,13 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
                   <div className="task-objective-line">
                     <span>{taskObjectives.length ? taskObjectives.map(getTaskObjectiveLabel).join(' · ') : 'Sin meta o submeta vinculada'}</span>
                     <button type="button" onClick={() => openTaskRelations(task)} disabled={busy || Boolean(task.archived_at)} aria-label={`Gestionar objetivos: ${task.action}`}>{taskObjectives.length ? 'Gestionar' : 'Vincular objetivo'}</button>
+                  </div>
+                  <div className="task-objective-line task-project-line">
+                    <span>{taskProjects.length ? taskProjects.map((link) => {
+                      const project = projects.find((row) => row.id === link.project_id);
+                      return `${project?.name || 'Proyecto no disponible'} (${link.relation_role === 'primary' ? 'principal' : 'adicional'})`;
+                    }).join(' · ') : 'Sin proyecto vinculado'}</span>
+                    <button type="button" onClick={() => openTaskProjects(task)} disabled={busy || Boolean(task.archived_at)} aria-label={`${taskProjects.length ? 'Gestionar proyectos' : 'Vincular proyecto'}: ${task.action}`}>{taskProjects.length ? 'Gestionar' : 'Vincular proyecto'}</button>
                   </div>
                 </div>
                 {!task.archived_at && isOpenTask(task) ? (
@@ -1931,6 +2032,37 @@ function TasksPage({ profile, refreshKey, runAction, busy }) {
             <button type="submit" className="button button-primary" disabled={busy || !relationTarget || relationTargetIsLinked}>Vincular meta o submeta <span>→</span></button>
           </form>
           <div className="task-editor-actions"><button type="button" className="button task-editor-cancel" onClick={closeTaskRelations} disabled={busy}>Cerrar</button></div>
+        </section>
+      </div>
+    )}
+    {projectTask && (
+      <div className="task-editor-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) closeTaskProjects(); }} onKeyDown={(event) => { if (event.key === 'Escape' && !busy) closeTaskProjects(); }}>
+        <section className="task-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="task-project-title">
+          <div className="task-editor-heading">
+            <div><div className="eyebrow">ORGANIZA EL TRABAJO POR INICIATIVAS</div><h2 id="task-project-title">Proyectos de la tarea</h2></div>
+            <button type="button" className="task-editor-close" onClick={closeTaskProjects} disabled={busy} aria-label="Cerrar proyectos de la tarea">×</button>
+          </div>
+          <div className="task-objective-selected"><strong>{projectTask.action}</strong><small>Una tarea puede tener un proyecto principal y pertenecer también a otros proyectos relacionados.</small></div>
+          <div className="task-objective-current">
+            <span>Proyectos vinculados</span>
+            {taskProjectRows.length ? taskProjectRows.map((link) => {
+              const linkedProject = projects.find((project) => project.id === link.project_id);
+              return <div className="project-relation-row" key={link.id}>
+                <div><span>{link.relation_role === 'primary' ? 'Proyecto principal' : 'Proyecto adicional'}</span><strong>{linkedProject?.name || 'Proyecto no disponible'}</strong>{linkedProject?.archived_at && <small>Archivado</small>}</div>
+                {link.relation_role !== 'primary' && <button type="button" className="text-button" disabled={busy || Boolean(projectTask.archived_at) || Boolean(linkedProject?.archived_at)} onClick={() => setPrimaryTaskProject(link)} aria-label={'Hacer principal: ' + (linkedProject?.name || 'proyecto')}>Hacer principal</button>}
+              </div>;
+            }) : <p className="muted">Esta tarea todavía no pertenece a ningún proyecto.</p>}
+          </div>
+          {!projectTask.archived_at && <form className="project-relation-form" onSubmit={addTaskProject}>
+            <label className="field"><span>Agregar proyecto</span><select aria-label="Seleccionar proyecto" required value={projectTarget} onChange={(event) => setProjectTarget(event.target.value)} disabled={busy}>
+              <option value="">Selecciona un proyecto activo</option>
+              {activeObjectiveProjects.filter((project) => !taskProjectRows.some((link) => link.project_id === project.id)).map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+            </select></label>
+            {!activeObjectiveProjects.some((project) => !taskProjectRows.some((link) => link.project_id === project.id)) && <p className="task-editor-note">No hay otros proyectos activos disponibles para vincular.</p>}
+            <button type="submit" className="button button-primary" disabled={busy || !projectTarget || taskProjectRows.some((link) => link.project_id === projectTarget)}>Vincular proyecto <span>→</span></button>
+          </form>}
+          <p className="task-editor-note">Los vínculos se conservan. Puedes cambiar cuál es el proyecto principal; los demás quedan como adicionales. No se elimina ninguna relación.</p>
+          <div className="task-editor-actions"><button type="button" className="button task-editor-cancel" onClick={closeTaskProjects} disabled={busy}>Cerrar</button></div>
         </section>
       </div>
     )}
