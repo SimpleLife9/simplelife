@@ -300,7 +300,9 @@ async function mockSupabaseSession(page, initialData = {}) {
       const payload = request.postDataJSON();
       const idFilter = url.searchParams.get('id') || '';
       const projectFilter = url.searchParams.get('project_id') || '';
-      const relation = contributionRelations.find((row) => idFilter === 'eq.' + row.id && projectFilter === 'eq.' + row.project_id);
+      const taskFilter = url.searchParams.get('task_id') || '';
+      const relation = contributionRelations.find((row) => idFilter === 'eq.' + row.id
+        && (projectFilter ? projectFilter === 'eq.' + row.project_id : taskFilter ? taskFilter === 'eq.' + row.task_id : true));
       if (!relation) { await json(200, []); return; }
       Object.assign(relation, payload);
       updatedContributionRelations.push({ id: relation.id, ...payload });
@@ -1520,4 +1522,107 @@ test('Tasks support work-status changes, reversible archiving and bulk archive',
   expect(completed.status).toBe('completed');
   await archiveFilter.selectOption('archived');
   await expect(page.getByRole('button', { name: 'Restaurar tarea: Informe entregado' })).toBeVisible();
+});
+
+
+test('Tasks link to goals and subgoals, filter by objective, and restore removed relations without duplicates', async ({ page }) => {
+  const area = {
+    id: '00000000-0000-7000-8000-000000000701',
+    owner_user_id: profile.id, created_by_user_id: profile.id,
+    title: 'Negocio', description: null, position: 0, status: 'active', archived_at: null, deleted_at: null,
+  };
+  const goal = {
+    id: '00000000-0000-7000-8000-000000000702',
+    owner_user_id: profile.id, created_by_user_id: profile.id,
+    life_area_id: area.id, title: 'Aumentar ventas', reason: null, expected_result: 'Más clientes',
+    target_date: null, status: 'active', archived_at: null, deleted_at: null,
+    created_at: '2026-11-20T11:00:00.000Z',
+  };
+  const subgoal = {
+    id: '00000000-0000-7000-8000-000000000703',
+    goal_id: goal.id, created_by_user_id: profile.id,
+    title: 'Contactar nuevos clientes', expected_result: null, target_date: null,
+    status: 'active', archived_at: null, deleted_at: null, created_at: '2026-11-20T11:10:00.000Z',
+  };
+  const task = (id, action) => ({
+    id, owner_user_id: profile.id, created_by_user_id: profile.id,
+    action, description: null, status: 'todo', priority: 2, due_date: null,
+    estimated_duration_minutes: 30, time_zone: 'America/Havana',
+    archived_at: null, deleted_at: null, created_at: '2026-11-20T12:00:00.000Z',
+  });
+  const first = task('00000000-0000-7000-8000-000000000704', 'Preparar propuesta comercial');
+  const second = task('00000000-0000-7000-8000-000000000705', 'Actualizar métricas');
+  const result = await mockSupabaseSession(page, {
+    areas: [area], goals: [goal], subgoals: [subgoal], tasks: [first, second],
+    contributionRelations: [],
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.getByRole('button', { name: 'Más' }).click();
+  await page.getByRole('button', { name: 'Tareas', exact: true }).click();
+
+  const objectiveFilter = page.getByLabel('Filtrar por meta o submeta');
+  await objectiveFilter.selectOption('none');
+  await expect(page.getByText('Preparar propuesta comercial', { exact: true })).toBeVisible();
+  await expect(page.getByText('Actualizar métricas', { exact: true })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Gestionar objetivos: Preparar propuesta comercial' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Objetivos de la tarea' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel('Seleccionar meta o submeta').selectOption('goal:' + goal.id);
+  await dialog.getByRole('button', { name: 'Vincular meta o submeta' }).click();
+  await expect(page.getByText('Objetivo vinculado a la tarea.')).toBeVisible();
+  expect(result.insertedContributionRelations).toHaveLength(1);
+  expect(result.insertedContributionRelations[0]).toMatchObject({
+    task_id: first.id, goal_id: goal.id, subgoal_id: undefined,
+    relation_status: 'confirmed', created_by_user_id: profile.id,
+  });
+  await expect(page.getByText('Meta: Aumentar ventas')).toBeVisible();
+
+  await dialog.getByLabel('Seleccionar meta o submeta').selectOption('subgoal:' + subgoal.id);
+  await dialog.getByRole('button', { name: 'Vincular meta o submeta' }).click();
+  await expect(page.getByText('Objetivo vinculado a la tarea.')).toBeVisible();
+  expect(result.insertedContributionRelations).toHaveLength(2);
+  await expect(page.getByText('Submeta: Contactar nuevos clientes · Aumentar ventas')).toBeVisible();
+
+  await objectiveFilter.selectOption('goal:' + goal.id);
+  await expect(page.getByText('Preparar propuesta comercial', { exact: true })).toBeVisible();
+  await expect(page.getByText('Actualizar métricas', { exact: true })).toHaveCount(0);
+  await objectiveFilter.selectOption('subgoal:' + subgoal.id);
+  await expect(page.getByText('Preparar propuesta comercial', { exact: true })).toBeVisible();
+  await expect(page.getByText('Actualizar métricas', { exact: true })).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Gestionar objetivos: Preparar propuesta comercial' }).click();
+  await page.getByRole('button', { name: 'Desvincular meta: Aumentar ventas' }).click();
+  await expect(page.getByText('Meta desvinculada de la tarea.')).toBeVisible();
+  const goalRelation = result.contributionRelations.find((row) => row.task_id === first.id && row.goal_id === goal.id);
+  expect(goalRelation.relation_status).toBe('removed');
+
+  await objectiveFilter.selectOption('goal:' + goal.id);
+  await expect(page.getByText('Preparar propuesta comercial', { exact: true })).toHaveCount(0);
+  await objectiveFilter.selectOption('all');
+  await page.getByRole('button', { name: 'Gestionar objetivos: Preparar propuesta comercial' }).click();
+  await dialog.getByLabel('Seleccionar meta o submeta').selectOption('goal:' + goal.id);
+  await expect(dialog.getByText('Este vínculo existe en el historial y se restaurará sin crear otro registro.')).toBeVisible();
+  await dialog.getByRole('button', { name: 'Vincular meta o submeta' }).click();
+  await expect(page.getByText('Vínculo restaurado.')).toBeVisible();
+  expect(result.insertedContributionRelations).toHaveLength(2);
+  expect(goalRelation.relation_status).toBe('confirmed');
+  expect(result.updatedContributionRelations).toContainEqual({ id: goalRelation.id, relation_status: 'confirmed' });
+
+  await objectiveFilter.selectOption('none');
+  await expect(page.getByText('Actualizar métricas', { exact: true })).toBeVisible();
+  await expect(page.getByText('Preparar propuesta comercial', { exact: true })).toHaveCount(0);
+
+  await page.locator('.side-nav').getByRole('button', { name: /Objetivos/ }).click();
+  await page.getByRole('button', { name: 'Metas', exact: true }).click();
+  const goalCard = page.locator('.goal-record-card').filter({ has: page.getByRole('heading', { name: goal.title }) });
+  await expect(goalCard.getByText('Tareas que contribuyen · 1')).toBeVisible();
+  await expect(goalCard.getByText('Preparar propuesta comercial')).toBeVisible();
+  await page.getByRole('button', { name: 'Submetas', exact: true }).click();
+  const subgoalCard = page.locator('.subgoal-record-card').filter({ has: page.getByRole('heading', { name: subgoal.title }) });
+  await expect(subgoalCard.getByText('Tareas que contribuyen · 1')).toBeVisible();
+  await expect(subgoalCard.getByText('Preparar propuesta comercial')).toBeVisible();
 });
