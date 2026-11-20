@@ -786,9 +786,10 @@ test('Objectives create areas and goals through separate floating forms', async 
 
 test('Objetivos permite editar áreas, metas y submetas, gestionar estados y crear submetas en todas las metas', async ({ page }) => {
   const area = { id: '00000000-0000-7000-8000-000000000201', owner_user_id: profile.id, created_by_user_id: profile.id, title: 'Finanzas', description: null, position: 0, status: 'active', deleted_at: null };
+  const secondArea = { id: '00000000-0000-7000-8000-000000000211', owner_user_id: profile.id, created_by_user_id: profile.id, title: 'Salud', description: null, position: 1, status: 'active', deleted_at: null };
   const goals = Array.from({ length: 3 }, (_, index) => ({ id: `00000000-0000-7000-8000-00000000020${index + 2}`, owner_user_id: profile.id, created_by_user_id: profile.id, life_area_id: area.id, title: `Meta ${index + 1}`, reason: null, expected_result: null, target_date: null, status: 'active', deleted_at: null }));
   const subgoal = { id: '00000000-0000-7000-8000-000000000209', goal_id: goals[0].id, created_by_user_id: profile.id, title: 'Ahorrar cada mes', expected_result: null, target_date: null, status: 'active', deleted_at: null };
-  const result = await mockSupabaseSession(page, { areas: [area], goals, subgoals: [subgoal] });
+  const result = await mockSupabaseSession(page, { areas: [area, secondArea], goals, subgoals: [subgoal] });
   await page.goto('/');
   await page.getByLabel('Correo electrónico').fill(authUser.email);
   await page.getByLabel('Contraseña').fill('not-a-real-password');
@@ -805,6 +806,12 @@ test('Objetivos permite editar áreas, metas y submetas, gestionar estados y cre
   await areaDialog.getByRole('button', { name: 'Guardar cambios' }).click();
   await expect(page.getByText('Área actualizada.')).toBeVisible();
   expect(result.updatedAreas.at(-1)).toMatchObject({ title: 'Finanzas personales', description: 'Control y crecimiento del dinero.' });
+
+  await page.getByRole('button', { name: 'Mover área abajo: Finanzas personales' }).click();
+  await expect(page.getByText('Área movida hacia abajo.')).toBeVisible();
+  expect(result.updatedAreas).toContainEqual({ id: area.id, position: secondArea.position });
+  expect(result.updatedAreas).toContainEqual({ id: secondArea.id, position: area.position });
+  await expect(page.getByRole('button', { name: 'Mover área arriba: Finanzas personales' })).toBeEnabled();
 
   await page.getByRole('button', { name: 'Editar meta: Meta 1' }).click();
   const goalDialog = page.getByRole('dialog', { name: 'Editar meta' });
