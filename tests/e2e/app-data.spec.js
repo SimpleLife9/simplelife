@@ -693,9 +693,10 @@ test('Projects support search, lifecycle, editing, archive, restore and linked t
   await expect(detail.getByText('Ahorrar cada mes', { exact: true })).toBeVisible();
   expect(insertedContributionRelations).toHaveLength(1);
   expect(insertedContributionRelations[0]).toMatchObject({
-    project_id: projectA.id, goal_id: null, subgoal_id: subgoalForProject.id,
+    project_id: projectA.id, subgoal_id: subgoalForProject.id,
     relation_status: 'confirmed', created_by_user_id: profile.id,
   });
+  expect(insertedContributionRelations[0]).not.toHaveProperty('goal_id');
 
   await detail.getByRole('button', { name: 'Desvincular submeta: Ahorrar cada mes' }).click();
   await expect(page.getByText('Submeta desvinculada del proyecto.')).toBeVisible();
