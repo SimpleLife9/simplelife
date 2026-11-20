@@ -229,7 +229,15 @@ async function mockSupabaseSession(page, initialData = {}) {
 
     if (url.pathname === '/rest/v1/task' && method === 'GET') {
       const idFilter = url.searchParams.get('id') || '';
-      const rows = taskRows.filter((task) => !task.deleted_at && (!idFilter || idFilter === 'eq.' + task.id));
+      const statusFilter = url.searchParams.get('status') || '';
+      const archivedFilter = url.searchParams.get('archived_at') || '';
+      const excludedStatuses = statusFilter.startsWith('not.in.(')
+        ? statusFilter.slice(8, -1).split(',')
+        : [];
+      const rows = taskRows.filter((task) => !task.deleted_at
+        && (!idFilter || idFilter === 'eq.' + task.id)
+        && (!archivedFilter || archivedFilter !== 'is.null' || task.archived_at == null)
+        && (!excludedStatuses.length || !excludedStatuses.includes(task.status)));
       await json(200, rows);
       return;
     }
@@ -443,14 +451,24 @@ async function mockSupabaseSession(page, initialData = {}) {
       const payload = request.postDataJSON();
       const idFilter = url.searchParams.get('id') || '';
       const ownerFilter = url.searchParams.get('owner_user_id') || '';
-      const task = taskRows.find((row) => idFilter === `eq.${row.id}` && ownerFilter === `eq.${row.owner_user_id}`);
-      if (!task) {
+      const statusFilter = url.searchParams.get('status') || '';
+      const targetIds = idFilter.startsWith('in.(')
+        ? idFilter.slice(4, -1).split(',')
+        : idFilter.startsWith('eq.') ? [idFilter.slice(3)] : [];
+      const allowedStatuses = statusFilter.startsWith('in.(')
+        ? statusFilter.slice(4, -1).split(',')
+        : [];
+      const matching = taskRows.filter((row) => targetIds.includes(row.id)
+        && ownerFilter === `eq.${row.owner_user_id}`
+        && (!allowedStatuses.length || allowedStatuses.includes(row.status)));
+      if (!matching.length) {
         await json(200, []);
         return;
       }
-      Object.assign(task, payload);
-      updatedTasks.push({ ...payload });
-      await json(200, [{ id: task.id }], { 'content-range': '0-0/*' });
+      matching.forEach((task) => Object.assign(task, payload));
+      if (idFilter.startsWith('in.(')) updatedTasks.push({ ids: matching.map((task) => task.id), ...payload });
+      else updatedTasks.push({ ...payload });
+      await json(200, matching.map((task) => ({ id: task.id })), { 'content-range': `0-${matching.length - 1}/*` });
       return;
     }
 
@@ -488,6 +506,7 @@ test('mock-authenticated task creation uses the signed-in profile and Havana tim
   await createTaskDialog.getByLabel('¿Qué necesitas hacer?').fill('Revisar el plan del día');
   await createTaskDialog.getByLabel('Prioridad').selectOption('2');
   await createTaskDialog.getByLabel('Fecha (opcional)').fill('2026-11-20');
+  await createTaskDialog.getByLabel('Tiempo estimado (min)').fill('90');
   await createTaskDialog.getByRole('button', { name: 'Añadir tarea' }).click();
   await expect(createTaskDialog).toBeHidden();
 
@@ -499,6 +518,7 @@ test('mock-authenticated task creation uses the signed-in profile and Havana tim
     action: 'Revisar el plan del día',
     priority: 2,
     due_date: '2026-11-20',
+    estimated_duration_minutes: 90,
     status: 'todo',
     time_zone: 'America/Havana',
   });
@@ -512,6 +532,7 @@ test('mock-authenticated task creation uses the signed-in profile and Havana tim
   await editor.getByLabel('Detalles (opcional)').fill('Comprobar prioridades y fechas.');
   await editor.getByRole('combobox').selectOption('1');
   await editor.getByLabel('Fecha (opcional)').fill('2026-11-21');
+  await editor.getByLabel('Tiempo estimado (min)').fill('120');
   await editor.getByRole('button', { name: 'Guardar cambios' }).click();
 
   await expect(page.getByText('Tarea actualizada.')).toBeVisible();
@@ -521,6 +542,7 @@ test('mock-authenticated task creation uses the signed-in profile and Havana tim
     description: 'Comprobar prioridades y fechas.',
     priority: 1,
     due_date: '2026-11-21',
+    estimated_duration_minutes: 120,
   });
   expect(insertedTasks[0]).toMatchObject({
     action: 'Revisar el plan semanal',
@@ -1288,4 +1310,123 @@ test('Lists convert an item into a task, preserve the original and avoid duplica
   await expect(page.getByRole('button', { name: 'Convertir en tarea: ' + existingItem.content })).toHaveCount(0);
   expect(insertedTasks).toHaveLength(1);
   expect(updatedListItems).toHaveLength(1);
+});
+
+
+test('Today separates overdue tasks, allows moving them to today and totals estimated time', async ({ page }) => {
+  const today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Havana', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
+  const dateOffset = (offset) => {
+    const [year, month, day] = today.split('-').map(Number);
+    const next = new Date(Date.UTC(year, month - 1, day + offset));
+    return [next.getUTCFullYear(), String(next.getUTCMonth() + 1).padStart(2, '0'), String(next.getUTCDate()).padStart(2, '0')].join('-');
+  };
+  const task = (id, action, dueDate, estimatedDuration) => ({
+    id, owner_user_id: profile.id, created_by_user_id: profile.id,
+    action, description: null, status: 'todo', priority: 2,
+    due_date: dueDate, estimated_duration_minutes: estimatedDuration,
+    time_zone: 'America/Havana', archived_at: null, deleted_at: null,
+    created_at: '2026-11-19T12:00:00.000Z',
+  });
+  const overdueTask = task('00000000-0000-7000-8000-000000000801', 'Pagar factura atrasada', dateOffset(-2), 90);
+  const todayTask = task('00000000-0000-7000-8000-000000000802', 'Preparar reunión de hoy', today, 45);
+  const laterTask = task('00000000-0000-7000-8000-000000000803', 'Comprar materiales', dateOffset(3), 30);
+  const { taskRows, updatedTasks } = await mockSupabaseSession(page, { tasks: [overdueTask, todayTask, laterTask] });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Atrasadas', exact: true })).toBeVisible();
+  await expect(page.getByText('Pagar factura atrasada')).toBeVisible();
+  await expect(page.getByText('Preparar reunión de hoy')).toBeVisible();
+  await expect(page.getByText('Comprar materiales')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Pasar a hoy: Pagar factura atrasada' })).toBeVisible();
+  await page.getByRole('button', { name: 'Pasar a hoy: Pagar factura atrasada' }).click();
+
+  await expect(page.getByText('Tarea movida a hoy.')).toBeVisible();
+  expect(taskRows.find((row) => row.id === overdueTask.id).due_date).toBe(today);
+  expect(updatedTasks.at(-1)).toEqual({ due_date: today });
+  await expect(page.getByRole('heading', { name: 'Atrasadas', exact: true })).toHaveCount(0);
+  await expect(page.getByText('2 h 15 min', { exact: true })).toBeVisible();
+});
+
+test('Tasks filter by due date and support bulk complete, reschedule and clear date', async ({ page }) => {
+  const today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Havana', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
+  const dateOffset = (offset) => {
+    const [year, month, day] = today.split('-').map(Number);
+    const next = new Date(Date.UTC(year, month - 1, day + offset));
+    return [next.getUTCFullYear(), String(next.getUTCMonth() + 1).padStart(2, '0'), String(next.getUTCDate()).padStart(2, '0')].join('-');
+  };
+  const task = (id, action, status, dueDate) => ({
+    id, owner_user_id: profile.id, created_by_user_id: profile.id,
+    action, description: null, status, priority: 3,
+    due_date: dueDate, estimated_duration_minutes: null,
+    time_zone: 'America/Havana', archived_at: null, deleted_at: null,
+    created_at: '2026-11-19T12:00:00.000Z',
+  });
+  const overdue = task('00000000-0000-7000-8000-000000000811', 'Enviar informe', 'todo', dateOffset(-2));
+  const todayTask = task('00000000-0000-7000-8000-000000000812', 'Pagar electricidad', 'todo', today);
+  const nextTask = task('00000000-0000-7000-8000-000000000813', 'Comprar pan', 'in_progress', dateOffset(3));
+  const noDateTask = task('00000000-0000-7000-8000-000000000814', 'Ordenar escritorio', 'todo', null);
+  const distantTask = task('00000000-0000-7000-8000-000000000815', 'Preparar viaje', 'blocked', dateOffset(10));
+  const completedTask = task('00000000-0000-7000-8000-000000000816', 'Informe antiguo', 'completed', dateOffset(-5));
+  const { taskRows, updatedTasks } = await mockSupabaseSession(page, {
+    tasks: [overdue, todayTask, nextTask, noDateTask, distantTask, completedTask],
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.getByRole('button', { name: /Más/ }).click();
+  await page.getByRole('button', { name: 'Tareas', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Todas tus tareas' })).toBeVisible();
+
+  const dateFilter = page.getByLabel('Filtrar por fecha');
+  await dateFilter.selectOption('overdue');
+  await expect(page.getByText('Enviar informe', { exact: true })).toBeVisible();
+  await expect(page.getByText('Pagar electricidad', { exact: true })).toHaveCount(0);
+  await dateFilter.selectOption('today');
+  await expect(page.getByText('Pagar electricidad', { exact: true })).toBeVisible();
+  await expect(page.getByText('Enviar informe', { exact: true })).toHaveCount(0);
+  await dateFilter.selectOption('next7');
+  await expect(page.getByText('Comprar pan', { exact: true })).toBeVisible();
+  await expect(page.getByText('Preparar viaje', { exact: true })).toHaveCount(0);
+  await dateFilter.selectOption('no-date');
+  await expect(page.getByText('Ordenar escritorio', { exact: true })).toBeVisible();
+  await dateFilter.selectOption('all');
+
+  // Change the dates of multiple active tasks in one owner-scoped update.
+  await page.getByLabel('Seleccionar tarea: Pagar electricidad').check();
+  await page.getByLabel('Seleccionar tarea: Comprar pan').check();
+  await page.getByLabel('Nueva fecha para selección').fill(dateOffset(20));
+  await page.getByRole('button', { name: 'Aplicar fecha' }).click();
+  await expect(page.getByText('Fecha actualizada en las tareas seleccionadas.')).toBeVisible();
+  expect(taskRows.find((row) => row.id === todayTask.id).due_date).toBe(dateOffset(20));
+  expect(taskRows.find((row) => row.id === nextTask.id).due_date).toBe(dateOffset(20));
+  expect(updatedTasks.at(-1)).toMatchObject({ due_date: dateOffset(20), ids: expect.arrayContaining([todayTask.id, nextTask.id]) });
+
+  // Clear a date without touching the other selected rows.
+  await page.getByLabel('Seleccionar tarea: Pagar electricidad').check();
+  await page.getByRole('button', { name: 'Quitar fecha' }).click();
+  await expect(page.getByText('Fechas eliminadas de las tareas seleccionadas.')).toBeVisible();
+  expect(taskRows.find((row) => row.id === todayTask.id).due_date).toBeNull();
+  expect(taskRows.find((row) => row.id === nextTask.id).due_date).toBe(dateOffset(20));
+
+  // Complete two selected tasks at once.
+  await page.getByLabel('Seleccionar tarea: Enviar informe').check();
+  await page.getByLabel('Seleccionar tarea: Ordenar escritorio').check();
+  await page.getByRole('button', { name: 'Completar seleccionadas' }).click();
+  await expect(page.getByText('2 tareas completadas.')).toBeVisible();
+  expect(taskRows.find((row) => row.id === overdue.id)).toMatchObject({ status: 'completed', completion_outcome: 'complete' });
+  expect(taskRows.find((row) => row.id === noDateTask.id)).toMatchObject({ status: 'completed', completion_outcome: 'complete' });
+  expect(updatedTasks.at(-1)).toMatchObject({
+    status: 'completed',
+    completion_outcome: 'complete',
+    ids: expect.arrayContaining([overdue.id, noDateTask.id]),
+  });
 });
