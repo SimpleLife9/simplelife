@@ -553,6 +553,22 @@ function GoalsPage({ profile, refreshKey, runAction, busy }) {
     if (!data?.length) throw new Error('No se pudo cambiar el estado del área.');
   }, area.status === 'paused' ? 'Área reactivada.' : 'Área pausada.');
 
+  const moveArea = (area, direction) => runAction(async () => {
+    const currentIndex = areas.findIndex((item) => item.id === area.id);
+    const neighbor = areas[currentIndex + direction];
+    if (!neighbor) return;
+    const updates = [
+      { id: area.id, position: neighbor.position ?? currentIndex + direction },
+      { id: neighbor.id, position: area.position ?? currentIndex },
+    ];
+    for (const update of updates) {
+      const { data, error } = await supabase.from('life_area').update({ position: update.position })
+        .eq('id', update.id).eq('owner_user_id', profile.id).is('deleted_at', null).select('id');
+      if (error) throw error;
+      if (!data?.length) throw new Error('No se pudo reordenar el área. Actualiza la vista e inténtalo de nuevo.');
+    }
+  }, direction < 0 ? 'Área movida hacia arriba.' : 'Área movida hacia abajo.');
+
   const saveGoal = async (event) => {
     event.preventDefault();
     if (!selectedArea || !goalTitle.trim()) return;
@@ -620,12 +636,12 @@ function GoalsPage({ profile, refreshKey, runAction, busy }) {
             <button type="button" className="section-create-button" onClick={() => setShowAreaModal(true)}>Nueva Área</button>
           </div>
         </div>
-        {loading ? <p className="muted">Cargando…</p> : localError ? <div className="form-error">{localError}</div> : areas.length ? <div className="area-grid">{areas.map((area) => {
+        {loading ? <p className="muted">Cargando…</p> : localError ? <div className="form-error">{localError}</div> : areas.length ? <div className="area-grid">{areas.map((area, areaIndex) => {
           const areaGoals = goals.filter((goal) => goal.life_area_id === area.id);
           return <div className="area-card" key={area.id}>
             <div className="area-card-top"><span className="area-symbol">◎</span><span className="area-count">{areaGoals.length} metas</span></div>
             <div className="area-heading-edit"><div><h3>{area.title}</h3>{area.description && <p>{area.description}</p>}</div><button type="button" className="task-edit-button" onClick={() => openAreaEditor(area)} aria-label={`Editar área: ${area.title}`}>Editar</button></div>
-            <div className="area-inline-actions"><span className={`status-tag status-${area.status || 'active'}`}>{area.status === 'paused' ? 'En pausa' : 'Activa'}</span><button type="button" className="text-button" disabled={busy} onClick={() => setAreaStatus(area)}>{area.status === 'paused' ? 'Reactivar área' : 'Pausar área'}</button></div>
+            <div className="area-inline-actions"><span className={`status-tag status-${area.status || 'active'}`}>{area.status === 'paused' ? 'En pausa' : 'Activa'}</span><div className="area-management-actions"><button type="button" className="text-button" disabled={busy || areaIndex === 0} onClick={() => moveArea(area, -1)} aria-label={`Mover área arriba: ${area.title}`}>↑ Subir</button><button type="button" className="text-button" disabled={busy || areaIndex === areas.length - 1} onClick={() => moveArea(area, 1)} aria-label={`Mover área abajo: ${area.title}`}>↓ Bajar</button><button type="button" className="text-button" disabled={busy} onClick={() => setAreaStatus(area)}>{area.status === 'paused' ? 'Reactivar área' : 'Pausar área'}</button></div></div>
             <div className="goal-mini-list">{areaGoals.map((goal) => {
               const goalSubgoals = subgoals.filter((subgoal) => subgoal.goal_id === goal.id);
               return <div className="goal-mini-wrap" key={goal.id}>
