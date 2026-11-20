@@ -134,3 +134,6 @@
 .area-card .subgoal-form{margin:8px 0 3px;padding-left:18px}
 .area-card .subgoal-form input{font-size:.68rem}
 @media(max-width:600px){.goal-mini{flex-wrap:wrap}.goal-mini>div{min-width:calc(100% - 60px)}.goal-mini .task-edit-button{margin-left:auto}.subgoal-mini{align-items:flex-start}.subgoal-controls{flex-wrap:wrap;justify-content:flex-end}}
+
+.area-management-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.area-management-actions .text-button:disabled{opacity:.35;cursor:not-allowed}
