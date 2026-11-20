@@ -270,5 +270,29 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 - Selección individual o de todas las tareas activas visibles; acciones en bloque para completar, fijar una fecha común o quitar las fechas. Los cambios se limitan a IDs seleccionados, estados activos y `owner_user_id`, y verifican filas afectadas.
 - Playwright cubre captura/edición de duración, filtros por fecha, completar en bloque, reprogramar, quitar fecha y recuperar tareas atrasadas. Las pruebas usan mocks; no escriben datos reales.
 - Reutiliza columnas, política RLS, grants y permisos existentes. Sin migraciones, cambios de esquema, RLS, grants, permisos o secretos.
-- Validación manual de Robert en localhost: PENDIENTE.
+- Validación manual de Robert en localhost: PASS (20/11/2026). Confirmó que el lote funciona correctamente; aclaró que la duración estimada representa tiempo previsto, no un cronómetro. Anexo 136 cerrado manualmente.
 - Sin despliegue público ni preview. Estado de CI post-merge: no confirmado en la consulta actual; no se marca PASS por inferencia.
+
+
+
+## Lote 10 — Control del ciclo de vida de las tareas (20/11/2026)
+
+- PR #14 integrado en main: https://github.com/SimpleLife9/simplelife/pull/14.
+- SHA squash integrado: `417e0458ee5e06067d0ee2713657a5130d721c9e`.
+- SHA de la rama verificada por CI: `5fb193ce9ea3c9d90f5de6f27fd23aef66106163`.
+- CI PR #81: PASS — 3 pruebas unitarias, 16 E2E de navegador y build de producción: https://github.com/SimpleLife9/simplelife/actions/runs/44780320046.
+- CI post-merge #82 sobre el SHA integrado: PASS — pruebas unitarias, 16 E2E de navegador y build de producción: https://github.com/SimpleLife9/simplelife/actions/runs/44780632456.
+- Se agregan estados de trabajo editables (Pendiente, En curso, Bloqueada), archivo individual reversible, filtro Activas/Archivadas/Todas, restauración conservando estado y archivo masivo de tareas activas seleccionadas.
+- El campo de duración estimada ahora pregunta «¿Cuánto tiempo crees que te llevará?» y aclara que organiza el día y no inicia un temporizador.
+- Se reutilizan `task.status` y `task.archived_at`. Las operaciones se limitan por propietario, identidad, estado/archivo esperado y filas afectadas. Archivar no elimina físicamente ni altera el estado previo.
+- E2E usa Auth/PostgREST mocks; no escribe datos reales de Supabase en QA.
+- Sin migraciones ni cambios de esquema, RLS, grants, permisos o secretos. Sin despliegue público ni preview.
+- Validación manual de Robert en localhost: PENDIENTE.
+
+### Sesión de validación manual — Lote 10
+
+1. Cambiar una tarea entre Pendiente, En curso y Bloqueada.
+2. Archivar una tarea, filtrar por Archivadas y restaurarla comprobando que mantiene su estado.
+3. Seleccionar dos tareas activas y archivarlas en bloque.
+4. Archivar y restaurar una tarea completada; confirmar que sigue completada.
+5. Revisar el nuevo texto de duración estimada al crear y editar una tarea.
