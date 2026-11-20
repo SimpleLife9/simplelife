@@ -1580,15 +1580,18 @@ test('Tasks link to goals and subgoals, filter by objective, and restore removed
     task_id: first.id, goal_id: goal.id,
     relation_status: 'confirmed', created_by_user_id: profile.id,
   });
-  // The task correctly leaves the "Sin objetivo" filter as soon as the link is saved.
+  // Close the manager before using the list filters underneath it.
+  await dialog.getByRole('button', { name: 'Cerrar' }).click();
   await objectiveFilter.selectOption('all');
   await expect(page.getByText('Meta: Aumentar ventas')).toBeVisible();
 
+  await page.getByRole('button', { name: 'Gestionar objetivos: Preparar propuesta comercial' }).click();
   await dialog.getByLabel('Seleccionar meta o submeta').selectOption('subgoal:' + subgoal.id);
   await dialog.getByRole('button', { name: 'Vincular meta o submeta' }).click();
   await expect(page.getByText('Objetivo vinculado a la tarea.')).toBeVisible();
   expect(result.insertedContributionRelations).toHaveLength(2);
   await expect(page.getByText('Submeta: Contactar nuevos clientes · Aumentar ventas')).toBeVisible();
+  await dialog.getByRole('button', { name: 'Cerrar' }).click();
 
   // A task linked only to the subgoal must also contribute to the parent goal.
   await page.getByRole('button', { name: 'Gestionar objetivos: Llamar a nuevos clientes' }).click();
@@ -1597,6 +1600,7 @@ test('Tasks link to goals and subgoals, filter by objective, and restore removed
   await thirdDialog.getByRole('button', { name: 'Vincular meta o submeta' }).click();
   await expect(page.getByText('Objetivo vinculado a la tarea.')).toBeVisible();
   expect(result.insertedContributionRelations).toHaveLength(3);
+  await thirdDialog.getByRole('button', { name: 'Cerrar' }).click();
 
   await objectiveFilter.selectOption('goal:' + goal.id);
   await expect(page.getByText('Preparar propuesta comercial', { exact: true })).toBeVisible();
@@ -1610,6 +1614,7 @@ test('Tasks link to goals and subgoals, filter by objective, and restore removed
   await page.getByRole('button', { name: 'Gestionar objetivos: Preparar propuesta comercial' }).click();
   await page.getByRole('button', { name: 'Desvincular meta: Aumentar ventas' }).click();
   await expect(page.getByText('Meta desvinculada de la tarea.')).toBeVisible();
+  await dialog.getByRole('button', { name: 'Cerrar' }).click();
   const goalRelation = result.contributionRelations.find((row) => row.task_id === first.id && row.goal_id === goal.id);
   expect(goalRelation.relation_status).toBe('removed');
 
@@ -1623,6 +1628,7 @@ test('Tasks link to goals and subgoals, filter by objective, and restore removed
   await expect(dialog.getByText('Este vínculo existe en el historial y se restaurará sin crear otro registro.')).toBeVisible();
   await dialog.getByRole('button', { name: 'Vincular meta o submeta' }).click();
   await expect(page.getByText('Vínculo restaurado.')).toBeVisible();
+  await dialog.getByRole('button', { name: 'Cerrar' }).click();
   expect(result.insertedContributionRelations).toHaveLength(2);
   expect(goalRelation.relation_status).toBe('confirmed');
   expect(result.updatedContributionRelations).toContainEqual({ id: goalRelation.id, relation_status: 'confirmed' });
