@@ -1581,7 +1581,7 @@ test('Tasks link to goals and subgoals, filter by objective, and restore removed
     relation_status: 'confirmed', created_by_user_id: profile.id,
   });
   // Close the manager before using the list filters underneath it.
-  await dialog.getByRole('button', { name: 'Cerrar' }).click();
+  await dialog.getByRole('button', { name: 'Cerrar', exact: true }).click();
   await objectiveFilter.selectOption('all');
   await expect(page.getByText('Meta: Aumentar ventas')).toBeVisible();
 
@@ -1591,7 +1591,7 @@ test('Tasks link to goals and subgoals, filter by objective, and restore removed
   await expect(page.getByText('Objetivo vinculado a la tarea.')).toBeVisible();
   expect(result.insertedContributionRelations).toHaveLength(2);
   await expect(page.getByText('Submeta: Contactar nuevos clientes · Aumentar ventas')).toBeVisible();
-  await dialog.getByRole('button', { name: 'Cerrar' }).click();
+  await dialog.getByRole('button', { name: 'Cerrar', exact: true }).click();
 
   // A task linked only to the subgoal must also contribute to the parent goal.
   await page.getByRole('button', { name: 'Gestionar objetivos: Llamar a nuevos clientes' }).click();
@@ -1614,7 +1614,7 @@ test('Tasks link to goals and subgoals, filter by objective, and restore removed
   await page.getByRole('button', { name: 'Gestionar objetivos: Preparar propuesta comercial' }).click();
   await page.getByRole('button', { name: 'Desvincular meta: Aumentar ventas' }).click();
   await expect(page.getByText('Meta desvinculada de la tarea.')).toBeVisible();
-  await dialog.getByRole('button', { name: 'Cerrar' }).click();
+  await dialog.getByRole('button', { name: 'Cerrar', exact: true }).click();
   const goalRelation = result.contributionRelations.find((row) => row.task_id === first.id && row.goal_id === goal.id);
   expect(goalRelation.relation_status).toBe('removed');
 
@@ -1628,7 +1628,7 @@ test('Tasks link to goals and subgoals, filter by objective, and restore removed
   await expect(dialog.getByText('Este vínculo existe en el historial y se restaurará sin crear otro registro.')).toBeVisible();
   await dialog.getByRole('button', { name: 'Vincular meta o submeta' }).click();
   await expect(page.getByText('Vínculo restaurado.')).toBeVisible();
-  await dialog.getByRole('button', { name: 'Cerrar' }).click();
+  await dialog.getByRole('button', { name: 'Cerrar', exact: true }).click();
   expect(result.insertedContributionRelations).toHaveLength(3);
   expect(goalRelation.relation_status).toBe('confirmed');
   expect(result.updatedContributionRelations).toContainEqual({ id: goalRelation.id, relation_status: 'confirmed' });
