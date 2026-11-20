@@ -256,3 +256,19 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 - CI post-merge #73 (commit documental `59a7dacd69ac4595aa82de543f88eb0e2bc3c19d`): PASS — pruebas unitarias, Playwright y build de producción: https://github.com/SimpleLife9/simplelife/actions/runs/44738010979.
 - Validación manual de Robert en localhost: PASS (20/11/2026). Confirmó «funciona perfecto» tras probar la conversión de elementos de lista en tareas; Anexo 135 cerrado.
 - Sin despliegue público ni preview.
+
+
+## Lote 9 — Planificación diaria y gestión por lotes (20/11/2026)
+
+- PR #13 integrado: https://github.com/SimpleLife9/simplelife/pull/13.
+- SHA squash en main: `bfcdeed51f7411b7a7a228ba6e82f0ad467b3a86`.
+- SHA de la rama verificada por CI: `1c24ba9c380c75ac2c184c45af7b74cfd52e0729`.
+- CI PR #76: PASS — tests unitarios, Playwright de navegador y build de producción: https://github.com/SimpleLife9/simplelife/actions/runs/44742883966.
+- La creación y edición de tareas permiten guardar `estimated_duration_minutes` (1–10080 min) mediante el campo ya existente; la duración se muestra en formato legible.
+- Hoy separa las tareas atrasadas de las próximas, muestra conteo de atrasos y calcula el tiempo estimado de las tareas fechadas para hoy. Cada tarea atrasada ofrece «Pasar a hoy».
+- Tareas incorpora filtros por fecha: vencidas, hoy, próximos 7 días, sin fecha y todas.
+- Selección individual o de todas las tareas activas visibles; acciones en bloque para completar, fijar una fecha común o quitar las fechas. Los cambios se limitan a IDs seleccionados, estados activos y `owner_user_id`, y verifican filas afectadas.
+- Playwright cubre captura/edición de duración, filtros por fecha, completar en bloque, reprogramar, quitar fecha y recuperar tareas atrasadas. Las pruebas usan mocks; no escriben datos reales.
+- Reutiliza columnas, política RLS, grants y permisos existentes. Sin migraciones, cambios de esquema, RLS, grants, permisos o secretos.
+- Validación manual de Robert en localhost: PENDIENTE.
+- Sin despliegue público ni preview. Estado de CI post-merge: no confirmado en la consulta actual; no se marca PASS por inferencia.
