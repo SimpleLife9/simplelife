@@ -785,8 +785,8 @@ test('Objectives create areas and goals through separate floating forms', async 
 
 
 test('Objetivos permite editar áreas, metas y submetas, gestionar estados y crear submetas en todas las metas', async ({ page }) => {
-  const area = { id: '00000000-0000-7000-8000-000000000201', owner_user_id: profile.id, created_by_user_id: profile.id, title: 'Finanzas', description: null, position: 0, status: 'active', deleted_at: null };
-  const secondArea = { id: '00000000-0000-7000-8000-000000000211', owner_user_id: profile.id, created_by_user_id: profile.id, title: 'Salud', description: null, position: 1, status: 'active', deleted_at: null };
+  const area = { id: '00000000-0000-7000-8000-000000000201', owner_user_id: profile.id, created_by_user_id: profile.id, title: 'Finanzas', description: null, position: null, status: 'active', deleted_at: null };
+  const secondArea = { id: '00000000-0000-7000-8000-000000000211', owner_user_id: profile.id, created_by_user_id: profile.id, title: 'Salud', description: null, position: null, status: 'active', deleted_at: null };
   const goals = Array.from({ length: 3 }, (_, index) => ({ id: `00000000-0000-7000-8000-00000000020${index + 2}`, owner_user_id: profile.id, created_by_user_id: profile.id, life_area_id: area.id, title: `Meta ${index + 1}`, reason: null, expected_result: null, target_date: null, status: 'active', deleted_at: null }));
   const subgoal = { id: '00000000-0000-7000-8000-000000000209', goal_id: goals[0].id, created_by_user_id: profile.id, title: 'Ahorrar cada mes', expected_result: null, target_date: null, status: 'active', deleted_at: null };
   const result = await mockSupabaseSession(page, { areas: [area, secondArea], goals, subgoals: [subgoal] });
@@ -813,6 +813,8 @@ test('Objetivos permite editar áreas, metas y submetas, gestionar estados y cre
   expect(result.updatedAreas.some((update) => update.id === secondArea.id && update.position === 0)).toBe(true);
   await expect(page.getByRole('button', { name: 'Mover área arriba: Finanzas personales' })).toBeEnabled();
 
+  await page.getByRole('button', { name: 'Metas', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Tus metas' })).toBeVisible();
   await page.getByRole('button', { name: 'Editar meta: Meta 1' }).click();
   const goalDialog = page.getByRole('dialog', { name: 'Editar meta' });
   await goalDialog.getByLabel('Resultado que buscas').fill('Crear fondo de emergencia');
@@ -828,6 +830,8 @@ test('Objetivos permite editar áreas, metas y submetas, gestionar estados y cre
   await page.getByLabel('Estado de meta: Crear fondo de emergencia').selectOption('active');
   await expect(page.getByText('Meta reactivada.')).toBeVisible();
 
+  await page.getByRole('button', { name: 'Submetas', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Tus submetas' })).toBeVisible();
   await page.getByRole('button', { name: 'Editar submeta: Ahorrar cada mes' }).click();
   const subgoalDialog = page.getByRole('dialog', { name: 'Editar submeta' });
   await subgoalDialog.getByLabel('Nombre de la submeta').fill('Ahorrar el 20% mensual');
@@ -838,8 +842,11 @@ test('Objetivos permite editar áreas, metas y submetas, gestionar estados y cre
   await page.getByLabel('Estado de submeta: Ahorrar el 20% mensual').selectOption('completed');
   await expect(page.getByText('Submeta completada.')).toBeVisible();
 
-  await page.getByLabel('Nueva submeta para: Meta 3').fill('Tercera meta sin límite');
-  await page.getByRole('button', { name: 'Añadir submeta a: Meta 3' }).click();
+  await page.getByRole('button', { name: 'Nueva Submeta' }).click();
+  const newSubgoalDialog = page.getByRole('dialog', { name: 'Nueva submeta' });
+  await newSubgoalDialog.getByLabel('Meta a la que pertenece').selectOption({ label: 'Meta 3' });
+  await newSubgoalDialog.getByLabel('Nombre de la submeta').fill('Tercera meta sin límite');
+  await newSubgoalDialog.getByRole('button', { name: 'Crear submeta' }).click();
   await expect(page.getByText('Submeta creada.')).toBeVisible();
   expect(result.insertedSubgoals).toHaveLength(1);
   expect(result.insertedSubgoals[0]).toMatchObject({ goal_id: goals[2].id, title: 'Tercera meta sin límite', status: 'active', created_by_user_id: profile.id });
