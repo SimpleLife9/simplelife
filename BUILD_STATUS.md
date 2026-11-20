@@ -219,3 +219,17 @@ Robert confirmó que la corrección funciona correctamente en localhost y autori
 - Se reutilizan tablas, columnas, RLS, restricciones y grants existentes. Sin migraciones, cambios de esquema, RLS, grants, permisos o secretos; sin escrituras de prueba en datos reales.
 - Validación manual de Robert en localhost: PENDIENTE.
 - Sin despliegue público ni preview.
+
+
+## Corrección de descubribilidad del Inbox — PR #11 (20/11/2026)
+
+- PR #11 integrado: https://github.com/SimpleLife9/simplelife/pull/11.
+- SHA squash: `ee9c9dbfa4532d6d19726363077a864f88abdd0e`.
+- CI del PR #67: PASS — pruebas unitarias, Playwright E2E y build de producción: https://github.com/SimpleLife9/simplelife/actions/runs/44733379618.
+- CI post-merge #68: PASS — pruebas unitarias, Playwright E2E y build de producción: https://github.com/SimpleLife9/simplelife/actions/runs/44733611020.
+- Se hizo visible la navegación de «Más» con pestañas para Tareas, Notas e ideas y Listas; disponible en escritorio y móvil. Antes, los enlaces quedaban ocultos dentro del submenú lateral y no existían en móvil.
+- Se corrigió NotesPage para que un registro con `created_at` ausente o no válido no provoque `RangeError: Invalid time value`; muestra «Fecha no disponible».
+- Playwright valida el recorrido desde Inbox hasta «Tu biblioteca» para una idea creada, la consulta de una lista recién creada y acceso móvil a los tres módulos.
+- La clasificación manual, la conservación del original y la procedencia del Inbox permanecen sin cambios.
+- Sin migraciones, cambios de esquema, RLS, grants, permisos ni secretos; sin escrituras de QA en datos reales. Sin despliegue público ni preview.
+- Validación manual de Robert en localhost: PENDIENTE. Comprobar «Más → Notas e ideas» y «Más → Listas» y confirmar que aparecen los registros guardados anteriormente desde Inbox.
