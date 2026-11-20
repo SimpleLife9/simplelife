@@ -216,3 +216,13 @@
 .more-page-tabs button:hover{color:var(--green);background:rgba(255,255,255,.65)}
 .more-page-tabs button.selected{background:#fff;color:var(--green);font-weight:700;box-shadow:0 2px 8px rgba(26,52,42,.07)}
 @media(max-width:600px){.more-page-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));width:100%;gap:4px;margin:-7px 0 22px}.more-page-tabs button{padding:10px 5px;font-size:.72rem}}
+
+
+/* List item -> task conversion */
+.list-item-wrap{display:grid;gap:3px;padding:4px 0}
+.list-item-wrap .list-item{padding:5px 2px}
+.list-item-tools{display:flex;align-items:center;gap:10px;padding:0 0 5px 29px;min-width:0}
+.list-task-link{font-size:.64rem;color:#6e8777;font-weight:600}
+.list-task-action{border:0;background:transparent;color:#32664f;padding:3px 0;font-size:.65rem;font-weight:700;text-align:left}
+.list-task-action:hover{text-decoration:underline}
+.list-task-action:disabled{opacity:.55;cursor:not-allowed}
