@@ -36,6 +36,8 @@ test('goal and project progress uses unique confirmed links and completed tasks 
   const tasks = [
     makeTask('done', 'completed', { completed_at: '2026-11-20T14:00:00Z' }),
     makeTask('doing', 'in_progress'),
+    makeTask('archived-open', 'todo', { archived_at: '2026-11-19T12:00:00Z' }),
+    makeTask('archived-done', 'completed', { archived_at: '2026-11-19T12:00:00Z' }),
     makeTask('cancelled', 'cancelled'),
     makeTask('deleted', 'completed', { deleted_at: '2026-11-19T00:00:00Z' }),
   ];
@@ -49,6 +51,8 @@ test('goal and project progress uses unique confirmed links and completed tasks 
       { task_id: 'done', goal_id: goal.id, relation_status: 'confirmed' },
       { task_id: 'done', goal_id: goal.id, relation_status: 'confirmed' },
       { task_id: 'doing', subgoal_id: subgoal.id, relation_status: 'confirmed' },
+      { task_id: 'archived-open', goal_id: goal.id, relation_status: 'confirmed' },
+      { task_id: 'archived-done', goal_id: goal.id, relation_status: 'confirmed' },
       { task_id: 'cancelled', goal_id: goal.id, relation_status: 'confirmed' },
       { task_id: 'doing', goal_id: goal.id, relation_status: 'removed' },
     ],
@@ -62,7 +66,7 @@ test('goal and project progress uses unique confirmed links and completed tasks 
 
   assert.deepEqual(snapshot.goalProgress[0], {
     id: 'goal-1', title: 'Fortalecer finanzas', targetDate: '2026-11-25',
-    totalTasks: 2, completedTasks: 1, blockedTasks: 0, progress: 50,
+    totalTasks: 3, completedTasks: 2, blockedTasks: 0, progress: 67,
   });
   assert.equal(snapshot.projectProgress[0].progress, 50);
   assert.equal(snapshot.projectProgress[0].totalTasks, 2);
