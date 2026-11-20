@@ -746,7 +746,7 @@ test('Objectives create areas and goals through separate floating forms', async 
   await page.locator('.side-nav').getByRole('button', { name: /Objetivos/ }).click();
   await expect(page.getByRole('heading', { name: 'Tus áreas de vida' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Nueva Meta' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Nueva Area' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Nueva Área' })).toBeVisible();
   await expect(page.getByRole('dialog', { name: 'Nueva área' })).toHaveCount(0);
   await expect(page.getByRole('dialog', { name: 'Nueva meta' })).toHaveCount(0);
 
@@ -793,7 +793,9 @@ test('Objetivos permite editar áreas, metas y submetas, gestionar estados y cre
   await page.getByLabel('Correo electrónico').fill(authUser.email);
   await page.getByLabel('Contraseña').fill('not-a-real-password');
   await page.getByRole('button', { name: 'Iniciar sesión' }).click();
-  await page.getByRole('button', { name: 'Objetivos', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+  await page.locator('.side-nav').getByRole('button', { name: /Objetivos/ }).click();
+  await expect(page.getByRole('heading', { name: 'Tus áreas de vida' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Finanzas' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Editar área: Finanzas' }).click();
