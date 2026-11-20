@@ -147,3 +147,18 @@ No `service_role` key or database password is present in the frontend. `.env.exa
 - Formularios `Nuevo Proyecto`, `Nueva Tarea`, `Nueva Meta` y `Nueva Area` permanecen cerrados hasta accionar el botón superior; cancelar limpia campos y no escribe.
 - Sin cambios de esquema, migraciones, RLS, permisos, secretos ni registros reales. Sin despliegue público.
 - Validación manual del usuario: PENDIENTE.
+
+
+## Lote 5 — Gestión completa de áreas, metas y submetas
+
+- Integrado en `main` por PR #7: https://github.com/SimpleLife9/simplelife/pull/7.
+- Merge SHA del código: `6efd261306e691438fa9cd7f253f76d82851178b`.
+- CI del PR #41: PASS — 3/3 pruebas unitarias, Playwright E2E y build de producción: https://github.com/SimpleLife9/simplelife/actions/runs/44666857088.
+- CI post-merge #42: PASS — 3/3 pruebas unitarias, Playwright E2E y build de producción: https://github.com/SimpleLife9/simplelife/actions/runs/44667145940.
+- Áreas: editar nombre/descripción, pausar/reactivar y reordenar mediante subir/bajar persistiendo en el campo existente `position`.
+- Metas: editar área asociada, título, resultado esperado, motivo y fecha objetivo; cambiar entre estados permitidos.
+- Submetas: editar título, resultado esperado y fecha objetivo; cambiar estado; crear desde cualquier meta, sin límite artificial de dos.
+- E2E valida la edición, el cambio de estados, reordenamiento de áreas y creación de submetas más allá de las dos primeras metas.
+- No se añadieron columnas/tablas ni migraciones. Sin cambios de RLS/grants/políticas, sin DELETE físico y sin modificaciones de datos reales durante las pruebas (E2E usa mocks).
+- Validación manual en la cuenta local autenticada: PENDIENTE.
+- No se creó despliegue público ni preview.
