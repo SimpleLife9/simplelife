@@ -142,7 +142,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     }
 
     if (url.pathname === '/rest/v1/life_area' && method === 'GET') {
-      await json(200, areas.filter((area) => !area.deleted_at));
+      await json(200, areas.filter((area) => !area.deleted_at).sort((a, b) => (a.position ?? 0) - (b.position ?? 0)));
       return;
     }
     if (url.pathname === '/rest/v1/life_area' && method === 'POST') {
