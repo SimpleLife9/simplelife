@@ -638,10 +638,14 @@ test('Projects support search, lifecycle, editing, archive, restore and linked t
     project_id: projectA.id,
     relation_role: 'primary',
   };
-  const { projects, insertedProjects, updatedProjects, taskRows, projectLinks } = await mockSupabaseSession(page, {
+  const goalForProject = { id: '00000000-0000-7000-8000-000000000731', owner_user_id: profile.id, created_by_user_id: profile.id, life_area_id: '00000000-0000-7000-8000-000000000730', title: 'Crear fondo de emergencia', reason: null, expected_result: 'Seis meses de gastos', target_date: null, status: 'active', deleted_at: null };
+  const subgoalForProject = { id: '00000000-0000-7000-8000-000000000732', goal_id: goalForProject.id, created_by_user_id: profile.id, title: 'Ahorrar cada mes', expected_result: null, target_date: null, status: 'active', deleted_at: null };
+  const { projects, insertedProjects, updatedProjects, taskRows, projectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations } = await mockSupabaseSession(page, {
     projects: [projectA, projectB],
     tasks: [linkedTask],
     links: [link],
+    goals: [goalForProject],
+    subgoals: [subgoalForProject],
   });
   await page.goto('/');
   await page.getByLabel('Correo electrónico').fill(authUser.email);
@@ -680,6 +684,42 @@ test('Projects support search, lifecycle, editing, archive, restore and linked t
   await expect(detail.getByText('Documentar proceso de ventas')).toBeVisible();
   await expect(detail.getByText('En curso', { exact: true })).toBeVisible();
   expect(await detail.locator('.project-task-summary > div strong').allTextContents()).toEqual(['1', '1', '0', '0']);
+  // Link a subgoal, remove it without deleting history, and restore the same relation.
+  await expect(detail.getByText('Este proyecto todavía no está vinculado a ninguna meta o submeta.')).toBeVisible();
+  await detail.getByRole('button', { name: 'Vincular meta o submeta' }).click();
+  await detail.getByLabel('Seleccionar meta o submeta').selectOption('subgoal:' + subgoalForProject.id);
+  await detail.getByRole('button', { name: 'Vincular relación' }).click();
+  await expect(page.getByText('Submeta vinculada al proyecto.')).toBeVisible();
+  await expect(detail.getByText('Ahorrar cada mes', { exact: true })).toBeVisible();
+  expect(insertedContributionRelations).toHaveLength(1);
+  expect(insertedContributionRelations[0]).toMatchObject({
+    project_id: projectA.id, goal_id: null, subgoal_id: subgoalForProject.id,
+    relation_status: 'confirmed', created_by_user_id: profile.id,
+  });
+
+  await detail.getByRole('button', { name: 'Desvincular submeta: Ahorrar cada mes' }).click();
+  await expect(page.getByText('Submeta desvinculada del proyecto.')).toBeVisible();
+  expect(updatedContributionRelations.at(-1)).toMatchObject({
+    id: insertedContributionRelations[0].id, relation_status: 'removed',
+  });
+  expect(contributionRelations).toHaveLength(1);
+
+  await detail.getByRole('button', { name: 'Vincular meta o submeta' }).click();
+  await detail.getByLabel('Seleccionar meta o submeta').selectOption('subgoal:' + subgoalForProject.id);
+  await detail.getByRole('button', { name: 'Vincular relación' }).click();
+  await expect(page.getByText('Vínculo restaurado.')).toBeVisible();
+  expect(insertedContributionRelations).toHaveLength(1);
+  expect(updatedContributionRelations.at(-1)).toMatchObject({
+    id: insertedContributionRelations[0].id, relation_status: 'confirmed',
+  });
+
+  // A project may also connect directly to its parent goal.
+  await detail.getByRole('button', { name: 'Vincular meta o submeta' }).click();
+  await detail.getByLabel('Seleccionar meta o submeta').selectOption('goal:' + goalForProject.id);
+  await detail.getByRole('button', { name: 'Vincular relación' }).click();
+  await expect(page.getByText('Meta vinculada al proyecto.')).toBeVisible();
+  expect(insertedContributionRelations).toHaveLength(2);
+
   await detail.getByRole('button', { name: 'Cerrar', exact: true }).click();
 
   // Edit all project fields and status, scoped to the signed-in owner.
@@ -812,7 +852,12 @@ test('Objetivos permite editar áreas, metas y submetas, gestionar estados y cre
   const secondArea = { id: '00000000-0000-7000-8000-000000000211', owner_user_id: profile.id, created_by_user_id: profile.id, title: 'Salud', description: null, position: null, status: 'active', deleted_at: null };
   const goals = Array.from({ length: 3 }, (_, index) => ({ id: `00000000-0000-7000-8000-00000000020${index + 2}`, owner_user_id: profile.id, created_by_user_id: profile.id, life_area_id: area.id, title: `Meta ${index + 1}`, reason: null, expected_result: null, target_date: null, status: 'active', deleted_at: null }));
   const subgoal = { id: '00000000-0000-7000-8000-000000000209', goal_id: goals[0].id, created_by_user_id: profile.id, title: 'Ahorrar cada mes', expected_result: null, target_date: null, status: 'active', deleted_at: null };
-  const result = await mockSupabaseSession(page, { areas: [area, secondArea], goals, subgoals: [subgoal] });
+  const relatedProject = { id: '00000000-0000-7000-8000-000000000220', owner_user_id: profile.id, created_by_user_id: profile.id, name: 'Proyecto de ahorro', purpose: null, status: 'active', archived_at: null, deleted_at: null, created_at: '2026-11-20T12:00:00.000Z' };
+  const contributionRelations = [
+    { id: '00000000-0000-7000-8000-000000000221', project_id: relatedProject.id, task_id: null, goal_id: goals[0].id, subgoal_id: null, relation_status: 'confirmed', created_by_user_id: profile.id },
+    { id: '00000000-0000-7000-8000-000000000222', project_id: relatedProject.id, task_id: null, goal_id: null, subgoal_id: subgoal.id, relation_status: 'confirmed', created_by_user_id: profile.id },
+  ];
+  const result = await mockSupabaseSession(page, { areas: [area, secondArea], goals, subgoals: [subgoal], projects: [relatedProject], contributionRelations });
   await page.goto('/');
   await page.getByLabel('Correo electrónico').fill(authUser.email);
   await page.getByLabel('Contraseña').fill('not-a-real-password');
@@ -838,6 +883,8 @@ test('Objetivos permite editar áreas, metas y submetas, gestionar estados y cre
 
   await page.getByRole('button', { name: 'Metas', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Tus metas' })).toBeVisible();
+  const relatedGoalCard = page.locator('.goal-record-card').filter({ has: page.getByRole('heading', { name: 'Meta 1' }) });
+  await expect(relatedGoalCard.getByText('Proyecto de ahorro', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Editar meta: Meta 1' }).click();
   const goalDialog = page.getByRole('dialog', { name: 'Editar meta' });
   await goalDialog.getByLabel('Resultado que buscas').fill('Crear fondo de emergencia');
@@ -855,6 +902,8 @@ test('Objetivos permite editar áreas, metas y submetas, gestionar estados y cre
 
   await page.getByRole('button', { name: 'Submetas', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Tus submetas' })).toBeVisible();
+  const relatedSubgoalCard = page.locator('.subgoal-record-card').filter({ has: page.getByRole('heading', { name: 'Ahorrar cada mes' }) });
+  await expect(relatedSubgoalCard.getByText('Proyecto de ahorro', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Editar submeta: Ahorrar cada mes' }).click();
   const subgoalDialog = page.getByRole('dialog', { name: 'Editar submeta' });
   await subgoalDialog.getByLabel('Nombre de la submeta').fill('Ahorrar el 20% mensual');
