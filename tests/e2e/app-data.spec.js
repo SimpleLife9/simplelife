@@ -110,6 +110,7 @@ async function mockSupabaseSession(page, initialData = {}) {
   const insertedLists = [];
   const listItems = [...(initialData.listItems || [])];
   const insertedListItems = [];
+  const updatedListItems = [];
   let createdCount = 0;
 
   await page.route(`${projectUrl}/**`, async (route) => {
@@ -363,7 +364,8 @@ async function mockSupabaseSession(page, initialData = {}) {
 
     if (url.pathname === '/rest/v1/list_item' && method === 'GET') {
       const idFilter = url.searchParams.get('id') || '';
-      await json(200, listItems.filter((row) => !idFilter || idFilter === 'eq.' + row.id));
+      const listFilter = url.searchParams.get('list_id') || '';
+      await json(200, listItems.filter((row) => (!idFilter || idFilter === 'eq.' + row.id) && (!listFilter || listFilter === 'eq.' + row.list_id)));
       return;
     }
     if (url.pathname === '/rest/v1/list_item' && method === 'POST') {
@@ -372,6 +374,18 @@ async function mockSupabaseSession(page, initialData = {}) {
       listItems.push(...rows);
       insertedListItems.push(...rows);
       await json(201, rows, { 'content-range': '0-0/*' });
+      return;
+    }
+
+    if (url.pathname === '/rest/v1/list_item' && method === 'PATCH') {
+      const payload = request.postDataJSON();
+      const idFilter = url.searchParams.get('id') || '';
+      const listFilter = url.searchParams.get('list_id') || '';
+      const row = listItems.find((item) => idFilter === 'eq.' + item.id && listFilter === 'eq.' + item.list_id && item.task_id == null);
+      if (!row) { await json(200, []); return; }
+      Object.assign(row, payload);
+      updatedListItems.push({ id: row.id, ...payload });
+      await json(200, [{ id: row.id }], { 'content-range': '0-0/*' });
       return;
     }
 
@@ -448,7 +462,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     await json(404, { message: `Unexpected mocked Supabase request: ${method} ${url.pathname}` });
   });
 
-  return { insertedTasks, updatedTasks, taskRows, projects, insertedProjects, updatedProjects, projectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems };
+  return { insertedTasks, updatedTasks, taskRows, projects, insertedProjects, updatedProjects, projectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
 }
 
 test('mock-authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
@@ -1203,4 +1217,75 @@ test('More modules remain directly accessible from the mobile navigation', async
   await expect(page.getByRole('heading', { name: 'Tu biblioteca' })).toBeVisible();
   await sectionNav.getByRole('button', { name: 'Listas' }).click();
   await expect(page.getByRole('heading', { name: 'Tus listas' })).toBeVisible();
+});
+
+
+test('Lists convert an item into a task, preserve the original and avoid duplicate conversion', async ({ page }) => {
+  const existingList = {
+    id: '00000000-0000-7000-8000-000000000501',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    name: 'Compras de la semana',
+    status: 'active',
+    archived_at: null,
+    deleted_at: null,
+  };
+  const existingItem = {
+    id: '00000000-0000-7000-8000-000000000502',
+    list_id: existingList.id,
+    task_id: null,
+    content: 'Comprar leche y avena para el desayuno',
+    position: 0,
+    is_checked: false,
+    created_at: '2026-11-20T10:00:00.000Z',
+  };
+  const { insertedTasks, updatedListItems, listItems } = await mockSupabaseSession(page, {
+    lists: [existingList],
+    listItems: [existingItem],
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.locator('.side-nav').getByRole('button', { name: /Más/ }).click();
+  await page.getByRole('navigation', { name: 'Secciones de Más' }).getByRole('button', { name: 'Listas' }).click();
+
+  await expect(page.getByRole('heading', { name: 'Compras de la semana' })).toBeVisible();
+  await expect(page.getByText(existingItem.content)).toBeVisible();
+  await page.getByRole('button', { name: 'Convertir en tarea: ' + existingItem.content }).click();
+  const dialog = page.getByRole('dialog', { name: 'Convertir en tarea' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel('Título de la tarea').fill('Comprar leche y avena');
+  await dialog.getByLabel('Prioridad de la tarea').selectOption('2');
+  await dialog.getByLabel('Fecha objetivo (opcional)').fill('2026-11-23');
+  await dialog.getByRole('button', { name: 'Crear y vincular tarea' }).click();
+
+  await expect(page.getByText('Tarea creada y vinculada al elemento de la lista.')).toBeVisible();
+  expect(insertedTasks).toHaveLength(1);
+  expect(insertedTasks[0]).toMatchObject({
+    id: updatedListItems[0].task_id,
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    action: 'Comprar leche y avena',
+    description: 'Comprar leche y avena para el desayuno\n\nOrigen: elemento de la lista "Compras de la semana".',
+    priority: 2,
+    due_date: '2026-11-23',
+    status: 'todo',
+    time_zone: 'America/Havana',
+  });
+  expect(updatedListItems).toEqual([{ id: existingItem.id, task_id: insertedTasks[0].id }]);
+  expect(listItems[0]).toMatchObject({ id: existingItem.id, content: existingItem.content, task_id: insertedTasks[0].id });
+
+  await expect(page.getByText('Tarea vinculada · Pendiente')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Convertir en tarea: ' + existingItem.content })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Abrir tareas →' }).click();
+  await expect(page.getByRole('heading', { name: 'Todas tus tareas' })).toBeVisible();
+  await expect(page.getByText('Comprar leche y avena', { exact: true })).toBeVisible();
+
+  await page.locator('.side-nav').getByRole('button', { name: /Más/ }).click();
+  await page.getByRole('navigation', { name: 'Secciones de Más' }).getByRole('button', { name: 'Listas' }).click();
+  await expect(page.getByText('Tarea vinculada · Pendiente')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Convertir en tarea: ' + existingItem.content })).toHaveCount(0);
+  expect(insertedTasks).toHaveLength(1);
+  expect(updatedListItems).toHaveLength(1);
 });
