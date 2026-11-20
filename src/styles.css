@@ -166,3 +166,26 @@
 .goal-filter-field select{min-width:210px}
 @media(max-width:760px){.goal-catalog-grid,.subgoal-catalog-grid{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:600px){.life-view-tabs{gap:4px}.life-view-tab{padding:9px 5px;font-size:.72rem}.goal-record-heading{flex-wrap:wrap}.goal-record-heading .task-edit-button{margin-left:auto}.goal-record-footer{align-items:stretch;flex-direction:column}.record-status-field select{max-width:none;width:100%}.subgoal-toolbar{justify-content:stretch}.goal-filter-field,.goal-filter-field select{width:100%;max-width:none}.area-area-summary{align-items:flex-start;flex-direction:column}}
+
+
+/* Goal and subgoal to project relationships */
+.goal-related-projects{display:grid;gap:7px;margin:0 0 14px;padding:11px 12px;border:1px solid #e8eee7;border-radius:10px;background:#fbfcfa}
+.goal-related-projects>span{color:#819087;font-size:.63rem;font-weight:750}
+.goal-related-projects>div{display:flex;gap:6px;flex-wrap:wrap}
+.goal-related-projects>small{color:#a0aaa3;font-size:.67rem}
+.goal-related-project-tag{display:inline-flex;padding:5px 8px;border:1px solid #dce8dc;border-radius:999px;background:#f0f6ee;color:#43674e;font-size:.66rem;font-weight:700}
+.project-goal-link-section{margin-bottom:18px}
+.project-relation-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
+.project-relation-heading>strong{color:#45594c;font-size:.75rem}
+.project-relation-heading .text-button{font-size:.68rem}
+.project-relation-list{display:grid;gap:7px;margin-bottom:10px}
+.project-relation-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 11px;border:1px solid #edf1ec;border-radius:10px;background:#fff}
+.project-relation-row>div{display:grid;gap:3px;min-width:0}
+.project-relation-row>div>span{color:#8b9a8f;font-size:.58rem;font-weight:800;text-transform:uppercase;letter-spacing:.05em}
+.project-relation-row strong{color:#45594c;font-size:.72rem;overflow-wrap:anywhere}
+.project-relation-row small{color:#99a49c;font-size:.61rem}
+.project-relation-row .text-button{flex:0 0 auto;font-size:.65rem}
+.project-relation-form{display:grid;gap:10px;margin-top:12px;padding:13px;border:1px solid #e5ece4;border-radius:11px;background:#f8faf7}
+.project-relation-form .field{margin:0}
+.project-relation-form .button{justify-self:start}
+@media(max-width:600px){.project-relation-heading{align-items:flex-start;flex-direction:column}.project-relation-row{align-items:flex-start}.project-relation-row .text-button{margin-left:auto}}
