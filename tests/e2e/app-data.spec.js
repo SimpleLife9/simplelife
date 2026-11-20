@@ -1723,7 +1723,7 @@ test('Tasks can be linked to primary and additional projects and filtered by pro
   await linkedRow.getByRole('button', { name: 'Gestionar proyectos: Preparar propuesta' }).click();
   const dialog = page.getByRole('dialog', { name: 'Proyectos de la tarea' });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByText('Proyecto principal', { exact: true })).toBeVisible();
+  await expect(dialog.locator('.project-relation-row').filter({ hasText: 'Proyecto principal' })).toBeVisible();
   await dialog.getByLabel('Seleccionar proyecto').selectOption(projectB.id);
   await dialog.getByRole('button', { name: 'Vincular proyecto' }).click();
   await expect(page.getByText('Proyecto adicional vinculado a la tarea.')).toBeVisible();
@@ -1731,7 +1731,7 @@ test('Tasks can be linked to primary and additional projects and filtered by pro
   expect(insertedProjectLinks[0]).toMatchObject({
     task_id: linkedTask.id, project_id: projectB.id, relation_role: 'additional', created_by_user_id: profile.id,
   });
-  await expect(dialog.getByText('Proyecto relacionado', { exact: true })).toBeVisible();
+  await expect(dialog.locator('.project-relation-row').filter({ hasText: 'Proyecto relacionado' })).toBeVisible();
 
   await dialog.getByRole('button', { name: 'Hacer principal: Proyecto relacionado' }).click();
   await expect(page.getByText('Proyecto principal actualizado. El anterior se conserva como adicional.')).toBeVisible();
