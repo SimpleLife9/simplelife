@@ -231,13 +231,21 @@ async function mockSupabaseSession(page, initialData = {}) {
       const idFilter = url.searchParams.get('id') || '';
       const statusFilter = url.searchParams.get('status') || '';
       const archivedFilter = url.searchParams.get('archived_at') || '';
+      const deletedFilter = url.searchParams.get('deleted_at') || '';
+      const statusEquals = statusFilter.startsWith('eq.') ? statusFilter.slice(3) : '';
       const excludedStatuses = statusFilter.startsWith('not.in.(')
         ? statusFilter.slice(8, -1).split(',')
         : [];
+      const allowedStatuses = statusFilter.startsWith('in.(')
+        ? statusFilter.slice(4, -1).split(',')
+        : [];
       const rows = taskRows.filter((task) => !task.deleted_at
         && (!idFilter || idFilter === 'eq.' + task.id)
-        && (!archivedFilter || archivedFilter !== 'is.null' || task.archived_at == null)
-        && (!excludedStatuses.length || !excludedStatuses.includes(task.status)));
+        && (!deletedFilter || deletedFilter !== 'is.null' || task.deleted_at == null)
+        && (!archivedFilter || (archivedFilter === 'is.null' && task.archived_at == null) || (archivedFilter === 'not.is.null' && task.archived_at != null))
+        && (!statusEquals || task.status === statusEquals)
+        && (!excludedStatuses.length || !excludedStatuses.includes(task.status))
+        && (!allowedStatuses.length || allowedStatuses.includes(task.status)));
       await json(200, rows);
       return;
     }
@@ -452,15 +460,21 @@ async function mockSupabaseSession(page, initialData = {}) {
       const idFilter = url.searchParams.get('id') || '';
       const ownerFilter = url.searchParams.get('owner_user_id') || '';
       const statusFilter = url.searchParams.get('status') || '';
+      const archiveFilter = url.searchParams.get('archived_at') || '';
+      const deletedFilter = url.searchParams.get('deleted_at') || '';
       const targetIds = idFilter.startsWith('in.(')
         ? idFilter.slice(4, -1).split(',')
         : idFilter.startsWith('eq.') ? [idFilter.slice(3)] : [];
+      const statusEquals = statusFilter.startsWith('eq.') ? statusFilter.slice(3) : '';
       const allowedStatuses = statusFilter.startsWith('in.(')
         ? statusFilter.slice(4, -1).split(',')
         : [];
       const matching = taskRows.filter((row) => targetIds.includes(row.id)
         && ownerFilter === `eq.${row.owner_user_id}`
-        && (!allowedStatuses.length || allowedStatuses.includes(row.status)));
+        && (!statusEquals || row.status === statusEquals)
+        && (!allowedStatuses.length || allowedStatuses.includes(row.status))
+        && (!archiveFilter || (archiveFilter === 'is.null' && row.archived_at == null) || (archiveFilter === 'not.is.null' && row.archived_at != null))
+        && (!deletedFilter || deletedFilter !== 'is.null' || row.deleted_at == null));
       if (!matching.length) {
         await json(200, []);
         return;
@@ -506,7 +520,7 @@ test('mock-authenticated task creation uses the signed-in profile and Havana tim
   await createTaskDialog.getByLabel('¿Qué necesitas hacer?').fill('Revisar el plan del día');
   await createTaskDialog.getByLabel('Prioridad').selectOption('2');
   await createTaskDialog.getByLabel('Fecha (opcional)').fill('2026-11-20');
-  await createTaskDialog.getByLabel('Tiempo estimado (min)').fill('90');
+  await createTaskDialog.getByLabel('¿Cuánto tiempo crees que te llevará?').fill('90');
   await createTaskDialog.getByRole('button', { name: 'Añadir tarea' }).click();
   await expect(createTaskDialog).toBeHidden();
 
@@ -532,7 +546,7 @@ test('mock-authenticated task creation uses the signed-in profile and Havana tim
   await editor.getByLabel('Detalles (opcional)').fill('Comprobar prioridades y fechas.');
   await editor.getByRole('combobox').selectOption('1');
   await editor.getByLabel('Fecha (opcional)').fill('2026-11-21');
-  await editor.getByLabel('Tiempo estimado (min)').fill('120');
+  await editor.getByLabel('¿Cuánto tiempo crees que te llevará?').fill('120');
   await editor.getByRole('button', { name: 'Guardar cambios' }).click();
 
   await expect(page.getByText('Tarea actualizada.')).toBeVisible();
@@ -574,7 +588,7 @@ test('mock-authenticated task creation uses the signed-in profile and Havana tim
     completed_at: null,
     completion_outcome: null,
   });
-  await expect(page.getByText('Pendiente', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Cambiar estado: Revisar el plan semanal')).toHaveValue('todo');
 
   // Create two more tasks to exercise search, filters and sorting as a single batch.
   await page.getByRole('button', { name: 'Nueva Tarea' }).click();
@@ -1429,4 +1443,81 @@ test('Tasks filter by due date and support bulk complete, reschedule and clear d
     completion_outcome: 'complete',
     ids: expect.arrayContaining([overdue.id, noDateTask.id]),
   });
+});
+
+
+test('Tasks support work-status changes, reversible archiving and bulk archive', async ({ page }) => {
+  const task = (id, action, status = 'todo', archivedAt = null) => ({
+    id, owner_user_id: profile.id, created_by_user_id: profile.id,
+    action, description: null, status, priority: 3,
+    due_date: null, estimated_duration_minutes: 30,
+    completed_at: status === 'completed' ? '2026-11-19T15:00:00.000Z' : null,
+    completion_outcome: status === 'completed' ? 'complete' : null,
+    time_zone: 'America/Havana', archived_at: archivedAt, deleted_at: null,
+    created_at: '2026-11-19T12:00:00.000Z',
+  });
+  const first = task('00000000-0000-7000-8000-000000000901', 'Preparar propuesta');
+  const second = task('00000000-0000-7000-8000-000000000902', 'Revisar presupuesto', 'in_progress');
+  const archived = task('00000000-0000-7000-8000-000000000903', 'Pendiente antigua', 'todo', '2026-11-18T12:00:00.000Z');
+  const completed = task('00000000-0000-7000-8000-000000000904', 'Informe entregado', 'completed');
+  const { taskRows, updatedTasks } = await mockSupabaseSession(page, { tasks: [first, second, archived, completed] });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.getByRole('button', { name: 'Más' }).click();
+  await page.getByRole('button', { name: 'Tareas', exact: true }).click();
+
+  const workStatus = page.getByLabel('Cambiar estado: Preparar propuesta');
+  await expect(workStatus).toHaveValue('todo');
+  await workStatus.selectOption('in_progress');
+  await expect(page.getByText('Estado actualizado: En curso.')).toBeVisible();
+  expect(first.status).toBe('in_progress');
+  await page.getByLabel('Cambiar estado: Preparar propuesta').selectOption('blocked');
+  await expect(page.getByText('Estado actualizado: Bloqueada.')).toBeVisible();
+  expect(first.status).toBe('blocked');
+  await page.getByLabel('Cambiar estado: Preparar propuesta').selectOption('todo');
+  await expect(page.getByText('Estado actualizado: Pendiente.')).toBeVisible();
+  expect(first.status).toBe('todo');
+
+  await page.getByRole('button', { name: 'Archivar tarea: Preparar propuesta' }).click();
+  await expect(page.getByText('Tarea archivada.')).toBeVisible();
+  expect(first.archived_at).toBeTruthy();
+  expect(first.status).toBe('todo');
+
+  const archiveFilter = page.getByLabel('Filtrar por archivo');
+  await archiveFilter.selectOption('archived');
+  await expect(page.getByText('Preparar propuesta', { exact: true })).toBeVisible();
+  await expect(page.getByText('Pendiente antigua', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Restaurar tarea: Preparar propuesta' }).click();
+  await expect(page.getByText('Tarea restaurada.')).toBeVisible();
+  expect(first.archived_at).toBeNull();
+  expect(first.status).toBe('todo');
+  await expect(page.getByText('Preparar propuesta', { exact: true })).toHaveCount(0);
+
+  await archiveFilter.selectOption('active');
+  await page.getByLabel('Seleccionar tarea: Preparar propuesta').check();
+  await page.getByLabel('Seleccionar tarea: Revisar presupuesto').check();
+  await page.getByRole('button', { name: 'Archivar seleccionadas' }).click();
+  await expect(page.getByText('2 tareas archivadas.')).toBeVisible();
+  expect(first.archived_at).toBeTruthy();
+  expect(second.archived_at).toBeTruthy();
+  expect(first.status).toBe('todo');
+  expect(second.status).toBe('in_progress');
+  expect(updatedTasks.at(-1)).toMatchObject({
+    archived_at: expect.any(String),
+    ids: expect.arrayContaining([first.id, second.id]),
+  });
+
+  await archiveFilter.selectOption('archived');
+  await expect(page.getByText('Preparar propuesta', { exact: true })).toBeVisible();
+  await expect(page.getByText('Revisar presupuesto', { exact: true })).toBeVisible();
+
+  await page.getByLabel('Filtrar por estado').selectOption('completed');
+  await archiveFilter.selectOption('active');
+  await page.getByRole('button', { name: 'Archivar tarea: Informe entregado' }).click();
+  await expect(page.getByText('Tarea archivada.')).toBeVisible();
+  expect(completed.status).toBe('completed');
+  await archiveFilter.selectOption('archived');
+  await expect(page.getByRole('button', { name: 'Restaurar tarea: Informe entregado' })).toBeVisible();
 });
