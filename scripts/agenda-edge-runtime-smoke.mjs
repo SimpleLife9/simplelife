@@ -1,16 +1,8 @@
-import { generateKeyPairSync, sign } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 
 const FUNCTION_NAME = "agenda-time-resolve";
-const SUPABASE_URL = "https://abcdefghijklmnopqrst.supabase.co";
-const PUBLISHABLE_KEY = "sb_publishable_agenda_edge_runtime_ci_only_0123456789";
-const SECRET_KEY = "sb_secret_agenda_edge_runtime_ci_only_0123456789";
-const USER_ID = "00000000-0000-4000-8000-000000000001";
-const KEY_ID = "agenda-edge-runtime-ci-rs256";
 const API_URL = "http://127.0.0.1:54321";
+const USER_PASSWORD = "Agenda-Edge-CI-Only-Password-2026!";
 
 function fail(message) { throw new Error(message); }
 
@@ -22,38 +14,6 @@ function run(command, args) {
   return result.stdout + result.stderr;
 }
 
-function b64url(value) { return Buffer.from(value).toString("base64url"); }
-
-function createSignedUserJwt() {
-  const pair = generateKeyPairSync("rsa", { modulusLength: 2048, publicExponent: 0x10001 });
-  const publicJwk = {
-    ...pair.publicKey.export({ format: "jwk" }),
-    alg: "RS256",
-    use: "sig",
-    kid: KEY_ID,
-  };
-  const now = Math.floor(Date.now() / 1000);
-  const header = b64url(JSON.stringify({ alg: "RS256", typ: "JWT", kid: KEY_ID }));
-  const payload = b64url(JSON.stringify({
-    iss: SUPABASE_URL + "/auth/v1",
-    aud: "authenticated",
-    exp: now + 300,
-    iat: now,
-    sub: USER_ID,
-    role: "authenticated",
-    email: "agenda-edge-runtime-ci@example.invalid",
-    phone: "",
-    app_metadata: {},
-    user_metadata: {},
-    aal: "aal1",
-    session_id: "00000000-0000-4000-8000-000000000002",
-    is_anonymous: false,
-  }));
-  const signingInput = header + "." + payload;
-  const signature = sign("RSA-SHA256", Buffer.from(signingInput), pair.privateKey).toString("base64url");
-  return { token: signingInput + "." + signature, publicJwk };
-}
-
 function assertEqual(actual, expected, label) {
   if (actual !== expected) {
     fail(label + ": expected " + expected + ", received " + actual);
@@ -62,31 +22,55 @@ function assertEqual(actual, expected, label) {
 
 const statusOutput = run("supabase", ["status"]);
 const publishableMatch = statusOutput.match(/Publishable\s*[│|]\s*(sb_publishable_[A-Za-z0-9_-]+)/i);
+const secretMatch = statusOutput.match(/Secret\s*[│|]\s*(sb_secret_[A-Za-z0-9_-]+)/i);
 const localPublishableKey = publishableMatch?.[1];
-if (!localPublishableKey) {
-  fail("Could not read the local publishable key from supabase status:\n" + statusOutput);
+const localSecretKey = secretMatch?.[1];
+if (!localPublishableKey || !localSecretKey) {
+  fail("Could not read local publishable/secret keys from supabase status:\n" + statusOutput);
 }
-const functionUrl = API_URL.replace(/\/$/, "") + "/functions/v1/" + FUNCTION_NAME;
 
-const signed = createSignedUserJwt();
-const envValues = {
-  SUPABASE_URL,
-  SUPABASE_PUBLISHABLE_KEYS: JSON.stringify({ default: localPublishableKey }),
-  SUPABASE_SECRET_KEYS: JSON.stringify({ default: SECRET_KEY }),
-  SUPABASE_JWKS: JSON.stringify({ keys: [signed.publicJwk] }),
-};
+const testEmail = "agenda-edge-runtime-ci+" + Date.now() + "@example.invalid";
+const adminCreate = await fetch(API_URL + "/auth/v1/admin/users", {
+  method: "POST",
+  headers: {
+    apikey: localSecretKey,
+    authorization: "Bearer " + localSecretKey,
+    "content-type": "application/json",
+  },
+  body: JSON.stringify({
+    email: testEmail,
+    password: USER_PASSWORD,
+    email_confirm: true,
+  }),
+  signal: AbortSignal.timeout(10000),
+});
+const adminBody = await adminCreate.text();
+if (adminCreate.status !== 200 && adminCreate.status !== 201) {
+  fail("Local Auth could not create the disposable test user (HTTP " + adminCreate.status + "): " + adminBody);
+}
 
-const tempDir = await mkdtemp(join(tmpdir(), "simplelife-agenda-edge-runtime-"));
-const envFile = join(tempDir, "edge-runtime.env");
-await writeFile(
-  envFile,
-  Object.entries(envValues).map(([key, value]) => key + "=" + JSON.stringify(value)).join("\n") + "\n",
-  { mode: 0o600 },
-);
+const login = await fetch(API_URL + "/auth/v1/token?grant_type=password", {
+  method: "POST",
+  headers: {
+    apikey: localPublishableKey,
+    "content-type": "application/json",
+  },
+  body: JSON.stringify({ email: testEmail, password: USER_PASSWORD }),
+  signal: AbortSignal.timeout(10000),
+});
+const loginBody = await login.text();
+if (login.status !== 200) {
+  fail("Local Auth could not issue a user session (HTTP " + login.status + "): " + loginBody);
+}
+const session = JSON.parse(loginBody);
+if (typeof session.access_token !== "string" || !session.access_token) {
+  fail("Local Auth response did not contain an access_token: " + loginBody);
+}
 
+const functionUrl = API_URL + "/functions/v1/" + FUNCTION_NAME;
 const server = spawn(
   "supabase",
-  ["functions", "serve", FUNCTION_NAME, "--no-verify-jwt", "--env-file", envFile],
+  ["functions", "serve", FUNCTION_NAME, "--no-verify-jwt"],
   { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, NO_COLOR: "1" } },
 );
 let serverLogs = "";
@@ -110,7 +94,7 @@ try {
   for (let attempt = 0; attempt < 60; attempt += 1) {
     if (serverExit !== null) fail("Edge Runtime function server exited early (" + serverExit + ").\n" + serverLogs);
     try {
-      const response = await request({ authorization: "Bearer " + PUBLISHABLE_KEY });
+      const response = await request({ authorization: "Bearer " + localPublishableKey });
       if (response.status === 401) {
         ready = true;
         break;
@@ -129,21 +113,21 @@ try {
   });
 
   const valid = await request({
-    authorization: "Bearer " + signed.token,
+    authorization: "Bearer " + session.access_token,
     "content-type": "application/json",
   }, rangePayload);
   const validBody = await valid.text();
   if (valid.status !== 200) {
-    fail("signed user JWT response status: expected 200, received " + valid.status
-      + "\\nresponse body: " + validBody
-      + "\\nEdge Runtime logs:\\n" + serverLogs);
+    fail("Auth-issued user JWT response status: expected 200, received " + valid.status
+      + "\nresponse body: " + validBody
+      + "\nEdge Runtime logs:\n" + serverLogs);
   }
   const resolved = JSON.parse(validBody);
   assertEqual(resolved.startsAt, "2026-11-01T05:15:00.000Z", "resolved range start");
   assertEqual(resolved.endsAt, "2026-11-01T06:45:00.000Z", "resolved range end");
 
   const apiKeyAsBearer = await request({
-    authorization: "Bearer " + PUBLISHABLE_KEY,
+    authorization: "Bearer " + localPublishableKey,
     "content-type": "application/json",
   }, rangePayload);
   assertEqual(apiKeyAsBearer.status, 401, "publishable key used as Bearer");
@@ -155,10 +139,11 @@ try {
   assertEqual(invalidJwt.status, 401, "malformed JWT response status");
 
   console.log("PASS: Supabase Edge Runtime served agenda-time-resolve locally.");
-  console.log("PASS: synthetic signed user JWT reached atomic range resolver.");
+  console.log("PASS: local Auth issued a disposable user session accepted by the Edge Function.");
+  console.log("PASS: Auth-issued user JWT reached the atomic range resolver.");
   console.log("PASS: publishable key as Bearer was rejected with HTTP 401.");
   console.log("PASS: malformed JWT was rejected with HTTP 401.");
-  console.log("PASS: requests used only the ephemeral local stack and synthetic credentials.");
+  console.log("PASS: disposable Auth user and all local data are removed by the CI stack cleanup.");
 } finally {
   server.kill("SIGTERM");
   await new Promise((resolve) => {
@@ -166,5 +151,4 @@ try {
     const timeout = setTimeout(resolve, 5000);
     server.once("exit", () => { clearTimeout(timeout); resolve(); });
   });
-  await rm(tempDir, { recursive: true, force: true });
 }
