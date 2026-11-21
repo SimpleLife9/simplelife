@@ -588,6 +588,7 @@ test('mock-authenticated task creation uses the signed-in profile and Havana tim
   await page.getByRole('button', { name: 'Nueva Tarea' }).click();
   const createTaskDialog = page.getByRole('dialog', { name: 'Nueva tarea' });
   await expect(createTaskDialog).toBeVisible();
+  await expect(createTaskDialog.locator('.task-estimate-help')).toContainText('no inicia un temporizador');
   await createTaskDialog.getByLabel('¿Qué necesitas hacer?').fill('Revisar el plan del día');
   await createTaskDialog.getByLabel('Prioridad').selectOption('2');
   await createTaskDialog.getByLabel('Fecha (opcional)').fill('2026-11-20');
@@ -612,6 +613,7 @@ test('mock-authenticated task creation uses the signed-in profile and Havana tim
   await page.getByRole('button', { name: 'Editar tarea: Revisar el plan del día' }).click();
   const editor = page.getByRole('dialog', { name: 'Editar tarea' });
   await expect(editor).toBeVisible();
+  await expect(editor.locator('.task-estimate-help')).toContainText('no inicia un temporizador');
   await expect(editor.getByLabel('Nombre de la tarea')).toHaveValue('Revisar el plan del día');
   await editor.getByLabel('Nombre de la tarea').fill('Revisar el plan semanal');
   await editor.getByLabel('Detalles (opcional)').fill('Comprobar prioridades y fechas.');
@@ -2000,7 +2002,14 @@ test('Tasks support work-status changes, reversible archiving and bulk archive',
   await expect(page.getByText('Tarea archivada.')).toBeVisible();
   expect(completed.status).toBe('completed');
   await archiveFilter.selectOption('archived');
-  await expect(page.getByRole('button', { name: 'Restaurar tarea: Informe entregado' })).toBeVisible();
+  await page.getByRole('button', { name: 'Restaurar tarea: Informe entregado' }).click();
+  await expect(page.getByText('Tarea restaurada.')).toBeVisible();
+  expect(completed.archived_at).toBeNull();
+  expect(completed.status).toBe('completed');
+  expect(completed.completed_at).toBe('2026-11-19T15:00:00.000Z');
+  expect(completed.completion_outcome).toBe('complete');
+  await archiveFilter.selectOption('active');
+  await expect(page.getByText('Informe entregado', { exact: true })).toBeVisible();
 });
 
 
@@ -2023,15 +2032,15 @@ test('Tasks link to goals and subgoals, filter by objective, and restore removed
     title: 'Contactar nuevos clientes', expected_result: null, target_date: null,
     status: 'active', archived_at: null, deleted_at: null, created_at: '2026-11-20T11:10:00.000Z',
   };
-  const task = (id, action) => ({
+  const task = (id, action, status = 'todo') => ({
     id, owner_user_id: profile.id, created_by_user_id: profile.id,
-    action, description: null, status: 'todo', priority: 2, due_date: null,
+    action, description: null, status, priority: 2, due_date: null,
     estimated_duration_minutes: 30, time_zone: 'America/Havana',
     archived_at: null, deleted_at: null, created_at: '2026-11-20T12:00:00.000Z',
   });
   const first = task('00000000-0000-7000-8000-000000000704', 'Preparar propuesta comercial');
   const second = task('00000000-0000-7000-8000-000000000705', 'Actualizar métricas');
-  const third = task('00000000-0000-7000-8000-000000000706', 'Llamar a nuevos clientes');
+  const third = task('00000000-0000-7000-8000-000000000706', 'Llamar a nuevos clientes', 'blocked');
   const result = await mockSupabaseSession(page, {
     areas: [area], goals: [goal], subgoals: [subgoal], tasks: [first, second, third],
     contributionRelations: [],
@@ -2122,11 +2131,19 @@ test('Tasks link to goals and subgoals, filter by objective, and restore removed
   await expect(goalCard.getByText('Tareas que contribuyen · 2')).toBeVisible();
   await expect(goalCard.getByText('Preparar propuesta comercial')).toBeVisible();
   await expect(goalCard.getByText('Llamar a nuevos clientes')).toBeVisible();
+  const goalPendingTag = goalCard.locator('.goal-related-task-tag').filter({ has: page.getByText('Preparar propuesta comercial', { exact: true }) });
+  const goalBlockedTag = goalCard.locator('.goal-related-task-tag').filter({ has: page.getByText('Llamar a nuevos clientes', { exact: true }) });
+  await expect(goalPendingTag.locator('small')).toHaveText('Pendiente');
+  await expect(goalBlockedTag.locator('small')).toHaveText('Bloqueada');
   await page.getByRole('button', { name: 'Submetas', exact: true }).click();
   const subgoalCard = page.locator('.subgoal-record-card').filter({ has: page.getByRole('heading', { name: subgoal.title }) });
   await expect(subgoalCard.getByText('Tareas que contribuyen · 2')).toBeVisible();
   await expect(subgoalCard.getByText('Preparar propuesta comercial')).toBeVisible();
   await expect(subgoalCard.getByText('Llamar a nuevos clientes')).toBeVisible();
+  const subgoalPendingTag = subgoalCard.locator('.goal-related-task-tag').filter({ has: page.getByText('Preparar propuesta comercial', { exact: true }) });
+  const subgoalBlockedTag = subgoalCard.locator('.goal-related-task-tag').filter({ has: page.getByText('Llamar a nuevos clientes', { exact: true }) });
+  await expect(subgoalPendingTag.locator('small')).toHaveText('Pendiente');
+  await expect(subgoalBlockedTag.locator('small')).toHaveText('Bloqueada');
 });
 
 
