@@ -1,6 +1,15 @@
-export const todayInHavana = () => new Intl.DateTimeFormat('en-CA', {
-  timeZone: 'America/Havana', year: 'numeric', month: '2-digit', day: '2-digit',
-}).format(new Date());
+export const dateKeyInTimeZone = (date, timeZone) => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(date);
+  const values = Object.fromEntries(
+    parts.filter((part) => ['year', 'month', 'day'].includes(part.type))
+      .map((part) => [part.type, part.value]),
+  );
+  return `${values.year}-${values.month}-${values.day}`;
+};
+
+export const todayInHavana = () => dateKeyInTimeZone(new Date(), 'America/Havana');
 
 export const addDaysToDateKey = (value, days) => {
   if (!value) return '';
