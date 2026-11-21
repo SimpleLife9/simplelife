@@ -351,7 +351,7 @@ export function ListsPage({ profile, refreshKey, runAction, busy, setActivePage,
             <button type="button" className="task-editor-close" onClick={closeNewList} disabled={busy} aria-label="Cerrar nueva lista">×</button>
           </div>
           <form className="task-editor-form" onSubmit={createList}>
-            <Field label="Nombre de la lista" name="list" value={name} onChange={(event) => setName(event.target.value)} placeholder="Ej. Compras de la semana" required />
+            <Field label="Nombre de la lista" name="list" value={name} onChange={(event) => setName(event.target.value)} placeholder="Ej. Compras de la semana" required autoFocus />
             <TextAreaField label="Propósito (opcional)" name="purpose" value={purpose} onChange={(event) => setPurpose(event.target.value)} placeholder="¿Para qué usarás esta lista?" rows={3} />
             <div className="task-editor-actions">
               <button type="button" className="button task-editor-cancel" onClick={closeNewList} disabled={busy}>Cancelar</button>
