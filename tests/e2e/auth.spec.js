@@ -6,6 +6,8 @@ test('login screen switches to registration and back', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Vuelve a enfocarte.' })).toBeVisible();
   await expect(page.getByLabel('Correo electrónico')).toBeVisible();
   await expect(page.getByLabel('Contraseña')).toBeVisible();
+  // Keep the live-smoke selector aligned with the button's accessible name (label + arrow).
+  await expect(page.getByRole('button', { name: /^Iniciar sesión/ })).toBeVisible();
 
   await page.getByRole('button', { name: 'Crear cuenta' }).click();
 
