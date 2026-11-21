@@ -2,7 +2,7 @@
 
 **Status:** TECHNICAL DESIGN PROPOSAL — no DDL or migrations applied  
 **Date:** 21 November 2026  
-**Application baseline:** `main` SHA `207ce9388f1fb192254b9212dffe9f9df273187e`  
+**Application baseline:** `main` SHA `dc321f2b4656abd4e8c1697c7eb232fc6dfd6ea5`  
 **Supabase target inspected read-only:** `Simplelife_dev` / `iybnjrnysiikbtokyshg` / PostgreSQL 17.12
 
 This document translates the approved product decisions in ChatBending Anexos 5, 49, 61, 64, 69, 70, 71, 76, 77, 80, 82, 85 into an implementable Phase 1 contract. It intentionally separates confirmed product rules from implementation defaults that still need code-level verification. No table, migration, policy, grant, data row or secret was changed while preparing this document.
@@ -202,7 +202,7 @@ Each slice is a separate small PR with unit/domain tests, mocked Playwright, rea
 ## 9. Open implementation blockers
 
 1. **Migration baseline:** the six historic forward SQL files are now versioned and provider-reconciled 6/6 after PR #58. The provider's read-only migration list matches Git. The local CLI-only `supabase migration list --linked` check remains open; do not run `db push` as a substitute.
-2. **Timezone rules authority:** the initial client-side domain helper uses the runtime `Intl.DateTimeFormat` IANA database for preview and deterministic tests, but JavaScript exposes no portable tzdb version. This result is explicitly marked `authoritative: false`; it must not be treated as the canonical server-resolved instant for a confirmed Event. Before persisted Event confirmation, adopt a centrally maintained/versioned IANA rules source (including update cadence, version provenance, mismatch handling and rollback) and verify its behavior against the browser preview. Never use fixed UTC offsets or silently trust stale device rules.
+2. **Timezone rules authority:** the client preview remains `authoritative: false`. PR #61 has merged a server-side proof of concept (`supabase/functions/agenda-time-resolve`) pinned to IANA TZDB `2026f`, with runtime version assertion and fail-closed drift handling. This is not yet deployed or connected to Event writes. Before persisted Event confirmation, complete dependency/supply-chain review, local Edge Runtime HTTP/auth contract tests, TZDB update monitoring and rollback, browser/server mismatch behavior, and the policy for future recurring occurrences after rule changes. Never use fixed UTC offsets or silently trust stale device rules.
 3. **Recurrence engine:** select a tested implementation or a small explicitly supported subset; do not claim general RFC 5545 support by implication.
 4. **Audit append path:** confirm the current trusted append mechanism/trigger contract before recording new Event transitions.
 5. **Real-auth smoke lifecycle:** create a reproducible, bounded QA fixture lifecycle without physical DELETE or modifying the existing canaries.
@@ -219,3 +219,18 @@ Branch: `feat/phase1-agenda-temporal-domain-v1`.
 - The returned local-time resolution includes the requested and resolved wall times, selected instant, resolution reason, adjustment minutes, `rulesSource: runtime-intl`, `rulesVersion: null` and `authoritative: false`.
 - The resolver samples timezone offsets around the requested date and applies the runtime IANA rules. Tests cover Havana round-tripping, New York 2026 spring-forward gap (02:30 → 03:00), fall-back repeated 01:30 (earlier by default, later on explicit request), invalid dates, all-day exclusive ranges, midnight-crossing instants, and half-open adjacency/conflicts.
 - This is a pure client/domain preview layer. No Event is persisted, no RLS or database write occurs, and no UI route is exposed in this slice. Do not use the runtime rule data as a canonical persisted instant until a maintained/versioned timezone authority is implemented.
+
+
+## 11. Server-side IANA timezone resolver proof of concept — PR #61 (21 November 2026)
+
+- PR #61 merged at main SHA `ad83849eadc7dab912cf73e139f0c4cad7e19cff`; post-merge CI #230 PASS: [run #230](https://github.com/SimpleLife9/simplelife/actions/runs/44936778867).
+- The isolated Supabase Edge Function `agenda-time-resolve` uses the pinned `moment-timezone@0.6.6` transition dataset carrying IANA TZDB `2026f`; `deno.lock` is committed and frozen. Runtime checks the loaded TZDB version and returns 503 on mismatch rather than silently using different rules.
+- The resolver implements exact, gap and fold behavior with a 1,440-minute maximum gap adjustment. Tests cover Cuba's 2026 rule, New York DST, Lord Howe's 30-minute transition, Apia's skipped date, invalid local values and unknown zones.
+- The function is only a pure calculation endpoint in source. It does not query or write tables, and has not been deployed or connected to UI/Event persistence. The `authoritative: true` response means the result came from the pinned dataset, not that the endpoint has completed production security/operational acceptance.
+- Remaining gates: explicit function JWT configuration; HTTP method/body/error contract tests; authenticated local Edge Runtime smoke; dependency/vendor review (Moment Timezone is maintenance-mode); recurring TZDB update/rollback policy; browser/server mismatch UX; future recurrence recalculation policy. No DDL, migrations, hosted function deploy, Auth/secrets/RLS/grants or data changes were made.
+
+## 12. Post-merge test-only DST coverage — PR #59 (21 November 2026)
+
+- PR #59 merged at SHA `dc321f2b4656abd4e8c1697c7eb232fc6dfd6ea5`: [PR #59](https://github.com/SimpleLife9/simplelife/pull/59).
+- CI #220 PASS on the PR head; post-merge CI #231 PASS on the exact main SHA, including unit tests, Playwright/mobile layout, offline live-smoke discovery, frozen Deno dependency validation and production build: [run #231](https://github.com/SimpleLife9/simplelife/actions/runs/44937458741).
+- This PR adds client temporal-domain coverage only; it does not change runtime behavior or persistence.
