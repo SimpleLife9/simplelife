@@ -32,12 +32,12 @@ async function createUserJwt(): Promise<{ token: string; publicJwk: JsonWebKey }
   ) as CryptoKeyPair;
 
   const exported = await crypto.subtle.exportKey("jwk", pair.publicKey);
-  const publicJwk: JsonWebKey = {
+  const publicJwk = {
     ...exported,
     alg: "RS256",
     use: "sig",
     kid: KEY_ID,
-  };
+  } as JsonWebKey & { kid: string };
   const now = Math.floor(Date.now() / 1000);
   const header = base64Url(new TextEncoder().encode(JSON.stringify({
     alg: "RS256",
