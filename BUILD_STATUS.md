@@ -657,3 +657,25 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 - Se conservan las validaciones, campos, mensajes de éxito, propietario/creador, UUIDv7 y las operaciones existentes de inserción. No se cambian tablas, columnas, permisos/RLS, datos, autenticación o PWA.
 - Se agregan escenarios Playwright para verificar formulario cerrado por defecto, apertura desde el botón superior, cancelación/cierre, limpieza del borrador y creación correcta de una idea y una lista.
 - La nueva aceptación manual en localhost queda pendiente hasta que Robert instale y pruebe esta versión. La validación en Android físico continúa fuera del alcance de esta sesión local y no es requisito para este cambio.
+
+## Manual acceptance — floating creation dialogs for Notes/Ideas and Lists (21 Nov 2026)
+
+- Robert tested the PR #52 implementation on localhost and confirmed it worked correctly.
+- **MANUAL PASS** is recorded specifically for:
+  - More → Notes and Ideas: top-level button and floating create dialog.
+  - More → Lists: top-level button and floating create dialog.
+- PR #52 MERGED: https://github.com/SimpleLife9/simplelife/pull/52.
+- PR CI #204 PASS: https://github.com/SimpleLife9/simplelife/actions/runs/44919008049.
+- Post-merge CI #205 PASS on exact main SHA `67b43af031c96255a8140624360cd018dbd9f212`: https://github.com/SimpleLife9/simplelife/actions/runs/44919148928.
+- Scope is limited to the two create-dialog UX changes; this does not imply manual acceptance of all Notes/Ideas or Lists lifecycle flows, Lote 10/11, Inbox, Projects, or account/preferences.
+- Physical Android/iOS validation is not required for this localhost UI change and remains separately scoped.
+
+## Roadmap reconciliation — master vision and Anexo 141 (21 Nov 2026)
+
+- The master vision contains 141 annexes spanning product decisions, functional contracts, conceptual/physical models, and implementation evidence. They are not 141 independent features and do not imply implementation.
+- The technical roadmap organizes work as Phase 0 plus Phases 1–10. Phase 0 stabilizes the current product and closes its validation gates; Phase 1 begins with Agenda.
+- Phase 1 Agenda remains DESIGNED / OPEN DESIGN DECISIONS, not implemented. The recorded Supabase development audit found no event/calendar/protected-time domain yet.
+- Future product capabilities still to build: Agenda/events/recurrence/protected time; voice/AI universal Inbox; ARIA planner and replanning; habits and training; Skill Tree/dependencies; statistics and Life Pressure; shared spaces/permissions/requests; read-only BattleCruiser/CuevaCoin integrations; offline/notifications/native mobile reliability; and the longer-term Digitalización Vital horizon.
+- Phase 0 manual gates still open: exhaustive Lote 10 and Lote 11 acceptance; separate Inbox review/archive acceptance; Projects/base creation modal lifecycle; account/profile/preferences reconciliation; and decision on physical Android/iOS scope. The real authenticated Task/Note/List/ListItem smoke and Lote 10 live smoke are PASS within their bounded scopes and should not be repeated.
+- Previously manually confirmed lots not to repeat absent a regression: Lote 5, Lote 6, Lote 7 navigation/destinations (distinct from Inbox review/archive), Lote 8, Lote 9, Lote 12 and Lote 13.
+- Next product objective: Phase 0 closeout, resolving or explicitly deferring remaining human gates. Then begin Phase 1 using `docs/PHASE_1_AGENDA_SPEC.md`; settle its open decisions before creating migrations.
