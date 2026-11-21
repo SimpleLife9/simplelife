@@ -104,7 +104,6 @@ test('half-open intervals allow adjacent events and detect actual overlaps', () 
   ), true);
 });
 
-
 test('a 30-minute Lord Howe spring-forward gap moves to the first valid local minute', () => {
   const resolved = resolveLocalDateTime({
     localDateTime: '2026-10-04T02:15',
