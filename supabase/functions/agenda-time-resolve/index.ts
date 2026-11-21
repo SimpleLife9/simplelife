@@ -1,3 +1,4 @@
+import { withSupabase } from "@supabase/server";
 import { resolveLocalDateTime, TzdbVersionError } from "./resolver.ts";
 
 export const MAX_REQUEST_BYTES = 4096;
@@ -96,4 +97,11 @@ export async function handleRequest(request: Request): Promise<Response> {
   }
 }
 
-if (import.meta.main) Deno.serve(handleRequest);
+// The gateway verify_jwt check is defense in depth. This user-mode wrapper
+// additionally rejects publishable/secret API keys used as bearer credentials.
+export const authenticatedHandler = withSupabase(
+  { auth: "user" },
+  async (request) => await handleRequest(request),
+);
+
+if (import.meta.main) Deno.serve(authenticatedHandler);
