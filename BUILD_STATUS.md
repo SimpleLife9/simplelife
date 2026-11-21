@@ -714,3 +714,16 @@ These deferrals are accepted to permit Phase 1 design/build work to begin. They 
 - No schema migration, production deployment, secret change or broad permission change is included in this Phase 0 closeout.
 - Reopen Phase 0 only for a regression or evidence that one of its accepted deferrals is a prerequisite/blocker for the next capability or release.
 
+
+
+## Phase 1 kickoff — Agenda contract reconciliation (21/11/2026)
+
+- Phase 0 is fully closed as **CLOSED — ACCEPTED DEFERRALS**. PR #54 MERGED at `207ce9388f1fb192254b9212dffe9f9df273187e`; CI #208 PASS and post-merge CI #209 PASS on the exact main SHA: https://github.com/SimpleLife9/simplelife/actions/runs/44930081462.
+- Robert authorized continuing with Phase 1 — Agenda and time management.
+- Recovered approved product contracts from ChatBending Master Anexos 5, 49, 61, 64, 69, 70, 71, 76, 77, 80, 82 and 85. The day/week/month calendar, Event/Task/TaskSchedule/Request distinctions, protected-time rules, event states, task-schedule states, recurrence exception scopes, IANA time semantics and DST gap/fold behavior are approved product rules.
+- PR #55 is being prepared as a documentation/contract reconciliation: the old Agenda spec is being changed from PRODUCT/OPEN DESIGN DECISIONS to PRODUCT CONTRACT APPROVED / TECHNICAL IMPLEMENTATION IN PROGRESS; a new data/security/verification contract is being added.
+- Read-only audit of `Simplelife_dev` (PostgreSQL 17.12): 17 public tables, 17/17 with RLS. Existing `task.due_date`, `due_at` and `time_zone` remain task deadline/instant semantics, not an Event or TaskSchedule. `user_preference.time_zone` already exists (default `America/Havana`). No event, protected-time or task-schedule domain is present.
+- **Migration-source blocker:** the hosted project records six applied migrations (`20261119124048`, `20261119124130`, `20261119124200`, `20261119132044`, `20261119132635`, `20261119133009`), but the GitHub main tree has no `supabase/migrations/` directory. Until those migration sources or a verified replayable baseline are restored to version control, do not apply Agenda DDL or use a direct hosted migration as a substitute. No database writes/DDL/RLS/grant changes were performed during this audit.
+- Other design guardrails: event overlap is a visible warning, not a global prohibition; timed intervals use half-open `[start,end)`; all-day events are calendar date ranges, not UTC midnight instants; EventParticipant/Request workflow remains Phase 7; automatic ARIA planning remains Phase 3; guaranteed notifications/offline reliability remain Phase 9.
+- Current Phase 1 state: product contract reconciliation in progress; technical data/security design documented as proposal; **Agenda is NOT IMPLEMENTED**.
+- Next execution: merge the contract-reconciliation PR after CI PASS; reconcile the repository migration baseline; then implement timezone-safe domain primitives and the first usable persisted Event vertical slice with RLS, real-auth smoke, rollback and exact-SHA CI.
