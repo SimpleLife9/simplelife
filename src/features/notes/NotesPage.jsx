@@ -6,7 +6,6 @@ import { SectionTitle } from '../../shared/components/SectionTitle.jsx';
 import { EmptyState } from '../../shared/components/EmptyState.jsx';
 import { Field } from '../../shared/components/Field.jsx';
 import { TextAreaField } from '../../shared/components/TextAreaField.jsx';
-import { FormCard } from '../../shared/components/FormCard.jsx';
 
 function isArchived(note) {
   return Boolean(note.archived_at) || note.status === 'archived';
@@ -20,6 +19,7 @@ export function NotesPage({ profile, refreshKey, runAction, busy }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [kindFilter, setKindFilter] = useState('all');
   const [archiveFilter, setArchiveFilter] = useState('active');
+  const [showNewNote, setShowNewNote] = useState(false);
   const [editingNote, setEditingNote] = useState(null);
   const [editKind, setEditKind] = useState('note');
   const [editTitle, setEditTitle] = useState('');
@@ -55,7 +55,16 @@ export function NotesPage({ profile, refreshKey, runAction, busy }) {
       if (insertError) throw insertError;
       setTitle('');
       setContent('');
+      setShowNewNote(false);
     }, kind === 'idea' ? 'Idea guardada.' : 'Nota guardada.');
+  };
+
+  const closeNewNote = () => {
+    if (busy) return;
+    setShowNewNote(false);
+    setKind('note');
+    setTitle('');
+    setContent('');
   };
 
   const openEditor = (note) => {
@@ -111,9 +120,14 @@ export function NotesPage({ profile, refreshKey, runAction, busy }) {
 
   return (
     <>
-      <div className="management-layout">
+      <div className="management-layout management-layout-single">
         <div className="content-main">
-          <SectionTitle detail={countDetail}>Tu biblioteca</SectionTitle>
+          <div className="section-heading-row">
+            <SectionTitle detail={countDetail}>Tu biblioteca</SectionTitle>
+            <div className="section-create-actions">
+              <button type="button" className="section-create-button" onClick={() => setShowNewNote(true)} disabled={busy}>Nueva nota o idea</button>
+            </div>
+          </div>
           <div className="notes-toolbar" role="search" aria-label="Buscar y filtrar notas e ideas">
             <label className="notes-toolbar-field notes-search-field" htmlFor="notes-search">
               <span>Buscar</span>
@@ -198,21 +212,37 @@ export function NotesPage({ profile, refreshKey, runAction, busy }) {
             <EmptyState title="Sin resultados" detail="Prueba con otro texto o cambia los filtros de tipo y archivo." icon="⌕" />
           )}
         </div>
-
-        <aside className="content-side">
-          <FormCard title="Nueva nota o idea" onSubmit={addNote} submitLabel="Guardar" busy={busy}>
-            <label className="field">
-              <span>Tipo</span>
-              <select value={kind} onChange={(event) => setKind(event.target.value)}>
-                <option value="note">Nota</option>
-                <option value="idea">Idea</option>
-              </select>
-            </label>
-            <Field label="Título (opcional)" name="title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Dale un nombre" />
-            <TextAreaField label="Contenido" name="content" value={content} onChange={(event) => setContent(event.target.value)} placeholder="Escribe lo que quieras conservar…" rows={5} required />
-          </FormCard>
-        </aside>
       </div>
+
+      {showNewNote && (
+        <div
+          className="task-editor-overlay"
+          onMouseDown={(event) => { if (event.target === event.currentTarget) closeNewNote(); }}
+          onKeyDown={(event) => { if (event.key === 'Escape') closeNewNote(); }}
+        >
+          <section className="task-editor-dialog floating-form-dialog" role="dialog" aria-modal="true" aria-labelledby="note-create-title">
+            <div className="task-editor-heading">
+              <div><div className="eyebrow">TU BIBLIOTECA</div><h2 id="note-create-title">Nueva nota o idea</h2></div>
+              <button type="button" className="task-editor-close" onClick={closeNewNote} disabled={busy} aria-label="Cerrar nueva nota o idea">×</button>
+            </div>
+            <form className="task-editor-form" onSubmit={addNote}>
+              <label className="field">
+                <span>Tipo</span>
+                <select aria-label="Tipo de nota" value={kind} onChange={(event) => setKind(event.target.value)} disabled={busy}>
+                  <option value="note">Nota</option>
+                  <option value="idea">Idea</option>
+                </select>
+              </label>
+              <Field label="Título (opcional)" name="title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Dale un nombre" autoFocus />
+              <TextAreaField label="Contenido" name="content" value={content} onChange={(event) => setContent(event.target.value)} placeholder="Escribe lo que quieras conservar…" rows={5} required />
+              <div className="task-editor-actions">
+                <button type="button" className="button task-editor-cancel" onClick={closeNewNote} disabled={busy}>Cancelar</button>
+                <button type="submit" className="button button-primary" disabled={busy || !content.trim()}>{busy ? 'Guardando…' : 'Guardar'} <span>→</span></button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
 
       {editingNote && (
         <div

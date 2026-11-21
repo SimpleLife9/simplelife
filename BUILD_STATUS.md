@@ -648,3 +648,12 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 - Auth real y perfil: PASS dentro del alcance acotado del smoke; preferencias y cuenta más amplias pendientes de reconciliación.
 - Android/iOS físico y PWA: NOT RUN; confirmar si forman parte del alcance obligatorio.
 - **Fase 0 permanece OPEN.** No cerrar hasta completar o aplazar expresamente cada puerta humana obligatoria.
+
+## UX checkpoint — creación de Notas/Ideas y Listas en diálogos (21/11/2026)
+
+- Solicitud: retirar los formularios de creación permanentes ubicados debajo/al lado del contenido en **Más → Notas e ideas** y **Más → Listas**.
+- Nueva experiencia: botón superior **Nueva nota o idea** y **Nueva lista**, respectivamente; cada botón abre un diálogo flotante con el formulario correspondiente, siguiendo el patrón usado por Nueva Tarea/Nuevo Proyecto.
+- Los diálogos se pueden cerrar con Escape, el botón X, Cancelar y clic en el fondo; al cerrar se descarta el borrador y al guardar se cierran después de que Supabase confirma el INSERT.
+- Se conservan las validaciones, campos, mensajes de éxito, propietario/creador, UUIDv7 y las operaciones existentes de inserción. No se cambian tablas, columnas, permisos/RLS, datos, autenticación o PWA.
+- Se agregan escenarios Playwright para verificar formulario cerrado por defecto, apertura desde el botón superior, cancelación/cierre, limpieza del borrador y creación correcta de una idea y una lista.
+- La nueva aceptación manual en localhost queda pendiente hasta que Robert instale y pruebe esta versión. La validación en Android físico continúa fuera del alcance de esta sesión local y no es requisito para este cambio.
