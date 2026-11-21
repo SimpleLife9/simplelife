@@ -202,10 +202,20 @@ Each slice is a separate small PR with unit/domain tests, mocked Playwright, rea
 ## 9. Open implementation blockers
 
 1. **Migration baseline:** six hosted migrations exist, but no corresponding `supabase/migrations/` source directory is tracked in the repository. Reconcile this before DDL.
-2. **Timezone resolver:** choose a maintained implementation capable of IANA civil-time resolution, gap/fold handling and deterministic tests; avoid ad-hoc fixed-offset arithmetic.
+2. **Timezone rules authority:** the initial client-side domain helper uses the runtime `Intl.DateTimeFormat` IANA database for preview and deterministic tests, but JavaScript exposes no portable tzdb version. This result is explicitly marked `authoritative: false`; it must not be treated as the canonical server-resolved instant for a confirmed Event. Before persisted Event confirmation, adopt a centrally maintained/versioned IANA rules source (including update cadence, version provenance, mismatch handling and rollback) and verify its behavior against the browser preview. Never use fixed UTC offsets or silently trust stale device rules.
 3. **Recurrence engine:** select a tested implementation or a small explicitly supported subset; do not claim general RFC 5545 support by implication.
 4. **Audit append path:** confirm the current trusted append mechanism/trigger contract before recording new Event transitions.
 5. **Real-auth smoke lifecycle:** create a reproducible, bounded QA fixture lifecycle without physical DELETE or modifying the existing canaries.
 6. **Manual acceptance:** test actual desktop and narrow mobile behavior; physical Android/iOS platform-specific alarms remain out of this phase unless explicitly added.
 
 **No DDL, schema migrations, RLS/grants, test rows or deployment are authorized by this design document.**
+
+
+## 10. First executable domain slice — client temporal preview (21 November 2026)
+
+Branch: `feat/phase1-agenda-temporal-domain-v1`.
+
+- `src/features/agenda/domain/temporal.js` provides date-only validation, IANA timezone support checks, local wall-time resolution, DST fold selection, next-valid-minute handling for gaps, date-based all-day ranges, positive timed intervals and half-open overlap detection.
+- The returned local-time resolution includes the requested and resolved wall times, selected instant, resolution reason, adjustment minutes, `rulesSource: runtime-intl`, `rulesVersion: null` and `authoritative: false`.
+- The resolver samples timezone offsets around the requested date and applies the runtime IANA rules. Tests cover Havana round-tripping, New York 2026 spring-forward gap (02:30 → 03:00), fall-back repeated 01:30 (earlier by default, later on explicit request), invalid dates, all-day exclusive ranges, midnight-crossing instants, and half-open adjacency/conflicts.
+- This is a pure client/domain preview layer. No Event is persisted, no RLS or database write occurs, and no UI route is exposed in this slice. Do not use the runtime rule data as a canonical persisted instant until a maintained/versioned timezone authority is implemented.

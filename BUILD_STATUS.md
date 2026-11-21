@@ -727,3 +727,13 @@ These deferrals are accepted to permit Phase 1 design/build work to begin. They 
 - Other design guardrails: event overlap is a visible warning, not a global prohibition; timed intervals use half-open `[start,end)`; all-day events are calendar date ranges, not UTC midnight instants; EventParticipant/Request workflow remains Phase 7; automatic ARIA planning remains Phase 3; guaranteed notifications/offline reliability remain Phase 9.
 - Current Phase 1 state: product contract reconciliation in progress; technical data/security design documented as proposal; **Agenda is NOT IMPLEMENTED**.
 - Next execution: merge the contract-reconciliation PR after CI PASS; reconcile the repository migration baseline; then implement timezone-safe domain primitives and the first usable persisted Event vertical slice with RLS, real-auth smoke, rollback and exact-SHA CI.
+
+
+## Phase 1 — first executable Agenda domain slice (21/11/2026)
+
+- Branch `feat/phase1-agenda-temporal-domain-v1` prepared from main SHA `9c92224bd18f3b3a8caee61b74f874a7f4e42576`.
+- Adds `src/features/agenda/domain/temporal.js`: strict date-only parsing, runtime IANA zone validation, local wall-time resolution, DST gap/fold outcomes, all-day exclusive date ranges, timed-range validation and half-open interval conflict detection.
+- Adds `tests/agenda-temporal.test.js`: Havana local-time round-trip; New York 2026 spring-forward gap and fall-back fold; invalid calendar dates; all-day range semantics; cross-midnight timed intervals; adjacent versus overlapping ranges.
+- The resolver uses the current runtime `Intl.DateTimeFormat` timezone database and explicitly returns `rulesVersion: null` / `authoritative: false`. It is a client preview and test foundation only, not the canonical server timezone source for confirmed Events. A centrally maintained/versioned IANA rules authority remains required before persisted Event confirmation.
+- No new dependency, lockfile change, page/navigation/UI, database schema, migration, row/data write, RLS/grant, Auth, secrets, service worker, or deployment change in this slice.
+- PR #56 and CI evidence will be recorded after the branch PR is opened and checks complete. Agenda remains not yet user-visible/persisted.
