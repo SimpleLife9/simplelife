@@ -253,6 +253,10 @@ Do not resolve the start and end in two separate HTTP calls for one confirmed Ev
 
 No Event, database table, migration, RLS/grant, audit record, Auth setting, secret or hosted function has been created or changed by this implementation.
 
+## TZDB lifecycle and recurring occurrence policy
+
+The operational update/rollback proposal is documented in [AGENDA_TZDB_LIFECYCLE_POLICY.md](./AGENDA_TZDB_LIFECYCLE_POLICY.md). It preserves confirmed one-off UTC instants and proposes explicit review for materialized future recurring occurrences when a new TZDB release changes their resolution. That recurring behavior remains a product Human Gate; do not implement it as approved behavior until Robert accepts it.
+
 ## Trusted Event write and audit append design (PR #66)
 
 The implementation proposal is documented in [AGENDA_AUDIT_APPEND_DESIGN.md](./AGENDA_AUDIT_APPEND_DESIGN.md). The key security boundary is a user-authenticated Edge Function that derives the profile from the verified user JWT and performs writes through `ctx.supabaseAdmin` only after strict owner checks. The browser receives SELECT-only access to Event rows (owner-scoped by RLS); it receives no direct INSERT/UPDATE/DELETE grants. A narrowly scoped private `SECURITY DEFINER` row trigger appends UUIDv7 audit evidence in the same transaction. The audit actor/owner fields are set only by trusted server code, not browser input.
