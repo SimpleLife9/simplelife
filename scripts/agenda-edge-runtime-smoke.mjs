@@ -132,8 +132,13 @@ try {
     authorization: "Bearer " + signed.token,
     "content-type": "application/json",
   }, rangePayload);
-  assertEqual(valid.status, 200, "signed user JWT response status");
-  const resolved = await valid.json();
+  const validBody = await valid.text();
+  if (valid.status !== 200) {
+    fail("signed user JWT response status: expected 200, received " + valid.status
+      + "\\nresponse body: " + validBody
+      + "\\nEdge Runtime logs:\\n" + serverLogs);
+  }
+  const resolved = JSON.parse(validBody);
   assertEqual(resolved.startsAt, "2026-11-01T05:15:00.000Z", "resolved range start");
   assertEqual(resolved.endsAt, "2026-11-01T06:45:00.000Z", "resolved range end");
 
