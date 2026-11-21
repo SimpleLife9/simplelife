@@ -234,3 +234,21 @@ Branch: `feat/phase1-agenda-temporal-domain-v1`.
 - PR #59 merged at SHA `dc321f2b4656abd4e8c1697c7eb232fc6dfd6ea5`: [PR #59](https://github.com/SimpleLife9/simplelife/pull/59).
 - CI #220 PASS on the PR head; post-merge CI #231 PASS on the exact main SHA, including unit tests, Playwright/mobile layout, offline live-smoke discovery, frozen Deno dependency validation and production build: [run #231](https://github.com/SimpleLife9/simplelife/actions/runs/44937458741).
 - This PR adds client temporal-domain coverage only; it does not change runtime behavior or persistence.
+
+## Atomic server-side resolution for timed Events — implementation addition (21/11/2026)
+
+The Edge Function now supports one atomic range request for a timed Event:
+
+```json
+{
+  "timeZone": "America/New_York",
+  "start": { "localDateTime": "2026-11-01T01:15", "disambiguation": "earlier" },
+  "end": { "localDateTime": "2026-11-01T01:45", "disambiguation": "later" }
+}
+```
+
+Both endpoints are resolved in one invocation against the same already-verified TZDB release, timezone object and resolver version. Start/end have independent DST fold/gap choices. The response carries both UTC instants, each endpoint's requested and resolved local value, adjustment/resolution, and shared top-level rules/resolver versions. The server checks `endsAt > startsAt` after resolving both endpoints and returns HTTP 422 otherwise.
+
+Do not resolve the start and end in two separate HTTP calls for one confirmed Event. All-day Events remain date-only and do not call this endpoint. The one-point resolver remains available for diagnostics, but Event persistence must use the atomic range mode.
+
+No Event, database table, migration, RLS/grant, audit record, Auth setting, secret or hosted function has been created or changed by this implementation.
