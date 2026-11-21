@@ -1,30 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { isSupabaseConfigured, supabase } from './lib/supabase.js';
 import { ensureUserProfile } from './lib/profile.js';
-import { uuidv7 } from './lib/uuidv7.js';
-import { todayInHavana, addDaysToDateKey, formatDuration, formatDate } from './lib/date-time.js';
-import { useRows } from './shared/hooks/useRows.js';
-import { isOpenTask } from './features/tasks/domain/task-status.js';
-import { SectionTitle } from './shared/components/SectionTitle.jsx';
-import { EmptyState } from './shared/components/EmptyState.jsx';
-import { TodayPage } from './features/today/TodayPage.jsx';
-import { InboxPage } from './features/inbox/InboxPage.jsx';
-import { GoalsPage } from './features/goals/GoalsPage.jsx';
-import { Field } from './shared/components/Field.jsx';
-import { StatusTag } from './shared/components/StatusTag.jsx';
-import { ProjectsPage } from './features/projects/ProjectsPage.jsx';
-import { TextAreaField } from './shared/components/TextAreaField.jsx';
-import { ProjectStatusTag } from './shared/components/ProjectStatusTag.jsx';
-import { TasksPage } from './features/tasks/TasksPage.jsx';
-import { NotesPage } from './features/notes/NotesPage.jsx';
-import { FormCard } from './shared/components/FormCard.jsx';
-import { ListsPage } from './features/lists/ListsPage.jsx';
 import { AuthScreen } from './features/auth/AuthScreen.jsx';
 import { ConfigurationScreen } from './shared/components/ConfigurationScreen.jsx';
 import { LoadingScreen } from './shared/components/LoadingScreen.jsx';
 import { AppShell } from './app/AppShell.jsx';
 import { getPageTitle, getPageDescription } from './app/navigation.js';
 import { createAppActions } from './app/createAppActions.js';
+import { AppPages } from './app/AppPages.jsx';
 
 
 
@@ -197,13 +180,16 @@ function App() {
       error={error}
       onClearAlerts={() => { setError(''); setNotice(''); }}
     >
-      {activePage === 'today' && <TodayPage profile={profile} refreshKey={refreshKey} runAction={runAction} busy={busy} setActivePage={setActivePage} setMorePage={setMorePage} />}
-      {activePage === 'inbox' && <InboxPage profile={profile} refreshKey={refreshKey} runAction={runAction} busy={busy} setActivePage={setActivePage} setMorePage={setMorePage} />}
-      {activePage === 'goals' && <GoalsPage profile={profile} refreshKey={refreshKey} runAction={runAction} busy={busy} />}
-      {activePage === 'projects' && <ProjectsPage profile={profile} refreshKey={refreshKey} runAction={runAction} busy={busy} setActivePage={setActivePage} setMorePage={setMorePage} />}
-      {activePage === 'more' && morePage === 'tasks' && <TasksPage profile={profile} refreshKey={refreshKey} runAction={runAction} busy={busy} />}
-      {activePage === 'more' && morePage === 'notes' && <NotesPage profile={profile} refreshKey={refreshKey} runAction={runAction} busy={busy} />}
-      {activePage === 'more' && morePage === 'lists' && <ListsPage profile={profile} refreshKey={refreshKey} runAction={runAction} busy={busy} setActivePage={setActivePage} setMorePage={setMorePage} />}
+      <AppPages
+        activePage={activePage}
+        morePage={morePage}
+        profile={profile}
+        refreshKey={refreshKey}
+        runAction={runAction}
+        busy={busy}
+        setActivePage={setActivePage}
+        setMorePage={setMorePage}
+      />
     </AppShell>
   );
 }

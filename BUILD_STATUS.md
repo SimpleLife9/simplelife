@@ -415,12 +415,22 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 
 ## PR #34 — shared app action orchestration (21/11/2026)
 
-- PR: https://github.com/SimpleLife9/simplelife/pull/34 — OPEN, CI pending.
-- Branch `refactor/phase0-extract-action-orchestration`; base SHA `5ed085010941d943079053bf9e4569cb209548aa`; current head SHA `f5cd6f33315c56b17981c97049d8914837046bc8`.
+- PR: https://github.com/SimpleLife9/simplelife/pull/34 — MERGED.
+- Branch `refactor/phase0-extract-action-orchestration`; tested head SHA `44ae00f77bd0b27070583ba297e23bd1de9bb485`; merge SHA `e75f9583bc97b6fe10f6e48a5a63bc2bdf388fb1`.
+- CI #145 PASS on the exact PR head: 21 unit tests, 20 Playwright scenarios and production build: https://github.com/SimpleLife9/simplelife/actions/runs/44849002744.
+- CI post-merge #146 PASS on the exact merge SHA: https://github.com/SimpleLife9/simplelife/actions/runs/44849425684.
 - Added `src/app/createAppActions.js` to extract the existing `showNotice`, `showError` and `runAction` lifecycle.
 - React state remains owned by `App`; the factory receives stable React setters and is memoized once. Existing behavior retained: busy state, shared refresh increment, 3.5-second notice, old-timeout/new-notice race guard, error clearing and fallback.
 - Added four Node unit tests: successful operation, failed operation, notice timeout race and clearing a notice on error.
 - `src/App.jsx` reduced from 9,087 to 8,516 characters in this cut (571 fewer).
-- Validation target: existing unit tests plus four new tests, 20 Playwright scenarios, production build and post-merge CI on exact SHA.
 - No Supabase Auth, data operation, schema, migration, RLS/grants, secret, dependency, Service Worker, PWA cache or deployment change.
-- Do not merge until the complete PR CI passes.
+
+## PR #35 — feature page composition extraction (21/11/2026)
+
+- PR is being prepared on branch `refactor/phase0-extract-page-composition`, based on merge SHA `e75f9583bc97b6fe10f6e48a5a63bc2bdf388fb1`.
+- New `src/app/AppPages.jsx` owns the conditional mounting of Today, Inbox, Goals, Projects, Tasks, Notes and Lists.
+- `src/App.jsx` now owns only app-level session/auth state, shared action orchestration, page selection and shell composition; unused legacy imports were removed.
+- `src/App.jsx` reduced from 8,516 to 6,509 characters (2,007 fewer).
+- Existing Playwright tests already cover all primary destinations, both navigation layouts and the More submodules. They will be retained as the regression gate.
+- CI and post-merge checks pending. Do not merge until unit, all 20 Playwright scenarios and production build pass.
+- No changes to database, data operations, Auth, schema, RLS/grants, secrets, dependencies, Service Worker, PWA or deployment.
