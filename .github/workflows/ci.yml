@@ -122,6 +122,10 @@ jobs:
             supabase stop --no-backup
           fi
 
+      - name: Restore tracked Supabase config after temporary CI override
+        if: always()
+        run: git checkout -- supabase/config.toml
+
       - name: Build production assets
         run: npm run build
 
