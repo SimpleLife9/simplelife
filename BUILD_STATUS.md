@@ -396,9 +396,9 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 | #33 | Authenticated AppShell and navigation metadata `src/app/` | #141 PASS | #142 PASS | `52e9c4eaa1ac70d3020144c05a4bc82fa9614034` |
 | #34 | Shared app action orchestration `src/app/createAppActions.js` | #145 PASS | #146 PASS | `e75f9583bc97b6fe10f6e48a5a63bc2bdf388fb1` |
 | #35 | Feature page composition `src/app/AppPages.jsx` | #147 PASS | #148 PASS | `7ed702a110a6ca155797c868826ea7019c06b14f` |
-| #36 | Auth/session lifecycle hook `src/app/useAppAuth.js` | PR CI PENDING | Post-merge PENDING | TBD |
+| #36 | Auth/session lifecycle hook `src/app/useAppAuth.js` | #151 PASS | #152 PASS | `6c0ffab3a848dfada10e01fe8691e87f9a6cf808` |
 
-- The extractions from PRs #19–#35 preserve existing APIs or behavior. PRs #33–#35 were verified with 20 Playwright scenarios; PR #34 added four isolated unit tests, bringing the unit suite to 21.
+- The extractions from PRs #19–#35 preserve existing APIs or behavior. PRs #33–#35 were verified with 20 Playwright scenarios; PR #36 adds the logout scenario, bringing the browser suite to 21. PR #34 added four isolated unit tests, bringing the unit suite to 21.
 - No new framework/dependency, schema migration, RLS/grant, auth, secret, Service Worker or deployment change was made in these batches.
 - This is incremental boundary work, not a completed rewrite. `src/App.jsx` now owns session/auth orchestration, cross-feature state and app-level composition; `src/app/` owns the authenticated shell, navigation, shared action orchestration and page mounting. Further session/service/domain extraction and validation gates remain before Phase 0 closes.
 - The real authenticated Supabase browser test and physical-device validation remain open; mocked E2E is not evidence of real persistence.
@@ -442,12 +442,13 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 
 ## PR #36 — auth/session lifecycle extraction (21/11/2026)
 
-- PR is being prepared on branch `refactor/phase0-extract-auth-session`; base main SHA `3521b4c75c56930aaa1f2dbe6fbabb4c10fe5203`; current head SHA `6ea896c5c4059a53a6d20157dc861a906463a2e3`.
+- PR: https://github.com/SimpleLife9/simplelife/pull/36 — MERGED. Branch `refactor/phase0-extract-auth-session`; tested head SHA `763ab007c058e119592e9af102507016ab2f2ec6`; merge SHA `6c0ffab3a848dfada10e01fe8691e87f9a6cf808`.
 - New `src/app/useAppAuth.js` owns the current session/profile initialization, auth-state subscription, login, registration and sign-out actions.
 - `App.jsx` keeps the application error state and passes its stable setter into the hook; rendering and navigation remain in the application shell.
 - Existing Auth behavior is retained: session restore, profile readiness, deferred profile work after auth callbacks, email normalization, registration confirmation message, profile preparation, Spanish error messages and sign-out result handling.
 - Added explicit E2E coverage for signing out from an authenticated session and returning to the sign-in screen. The logout request is mocked and asserted; no real account is used.
 - `src/App.jsx` reduced from 6,509 to 3,016 characters (3,493 fewer).
-- Validation target: all unit tests, 21 Playwright scenarios including the new sign-out case, production build and post-merge CI on exact SHA.
+- CI #151 PASS on the exact PR head: 21 unit tests, 21/21 Playwright scenarios (including sign-out returning to login) and production build: https://github.com/SimpleLife9/simplelife/actions/runs/44850316937.
+- CI #150 initially failed only because the new test used an ambiguous heading selector matching both `Hoy` and `Para hoy`. The assertion was corrected to target `.page-heading h1`; no production behavior needed modification.
+- CI post-merge #152 PASS on the exact merge SHA: https://github.com/SimpleLife9/simplelife/actions/runs/44850568173.
 - No Auth configuration, credential, user data, schema, migration, RLS/grants, secret, dependency, Service Worker, PWA cache or deployment change.
-- Do not merge until CI succeeds on the exact PR head.
