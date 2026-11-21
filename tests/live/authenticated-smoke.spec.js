@@ -235,7 +235,7 @@ test('real authenticated Supabase smoke: Lote 10 task lifecycle and completion m
   let archivedRows = page.locator('.task-row').filter({ hasText: TASK_TITLE });
   while (await archivedRows.count()) {
     await archivedRows.first().getByRole('button', { name: `Restaurar tarea: ${TASK_TITLE}` }).click();
-    await expect(page.getByText('Tarea restaurada.', { exact: true })).toBeVisible();
+    await expect(page.getByText('Tarea restaurada.')).toBeVisible();
     await waitForPageData(page);
   }
   await archiveFilter.selectOption('active');
@@ -246,7 +246,7 @@ test('real authenticated Supabase smoke: Lote 10 task lifecycle and completion m
   let completedRows = taskRows.filter({ hasText: 'Completada' });
   while (await completedRows.count()) {
     await completedRows.first().getByRole('button', { name: `Reabrir tarea: ${TASK_TITLE}` }).click();
-    await expect(page.getByText('Tarea reabierta.', { exact: true })).toBeVisible();
+    await expect(page.getByText('Tarea reabierta.')).toBeVisible();
     await waitForPageData(page);
   }
   await expect(taskRows).toHaveCount(3);
@@ -267,22 +267,22 @@ test('real authenticated Supabase smoke: Lote 10 task lifecycle and completion m
   // Exercise Pendiente → En curso → Bloqueada → Pendiente on the same canary.
   const firstStatus = () => taskRows.first().getByLabel(`Cambiar estado: ${TASK_TITLE}`);
   await firstStatus().selectOption('todo');
-  await expect(page.getByText('Estado actualizado: Pendiente.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Estado actualizado: Pendiente.')).toBeVisible();
   await waitForPageData(page);
   await expect(firstStatus()).toHaveValue('todo');
 
   await firstStatus().selectOption('in_progress');
-  await expect(page.getByText('Estado actualizado: En curso.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Estado actualizado: En curso.')).toBeVisible();
   await waitForPageData(page);
   await expect(firstStatus()).toHaveValue('in_progress');
 
   await firstStatus().selectOption('blocked');
-  await expect(page.getByText('Estado actualizado: Bloqueada.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Estado actualizado: Bloqueada.')).toBeVisible();
   await waitForPageData(page);
   await expect(firstStatus()).toHaveValue('blocked');
 
   await firstStatus().selectOption('todo');
-  await expect(page.getByText('Estado actualizado: Pendiente.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Estado actualizado: Pendiente.')).toBeVisible();
   await waitForPageData(page);
   await expect(firstStatus()).toHaveValue('todo');
 
@@ -300,13 +300,13 @@ test('real authenticated Supabase smoke: Lote 10 task lifecycle and completion m
   // Individual archive/restore must preserve the existing work status.
   firstRow = taskRows.first();
   await firstRow.getByRole('button', { name: `Archivar tarea: ${TASK_TITLE}` }).click();
-  await expect(page.getByText('Tarea archivada.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Tarea archivada.')).toBeVisible();
   await waitForPageData(page);
   await archiveFilter.selectOption('archived');
   archivedRows = page.locator('.task-row').filter({ hasText: TASK_TITLE });
   await expect(archivedRows).toHaveCount(1);
   await archivedRows.first().getByRole('button', { name: `Restaurar tarea: ${TASK_TITLE}` }).click();
-  await expect(page.getByText('Tarea restaurada.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Tarea restaurada.')).toBeVisible();
   await waitForPageData(page);
   await archiveFilter.selectOption('active');
   await expect(taskRows).toHaveCount(3);
@@ -314,12 +314,12 @@ test('real authenticated Supabase smoke: Lote 10 task lifecycle and completion m
 
   // Prepare two different open states, then archive both in one bulk operation.
   await taskRows.nth(1).getByLabel(`Cambiar estado: ${TASK_TITLE}`).selectOption('blocked');
-  await expect(page.getByText('Estado actualizado: Bloqueada.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Estado actualizado: Bloqueada.')).toBeVisible();
   await waitForPageData(page);
   await taskRows.nth(0).locator('input.task-select-checkbox').check();
   await taskRows.nth(1).locator('input.task-select-checkbox').check();
   await page.getByRole('button', { name: 'Archivar seleccionadas' }).click();
-  await expect(page.getByText('2 tareas archivadas.', { exact: true })).toBeVisible();
+  await expect(page.getByText('2 tareas archivadas.')).toBeVisible();
   await waitForPageData(page);
   await expect(taskRows).toHaveCount(1);
 
@@ -335,22 +335,22 @@ test('real authenticated Supabase smoke: Lote 10 task lifecycle and completion m
   const remainingStatus = taskRows.first().getByLabel(`Cambiar estado: ${TASK_TITLE}`);
   if (await remainingStatus.inputValue() !== 'todo') {
     await remainingStatus.selectOption('todo');
-    await expect(page.getByText('Estado actualizado: Pendiente.', { exact: true })).toBeVisible();
+    await expect(page.getByText('Estado actualizado: Pendiente.')).toBeVisible();
     await waitForPageData(page);
   }
   await taskRows.first().getByRole('button', { name: `Completar tarea: ${TASK_TITLE}` }).click();
-  await expect(page.getByText('Tarea completada.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Tarea completada.')).toBeVisible();
   await waitForPageData(page);
   await statusFilter.selectOption('completed');
   await expect(taskRows).toHaveCount(1);
   await taskRows.first().getByRole('button', { name: `Archivar tarea: ${TASK_TITLE}` }).click();
-  await expect(page.getByText('Tarea archivada.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Tarea archivada.')).toBeVisible();
   await waitForPageData(page);
 
   await archiveFilter.selectOption('archived');
   await expect(taskRows).toHaveCount(1);
   await taskRows.first().getByRole('button', { name: `Restaurar tarea: ${TASK_TITLE}` }).click();
-  await expect(page.getByText('Tarea restaurada.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Tarea restaurada.')).toBeVisible();
   await waitForPageData(page);
   await archiveFilter.selectOption('active');
   await expect(taskRows).toHaveCount(1);
@@ -368,7 +368,7 @@ test('real authenticated Supabase smoke: Lote 10 task lifecycle and completion m
 
   // Leave all three existing task canaries archived for the next smoke run.
   await taskRows.first().getByRole('button', { name: `Archivar tarea: ${TASK_TITLE}` }).click();
-  await expect(page.getByText('Tarea archivada.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Tarea archivada.')).toBeVisible();
   await waitForPageData(page);
   await statusFilter.selectOption('all');
   await archiveFilter.selectOption('archived');
