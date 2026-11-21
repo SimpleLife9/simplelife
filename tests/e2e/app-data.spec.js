@@ -1621,7 +1621,10 @@ test('Lists support rename, purpose, item editing, reordering and reversible arc
   });
   expect(lists[0].owner_user_id).toBe(profile.id);
 
-  await page.getByRole('button', { name: 'Editar elemento: Revisar factura' }).click();
+  const invoiceItemRow = page.locator('.list-card .list-items .list-item-wrap')
+    .filter({ hasText: 'Revisar factura' });
+  await expect(invoiceItemRow).toHaveCount(1);
+  await invoiceItemRow.getByRole('button', { name: 'Editar elemento: Revisar factura' }).click();
   const itemDialog = page.getByRole('dialog', { name: 'Editar elemento' });
   await itemDialog.getByLabel('Contenido del elemento').fill('Revisar factura del proveedor');
   await itemDialog.getByRole('button', { name: 'Guardar cambios' }).click();
