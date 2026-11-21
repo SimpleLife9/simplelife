@@ -1,4 +1,4 @@
-import { handleRequest, MAX_REQUEST_BYTES } from "../supabase/functions/agenda-time-resolve/index.ts";
+import { handleRequest, MAX_REQUEST_BYTES } from "../supabase/functions/agenda-time-resolve/handler.ts";
 
 const URL = "http://127.0.0.1/agenda-time-resolve";
 const JSON_HEADERS = { "content-type": "application/json" };
