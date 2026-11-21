@@ -252,3 +252,9 @@ Both endpoints are resolved in one invocation against the same already-verified 
 Do not resolve the start and end in two separate HTTP calls for one confirmed Event. All-day Events remain date-only and do not call this endpoint. The one-point resolver remains available for diagnostics, but Event persistence must use the atomic range mode.
 
 No Event, database table, migration, RLS/grant, audit record, Auth setting, secret or hosted function has been created or changed by this implementation.
+
+## Trusted Event write and audit append design (PR #66)
+
+The implementation proposal is documented in [AGENDA_AUDIT_APPEND_DESIGN.md](./AGENDA_AUDIT_APPEND_DESIGN.md). The key security boundary is a user-authenticated Edge Function that derives the profile from the verified user JWT and performs writes through `ctx.supabaseAdmin` only after strict owner checks. The browser receives SELECT-only access to Event rows (owner-scoped by RLS); it receives no direct INSERT/UPDATE/DELETE grants. A narrowly scoped private `SECURITY DEFINER` row trigger appends UUIDv7 audit evidence in the same transaction. The audit actor/owner fields are set only by trusted server code, not browser input.
+
+This is a design proposal, not a DDL authorization. It requires a separate explicit Human Gate before a migration or hosted database change.
