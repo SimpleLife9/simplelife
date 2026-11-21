@@ -108,6 +108,7 @@ async function mockSupabaseSession(page, initialData = {}) {
   const insertedCaptureLinks = [];
   const noteIdeas = [...(initialData.noteIdeas || [])];
   const insertedNoteIdeas = [];
+  const updatedNoteIdeas = [];
   const lists = [...(initialData.lists || [])];
   const insertedLists = [];
   const listItems = [...(initialData.listItems || [])];
@@ -399,6 +400,18 @@ async function mockSupabaseSession(page, initialData = {}) {
       await json(201, rows, { 'content-range': '0-0/*' });
       return;
     }
+    if (url.pathname === '/rest/v1/note_idea' && method === 'PATCH') {
+      const payload = request.postDataJSON();
+      const idFilter = url.searchParams.get('id') || '';
+      const ownerFilter = url.searchParams.get('owner_user_id') || '';
+      const rows = noteIdeas.filter((row) => !row.deleted_at
+        && (!idFilter || idFilter === 'eq.' + row.id)
+        && (!ownerFilter || ownerFilter === 'eq.' + row.owner_user_id));
+      rows.forEach((row) => Object.assign(row, payload));
+      updatedNoteIdeas.push(...rows.map((row) => ({ id: row.id, ...payload })));
+      await json(200, rows, { 'content-range': '0-0/*' });
+      return;
+    }
 
     if (url.pathname === '/rest/v1/user_list' && method === 'GET') {
       const idFilter = url.searchParams.get('id') || '';
@@ -531,7 +544,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     await json(404, { message: `Unexpected mocked Supabase request: ${method} ${url.pathname}` });
   });
 
-  return { signedOutRequests, insertedTasks, updatedTasks, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
+  return { signedOutRequests, insertedTasks, updatedTasks, updatedNoteIdeas, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
 }
 
 test('mock-authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
@@ -1309,6 +1322,154 @@ test('primary navigation preserves page destinations in the authenticated shell'
     await expect(page.locator('.page-heading h1')).toHaveText(destination.heading);
     await expect(mobileButton).toHaveClass(/active/);
   }
+});
+
+
+test('Notes can be edited, archived and restored without losing their content', async ({ page }) => {
+  const seedNotes = [
+    {
+      id: '00000000-0000-7000-8000-000000000701',
+      owner_user_id: profile.id,
+      created_by_user_id: profile.id,
+      kind: 'note',
+      title: 'Plan de lectura',
+      content: 'Leer veinte páginas antes de dormir.',
+      status: 'active',
+      archived_at: null,
+      deleted_at: null,
+      created_at: '2026-11-20T10:00:00.000Z',
+    },
+    {
+      id: '00000000-0000-7000-8000-000000000702',
+      owner_user_id: profile.id,
+      created_by_user_id: profile.id,
+      kind: 'idea',
+      title: 'Nueva cafetería',
+      content: 'Probar una merienda cubana para los clientes.',
+      status: 'active',
+      archived_at: null,
+      deleted_at: null,
+      created_at: '2026-11-20T11:00:00.000Z',
+    },
+  ];
+  const { noteIdeas, updatedNoteIdeas } = await mockSupabaseSession(page, { noteIdeas: seedNotes });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+
+  await page.locator('.side-nav').getByRole('button', { name: /Más/ }).click();
+  await page.getByRole('navigation', { name: 'Secciones de Más' }).getByRole('button', { name: 'Notas e ideas' }).click();
+  await expect(page.getByRole('heading', { name: 'Plan de lectura' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Editar nota: Plan de lectura' }).click();
+  const editor = page.getByRole('dialog', { name: 'Editar nota o idea' });
+  await editor.getByLabel('Título (opcional)').fill('Lectura diaria');
+  await editor.getByLabel('Contenido').fill('Leer treinta páginas y tomar notas.');
+  await editor.getByRole('button', { name: 'Guardar cambios' }).click();
+
+  await expect(page.getByText('Nota actualizada.')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Lectura diaria' })).toBeVisible();
+  expect(noteIdeas.find((note) => note.id === seedNotes[0].id)).toMatchObject({
+    title: 'Lectura diaria',
+    content: 'Leer treinta páginas y tomar notas.',
+  });
+  expect(updatedNoteIdeas[0]).toMatchObject({
+    id: seedNotes[0].id,
+    title: 'Lectura diaria',
+    content: 'Leer treinta páginas y tomar notas.',
+  });
+
+  await page.getByRole('button', { name: 'Archivar nota: Lectura diaria' }).click();
+  await expect(page.getByText('Nota archivada.')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Lectura diaria' })).toHaveCount(0);
+  expect(noteIdeas.find((note) => note.id === seedNotes[0].id)).toMatchObject({ status: 'archived' });
+  expect(updatedNoteIdeas[1]).toMatchObject({ id: seedNotes[0].id, status: 'archived' });
+
+  await page.getByLabel('Filtrar por archivo').selectOption('archived');
+  await expect(page.getByRole('heading', { name: 'Lectura diaria' })).toBeVisible();
+  await page.getByRole('button', { name: 'Restaurar nota: Lectura diaria' }).click();
+  await expect(page.getByText('Nota restaurada.')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Lectura diaria' })).toHaveCount(0);
+  expect(noteIdeas.find((note) => note.id === seedNotes[0].id)).toMatchObject({ status: 'active', archived_at: null });
+  expect(updatedNoteIdeas[2]).toMatchObject({ id: seedNotes[0].id, status: 'active', archived_at: null });
+
+  await page.getByLabel('Filtrar por archivo').selectOption('active');
+  await expect(page.getByRole('heading', { name: 'Lectura diaria' })).toBeVisible();
+});
+
+
+test('Notes and ideas can be searched by title or content and filtered by kind', async ({ page }) => {
+  const seedNotes = [
+    {
+      id: '00000000-0000-7000-8000-000000000601',
+      owner_user_id: profile.id,
+      created_by_user_id: profile.id,
+      kind: 'note',
+      title: 'Plan de lectura',
+      content: 'Leer veinte páginas antes de dormir.',
+      status: 'active',
+      archived_at: null,
+      deleted_at: null,
+      created_at: '2026-11-20T10:00:00.000Z',
+    },
+    {
+      id: '00000000-0000-7000-8000-000000000602',
+      owner_user_id: profile.id,
+      created_by_user_id: profile.id,
+      kind: 'idea',
+      title: 'Nueva cafetería',
+      content: 'Probar una merienda cubana para los clientes.',
+      status: 'active',
+      archived_at: null,
+      deleted_at: null,
+      created_at: '2026-11-20T11:00:00.000Z',
+    },
+    {
+      id: '00000000-0000-7000-8000-000000000603',
+      owner_user_id: profile.id,
+      created_by_user_id: profile.id,
+      kind: 'idea',
+      title: 'Catálogo de temporada',
+      content: 'Preparar fotografías para el catálogo.',
+      status: 'active',
+      archived_at: null,
+      deleted_at: null,
+      created_at: '2026-11-20T12:00:00.000Z',
+    },
+  ];
+  await mockSupabaseSession(page, { noteIdeas: seedNotes });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+
+  await page.locator('.side-nav').getByRole('button', { name: /Más/ }).click();
+  await page.getByRole('navigation', { name: 'Secciones de Más' }).getByRole('button', { name: 'Notas e ideas' }).click();
+  await expect(page.getByRole('heading', { name: 'Tu biblioteca' })).toBeVisible();
+  await expect(page.getByText('3 registros')).toBeVisible();
+
+  const search = page.getByRole('searchbox', { name: 'Buscar notas e ideas' });
+  await search.fill('Nueva cafetería');
+  await expect(page.getByRole('heading', { name: 'Nueva cafetería' })).toBeVisible();
+  await expect(page.getByText('Plan de lectura')).toHaveCount(0);
+  await expect(page.getByText('1 de 3 registros')).toBeVisible();
+
+  await search.fill('merienda cubana');
+  await expect(page.getByRole('heading', { name: 'Nueva cafetería' })).toBeVisible();
+  await expect(page.getByText('Catálogo de temporada')).toHaveCount(0);
+
+  await search.clear();
+  await page.getByLabel('Filtrar por tipo').selectOption('idea');
+  await expect(page.getByRole('heading', { name: 'Nueva cafetería' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Catálogo de temporada' })).toBeVisible();
+  await expect(page.getByText('Plan de lectura')).toHaveCount(0);
+  await expect(page.getByText('2 de 3 registros')).toBeVisible();
+
+  await page.getByLabel('Filtrar por tipo').selectOption('note');
+  await expect(page.getByRole('heading', { name: 'Plan de lectura' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Nueva cafetería' })).toHaveCount(0);
+  await expect(page.getByText('1 de 3 registros')).toBeVisible();
 });
 
 
