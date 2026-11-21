@@ -1881,6 +1881,28 @@ test('Tasks can be linked to primary and additional projects and filtered by pro
   await expect(projectBDetail.getByText('Proyecto principal de esta tarea')).toBeVisible();
 });
 
+test('authenticated session survives reload and still supports sign-out', async ({ page }) => {
+  const { signedOutRequests } = await mockSupabaseSession(page);
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+
+  await expect(page.locator('.page-heading h1')).toHaveText('Hoy');
+  await expect(page.locator('.profile-meta strong')).toHaveText('Playwright Test');
+
+  await page.reload();
+
+  await expect(page.locator('.page-heading h1')).toHaveText('Hoy');
+  await expect(page.locator('.profile-meta strong')).toHaveText('Playwright Test');
+  await expect(page.locator('.auth-screen')).toHaveCount(0);
+
+  await page.getByTitle('Cerrar sesión').click();
+  await expect(page.getByRole('heading', { name: 'Vuelve a enfocarte.' })).toBeVisible();
+  expect(signedOutRequests).toHaveLength(1);
+});
+
+
 test('authenticated user can sign out and return to the sign-in screen', async ({ page }) => {
   const { signedOutRequests } = await mockSupabaseSession(page);
   await page.goto('/');
