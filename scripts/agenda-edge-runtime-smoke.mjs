@@ -60,28 +60,19 @@ function assertEqual(actual, expected, label) {
   }
 }
 
-const statusOutput = run("supabase", ["status", "-o", "env"]);
-const statusValues = Object.fromEntries(
-  statusOutput.split(/\r?\n/).map((line) => {
-    const separator = line.indexOf("=");
-    return separator < 0
-      ? ["", ""]
-      : [line.slice(0, separator).trim(), line.slice(separator + 1).trim().replace(/^["']|["']$/g, "")];
-  }).filter(([key]) => key),
-);
-const localApiKey = statusValues.PUBLISHABLE_KEY || statusValues.ANON_KEY;
-if (!localApiKey) fail("Could not read local PUBLISHABLE_KEY or ANON_KEY from supabase status -o env.");
-const apiUrl = statusValues.API_URL || API_URL;
-const functionUrl = apiUrl.replace(/\/$/, "") + "/functions/v1/" + FUNCTION_NAME;
+const statusOutput = run("supabase", ["status"]);
+const publishableMatch = statusOutput.match(/Publishable\s*[│|]\s*(sb_publishable_[A-Za-z0-9_-]+)/i);
+const localPublishableKey = publishableMatch?.[1];
+if (!localPublishableKey) {
+  fail("Could not read the local publishable key from supabase status:\n" + statusOutput);
+}
+const functionUrl = API_URL.replace(/\/$/, "") + "/functions/v1/" + FUNCTION_NAME;
 
 const signed = createSignedUserJwt();
 const envValues = {
   SUPABASE_URL,
-  SUPABASE_PUBLISHABLE_KEYS: JSON.stringify({
-    test: PUBLISHABLE_KEY,
-    local_gateway: localApiKey,
-  }),
-  SUPABASE_SECRET_KEYS: JSON.stringify({ test: SECRET_KEY }),
+  SUPABASE_PUBLISHABLE_KEYS: JSON.stringify({ default: localPublishableKey }),
+  SUPABASE_SECRET_KEYS: JSON.stringify({ default: SECRET_KEY }),
   SUPABASE_JWKS: JSON.stringify({ keys: [signed.publicJwk] }),
 };
 
@@ -108,7 +99,7 @@ server.on("exit", (code) => { serverExit = code; });
 async function request(headers, body) {
   return await fetch(functionUrl, {
     method: body === undefined ? "GET" : "POST",
-    headers: { apikey: localApiKey, ...headers },
+    headers: { apikey: localPublishableKey, ...headers },
     body,
     signal: AbortSignal.timeout(5000),
   });
