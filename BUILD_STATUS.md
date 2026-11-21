@@ -727,3 +727,14 @@ These deferrals are accepted to permit Phase 1 design/build work to begin. They 
 - Other design guardrails: event overlap is a visible warning, not a global prohibition; timed intervals use half-open `[start,end)`; all-day events are calendar date ranges, not UTC midnight instants; EventParticipant/Request workflow remains Phase 7; automatic ARIA planning remains Phase 3; guaranteed notifications/offline reliability remain Phase 9.
 - Current Phase 1 state: product contract reconciliation in progress; technical data/security design documented as proposal; **Agenda is NOT IMPLEMENTED**.
 - Next execution: merge the contract-reconciliation PR after CI PASS; reconcile the repository migration baseline; then implement timezone-safe domain primitives and the first usable persisted Event vertical slice with RLS, real-auth smoke, rollback and exact-SHA CI.
+
+
+## Supabase migration source recovery — Phase 1 prerequisite (21/11/2026)
+
+- Recovered the six historic migration SQL bodies read-only from `supabase_migrations.schema_migrations` in `Simplelife_dev` (`iybnjrnysiikbtokyshg`, PostgreSQL 17.12).
+- Added the exact forward SQL bodies to conventional versioned files under `supabase/migrations/`. All six files were read back from the branch and compared character-for-character with their remote `statements[1]` values: 6/6 EXACT MATCH.
+- Added a minimal `supabase/config.toml` with local CLI project identifier `simplelife` and Postgres major version 17; no connection credentials are stored.
+- Important: remote `rollback` was NULL for all six historical migrations. The recovery restores forward source only; it does not fabricate reverse SQL.
+- Recovery record: `docs/SUPABASE_MIGRATION_BASELINE_RECOVERY.md`.
+- Current state: baseline source recovery PR is being prepared. No SQL was executed, no DDL/data/RLS/grants/Auth/secrets were changed, and no deployment occurred.
+- Before any new Agenda DDL: run the Supabase CLI migration-list/status comparison in read-only mode against the linked dev project; confirm the six local files reconcile with the six remote applied versions. New Agenda migrations require an explicit, reviewed rollback/compensation plan.
