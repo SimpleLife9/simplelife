@@ -397,8 +397,9 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 | #34 | Shared app action orchestration `src/app/createAppActions.js` | #145 PASS | #146 PASS | `e75f9583bc97b6fe10f6e48a5a63bc2bdf388fb1` |
 | #35 | Feature page composition `src/app/AppPages.jsx` | #147 PASS | #148 PASS | `7ed702a110a6ca155797c868826ea7019c06b14f` |
 | #36 | Auth/session lifecycle hook `src/app/useAppAuth.js` | #151 PASS | #152 PASS | `6c0ffab3a848dfada10e01fe8691e87f9a6cf808` |
+| #37 | Auth session restoration after browser reload (E2E test) | #154 PASS | #155 PASS | `c03d9bbbdfab333a3aa898863cc0d47c2eed781c` |
 
-- The extractions from PRs #19–#35 preserve existing APIs or behavior. PRs #33–#35 were verified with 20 Playwright scenarios; PR #36 adds the logout scenario, bringing the browser suite to 21. PR #34 added four isolated unit tests, bringing the unit suite to 21.
+- The extractions from PRs #19–#35 preserve existing APIs or behavior. PRs #33–#35 were verified with 20 Playwright scenarios; PR #36 adds logout (21 scenarios) and PR #37 adds session restoration after reload (22 scenarios). PR #34 added four isolated unit tests, bringing the unit suite to 21.
 - No new framework/dependency, schema migration, RLS/grant, auth, secret, Service Worker or deployment change was made in these batches.
 - This is incremental boundary work, not a completed rewrite. `src/App.jsx` now owns session/auth orchestration, cross-feature state and app-level composition; `src/app/` owns the authenticated shell, navigation, shared action orchestration and page mounting. Further session/service/domain extraction and validation gates remain before Phase 0 closes.
 - The real authenticated Supabase browser test and physical-device validation remain open; mocked E2E is not evidence of real persistence.
@@ -452,3 +453,14 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 - CI #150 initially failed only because the new test used an ambiguous heading selector matching both `Hoy` and `Para hoy`. The assertion was corrected to target `.page-heading h1`; no production behavior needed modification.
 - CI post-merge #152 PASS on the exact merge SHA: https://github.com/SimpleLife9/simplelife/actions/runs/44850568173.
 - No Auth configuration, credential, user data, schema, migration, RLS/grants, secret, dependency, Service Worker, PWA cache or deployment change.
+
+
+## PR #37 — auth session restoration after browser reload (21/11/2026)
+
+- PR: https://github.com/SimpleLife9/simplelife/pull/37 — MERGED.
+- Branch `test/phase0-auth-session-restore`; tested head SHA `fdf26150fa6f8f39fa8b047c42ce84ff32b9eec9`; merge SHA `c03d9bbbdfab333a3aa898863cc0d47c2eed781c`.
+- Test-only change in `tests/e2e/app-data.spec.js`: sign in using mocked Auth/PostgREST, reload the browser tab, verify Today and the profile are restored, then sign out and confirm return to login.
+- CI #154 PASS on the exact PR head: all 22 Playwright scenarios, unit tests and production build: https://github.com/SimpleLife9/simplelife/actions/runs/44850827033.
+- CI post-merge #155 PASS on the exact merge SHA: https://github.com/SimpleLife9/simplelife/actions/runs/44850997205.
+- This verifies client-side session restoration with deterministic mocks only. It is not evidence of real Supabase CRUD persistence.
+- No production code, Auth config, database/data, schema, RLS/grants, secrets, dependencies, Service Worker, PWA or deployment changes.
