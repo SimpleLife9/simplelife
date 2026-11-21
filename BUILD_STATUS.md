@@ -400,6 +400,7 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 | #37 | Auth session restoration after browser reload (E2E test) | #154 PASS | #155 PASS | `c03d9bbbdfab333a3aa898863cc0d47c2eed781c` |
 | #38 | Notes/Ideas search, filters, edit and archive/restore | #161 PASS | #162 PASS | `c6b681414e3f7b97a4c020632f1abacb888a4e43` |
 | #39 | Lists search, rename, item editing, reorder and archive/restore | #169 PASS | #170 PASS | `50092bb8f536724fdb9bd08a06088fd0393631f8` |
+| #40 | Reconcile E2E acceptance for task lifecycle and goal/subgoal contributions | PR CI PENDING | Post-merge PENDING | TBD |
 
 - The extractions from PRs #19–#39 preserve existing APIs or behavior. PRs #33–#35 were verified with 20 Playwright scenarios; PR #36 adds logout (21), PR #37 adds session restoration after reload (22), PR #38 adds Notes/Ideas lifecycle maintenance (24), and PR #39 adds full Lists maintenance (25). PR #34 added four isolated unit tests, bringing the unit suite to 21.
 - No new framework/dependency, schema migration, RLS/grant, auth, secret, Service Worker or deployment change was made in these batches.
@@ -500,3 +501,19 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 - Earlier CI #164/#166/#168 runs exposed test-only issues: immutable owner payload expectation, asynchronous checkbox state refresh, and ambiguous archive badge text. These were corrected without weakening assertions or changing production behavior.
 - No hard delete; archive is reversible and retains list items and task relationships. No service-role access or RLS bypass.
 - Real Supabase CRUD and physical-device Phase 0 gates remain independent; mocked E2E is not real persistence proof.
+
+## PR #40 — Reconcile Lote 10 and Lote 11 E2E acceptance (21/11/2026)
+
+- Test-only PR on `test/phase0-reconcile-lotes-10-11`; base main SHA `c6f2a02bd3aac2fcdd148d3650044b3e0e016b76`.
+- Lote 10:
+  - Extend the lifecycle E2E to archive and then restore an already-completed task.
+  - Assert `status=completed`, original `completed_at` and `completion_outcome=complete` survive archive and restore.
+  - Assert the estimated-duration helper explicitly says it does not start a timer in both create and edit dialogs.
+- Lote 11:
+  - Seed one task as blocked and another as pending.
+  - Assert both the goal card and subgoal card display each contributing task with its correct status label.
+  - Existing E2E already covers direct Goal and Subgoal links, subgoal-only task included by parent Goal filter, removal/restoration of the same relation, no duplicate row, and direct/subgoal filters.
+- No application/runtime code change. No Supabase credentials, real user, data, schema, grant, RLS, or deployment change.
+- Validation target: 21 unit tests, 25 Playwright scenarios, production build; post-merge CI on exact SHA.
+- Important evidence boundary: passing mocks validates the UI/client contract only. The manual localhost checks in Anexo 137/138 remain pending, as does the real authenticated Supabase smoke.
+- Do not mark either Lote 10 or 11 as manual PASS until Robert confirms the listed hands-on checks.
