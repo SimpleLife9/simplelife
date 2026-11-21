@@ -67,9 +67,9 @@ jobs:
           deno-version: 2.9.8
           cache: true
 
-      - name: Resolve and commit the exact Deno dependency graph
+      - name: Resolve and refresh the exact Deno dependency graph
         run: |
-          deno install --config supabase/functions/agenda-time-resolve/deno.json --frozen-lockfile --entrypoint supabase/functions/agenda-time-resolve/index.ts tests/agenda-iana-resolver.deno.ts
+          deno install --config supabase/functions/agenda-time-resolve/deno.json --entrypoint supabase/functions/agenda-time-resolve/index.ts tests/agenda-iana-resolver.deno.ts tests/agenda-time-resolve.http.deno.ts
 
       - name: Test and type-check Agenda IANA resolver with frozen lockfile
         run: |
