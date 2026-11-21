@@ -293,7 +293,7 @@ export function ListsPage({ profile, refreshKey, runAction, busy, setActivePage,
                     {archived && <em className="list-archive-tag">ARCHIVADA</em>}
                   </div>
                   <div className="list-card-actions">
-                    <button type="button" className="list-management-action" onClick={() => openListEditor(list)} disabled={busy} aria-label={`Editar lista: ${list.name}`}>Editar</button>
+                    <button type="button" className="list-management-action" onClick={() => openListEditor(list)} disabled={busy || archived} aria-label={`Editar lista: ${list.name}`}>Editar</button>
                     <button type="button" className="list-management-action" onClick={() => toggleListArchive(list)} disabled={busy} aria-label={`${archived ? 'Restaurar' : 'Archivar'} lista: ${list.name}`}>{archived ? 'Restaurar' : 'Archivar'}</button>
                   </div>
                 </div>
@@ -301,27 +301,27 @@ export function ListsPage({ profile, refreshKey, runAction, busy, setActivePage,
                   const linkedTask = item.task_id ? tasks.find((task) => task.id === item.task_id) : null;
                   return <div className="list-item-wrap" key={item.id}>
                     <label className={'list-item ' + (item.is_checked ? 'checked' : '')}>
-                      <input type="checkbox" checked={item.is_checked} onChange={() => toggleItem(item)} disabled={busy} />
+                      <input type="checkbox" checked={item.is_checked} onChange={() => toggleItem(item)} disabled={busy || archived} />
                       <span>{item.content}</span>
                     </label>
                     <div className="list-item-tools">
-                      <button type="button" className="list-task-action" onClick={() => openItemEditor(item)} disabled={busy} aria-label={`Editar elemento: ${item.content}`}>Editar</button>
-                      <button type="button" className="list-order-action" onClick={() => moveItem(list.id, item, -1)} disabled={busy || itemIndex === 0} aria-label={`Mover arriba: ${item.content}`}>↑</button>
-                      <button type="button" className="list-order-action" onClick={() => moveItem(list.id, item, 1)} disabled={busy || itemIndex === items.length - 1} aria-label={`Mover abajo: ${item.content}`}>↓</button>
+                      <button type="button" className="list-task-action" onClick={() => openItemEditor(item)} disabled={busy || archived} aria-label={`Editar elemento: ${item.content}`}>Editar</button>
+                      <button type="button" className="list-order-action" onClick={() => moveItem(list.id, item, -1)} disabled={busy || archived || itemIndex === 0} aria-label={`Mover arriba: ${item.content}`}>↑</button>
+                      <button type="button" className="list-order-action" onClick={() => moveItem(list.id, item, 1)} disabled={busy || archived || itemIndex === items.length - 1} aria-label={`Mover abajo: ${item.content}`}>↓</button>
                       {item.task_id ? (
                         <>
                           <span className="list-task-link">{linkedTask ? 'Tarea vinculada · ' + (taskStatusLabels[linkedTask.status] || 'Asociada') : 'Tarea vinculada'}</span>
                           <button type="button" className="list-task-action" onClick={openTasks}>Abrir tareas →</button>
                         </>
                       ) : (
-                        <button type="button" className="list-task-action" onClick={() => openConversion(list, item)} disabled={busy} aria-label={'Convertir en tarea: ' + item.content}>Convertir en tarea →</button>
+                        <button type="button" className="list-task-action" onClick={() => openConversion(list, item)} disabled={busy || archived} aria-label={'Convertir en tarea: ' + item.content}>Convertir en tarea →</button>
                       )}
                     </div>
                   </div>;
                 })}</div>
                 <div className="list-add">
-                  <input value={draftItems[list.id] || ''} onChange={(event) => setDraftItems((current) => ({ ...current, [list.id]: event.target.value }))} placeholder="Añadir elemento…" onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addItem(list.id); } }} />
-                  <button type="button" onClick={() => addItem(list.id)} disabled={busy || !(draftItems[list.id] || '').trim()}>+</button>
+                  <input disabled={busy || archived} value={draftItems[list.id] || ''} onChange={(event) => setDraftItems((current) => ({ ...current, [list.id]: event.target.value }))} placeholder="Añadir elemento…" onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addItem(list.id); } }} />
+                  <button type="button" onClick={() => addItem(list.id)} disabled={busy || archived || !(draftItems[list.id] || '').trim()}>+</button>
                 </div>
               </div>;
             })}</div>
