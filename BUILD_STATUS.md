@@ -398,9 +398,9 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 | #35 | Feature page composition `src/app/AppPages.jsx` | #147 PASS | #148 PASS | `7ed702a110a6ca155797c868826ea7019c06b14f` |
 | #36 | Auth/session lifecycle hook `src/app/useAppAuth.js` | #151 PASS | #152 PASS | `6c0ffab3a848dfada10e01fe8691e87f9a6cf808` |
 | #37 | Auth session restoration after browser reload (E2E test) | #154 PASS | #155 PASS | `c03d9bbbdfab333a3aa898863cc0d47c2eed781c` |
-| #38 | Notes/Ideas search, filters, edit and archive/restore | PR CI PENDING | Post-merge PENDING | TBD |
+| #38 | Notes/Ideas search, filters, edit and archive/restore | #161 PASS | #162 PASS | `c6b681414e3f7b97a4c020632f1abacb888a4e43` |
 
-- The extractions from PRs #19–#35 preserve existing APIs or behavior. PRs #33–#35 were verified with 20 Playwright scenarios; PR #36 adds logout (21) and PR #37 adds session restoration after reload (22). PR #38 adds Notes/Ideas search and type filters, with a target of 23 browser scenarios. PR #34 added four isolated unit tests, bringing the unit suite to 21.
+- The extractions from PRs #19–#35 preserve existing APIs or behavior. PRs #33–#35 were verified with 20 Playwright scenarios; PR #36 adds logout (21) and PR #37 adds session restoration after reload (22). PR #38 adds Notes/Ideas search, lifecycle filters, edit/archive/restore, verified with 24 Playwright scenarios. PR #34 added four isolated unit tests, bringing the unit suite to 21.
 - No new framework/dependency, schema migration, RLS/grant, auth, secret, Service Worker or deployment change was made in these batches.
 - This is incremental boundary work, not a completed rewrite. `src/App.jsx` now owns session/auth orchestration, cross-feature state and app-level composition; `src/app/` owns the authenticated shell, navigation, shared action orchestration and page mounting. Further session/service/domain extraction and validation gates remain before Phase 0 closes.
 - The real authenticated Supabase browser test and physical-device validation remain open; mocked E2E is not evidence of real persistence.
@@ -468,7 +468,10 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 
 ## PR #38 — Notes/Ideas search, filters and lifecycle (21/11/2026)
 
-- PR under validation on branch `feat/phase0-notes-search-filters`; base main SHA `bd94953ff5ed937d0479ea4de672db441afeb50a`.
+- PR: https://github.com/SimpleLife9/simplelife/pull/38 — MERGED.
+- Branch `feat/phase0-notes-search-filters`; tested head SHA `e585a6bd86accded257d3a995d0ce02d8b129514`; merge SHA `c6b681414e3f7b97a4c020632f1abacb888a4e43`.
+- CI #161 PASS on the exact PR head: 21 unit tests, 24/24 Playwright scenarios and production build: https://github.com/SimpleLife9/simplelife/actions/runs/44851870993.
+- CI post-merge #162 PASS on the exact merge SHA: https://github.com/SimpleLife9/simplelife/actions/runs/44852063433.
 - `NotesPage` searches by title/content, filters by kind (all / notes / ideas) and lifecycle (active / archived / all), shows visible-versus-total count and a no-results state.
 - Each note/idea can be edited (kind, optional title and content), archived and restored. Archive is reversible and retains content/relations; no hard delete is introduced.
 - Responsive `notes-toolbar`, archive label and per-card actions added.
@@ -477,5 +480,5 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 - The initial check of `information_schema.role_table_grants` showed only table-level `SELECT` and `INSERT`. A follow-up check of `information_schema.column_privileges` and `has_column_privilege` found existing column-level `UPDATE` for `title`, `content`, `kind`, `status`, `archived_at`, `deleted_at` and `purge_after`. Thus the required note edit/archive fields are already permitted without widening grants.
 - The `note_idea_touch` trigger updates `updated_at`. Ownership RLS remains unchanged; updates include the authenticated owner filter and exclude deleted rows.
 - The same column-level audit found `user_list` UPDATE for `name`, `purpose`, `status`, `archived_at`, `deleted_at`, `purge_after`; and `list_item` UPDATE for `content`, `is_checked`, `position`, `task_id`. No grants, policies, schema, data or rows changed in this audit.
-- No service-role access or RLS bypass. PR #38 target: 21 unit tests, 24 Playwright scenarios and production build, followed by post-merge CI on the exact SHA.
+- No service-role access or RLS bypass.
 - The real Supabase authenticated browser CRUD smoke and physical Android/iOS validations remain independent Phase 0 gates. Mocked tests do not count as backend persistence evidence.
