@@ -1267,6 +1267,44 @@ test('Inbox adds a capture to an existing list as a linked list item', async ({ 
 });
 
 
+test('primary navigation preserves page destinations in the authenticated shell', async ({ page }) => {
+  await mockSupabaseSession(page);
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+
+  const destinations = [
+    { label: 'Hoy', heading: 'Hoy' },
+    { label: 'Inbox', heading: 'Inbox' },
+    { label: 'Objetivos', heading: 'Objetivos' },
+    { label: 'Proyectos', heading: 'Proyectos' },
+    { label: 'Más', heading: 'Tareas' },
+  ];
+
+  const sideNavigation = page.getByRole('navigation', { name: 'Navegación principal' });
+  await expect(sideNavigation).toBeVisible();
+
+  for (const destination of destinations) {
+    const sideButton = sideNavigation.getByRole('button', { name: new RegExp(destination.label) });
+    await sideButton.click();
+    await expect(page.locator('.page-heading h1')).toHaveText(destination.heading);
+    await expect(sideButton).toHaveClass(/active/);
+  }
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mobileNavigation = page.getByRole('navigation', { name: 'Navegación móvil' });
+  await expect(mobileNavigation).toBeVisible();
+
+  for (const destination of destinations) {
+    const mobileButton = mobileNavigation.getByRole('button', { name: new RegExp(destination.label) });
+    await mobileButton.click();
+    await expect(page.locator('.page-heading h1')).toHaveText(destination.heading);
+    await expect(mobileButton).toHaveClass(/active/);
+  }
+});
+
+
 test('More modules remain directly accessible from the mobile navigation', async ({ page }) => {
   await mockSupabaseSession(page);
   await page.setViewportSize({ width: 390, height: 844 });
