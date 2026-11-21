@@ -6,7 +6,7 @@
   },
   "lock": {
     "path": "../../../deno.lock",
-    "frozen": false
+    "frozen": true
   },
   "compilerOptions": {
     "strict": true
