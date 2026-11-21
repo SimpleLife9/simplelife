@@ -19,9 +19,16 @@ test('real authenticated Supabase smoke: task, note, list item and persistence',
   test.skip(!email || !password, 'Set SIMPLELIFE_QA_EMAIL and SIMPLELIFE_QA_PASSWORD for the opt-in live smoke.');
 
   await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Vuelve a enfocarte.', exact: true })).toBeVisible();
   await page.getByLabel('Correo electrónico').fill(email);
   await page.getByLabel('Contraseña').fill(password);
-  await page.getByRole('button', { name: 'Iniciar sesión', exact: true }).click();
+
+  // AuthScreen adds a trailing arrow to the submit button's accessible name.
+  const signInButton = page.getByRole('button', { name: /^Iniciar sesión/ });
+  await expect(signInButton).toBeVisible();
+  await expect(signInButton).toBeEnabled();
+  await signInButton.click();
+
   await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
 
   // TASK: restore the stable QA task if needed, change its state, reload and archive it.
