@@ -31,3 +31,22 @@ Cuba 2026 rule; New York spring gap and fall fold; Lord Howe half-hour transitio
 
 ## Explicit non-effects
 No tables, migrations, database functions, triggers, RLS, grants, audit rows, user data, Auth settings, secrets, hosted Supabase functions or deployments are changed. This is not yet integrated into the Agenda UI or Event persistence path.
+
+## Atomic Event range resolution (21 November 2026)
+
+The resolver accepts an optional range form for a timed Event:
+
+```json
+{
+  "timeZone": "America/New_York",
+  "start": { "localDateTime": "2026-11-01T01:15", "disambiguation": "earlier" },
+  "end": { "localDateTime": "2026-11-01T01:45", "disambiguation": "later" }
+}
+```
+
+- Both endpoints are resolved in a single invocation after reading and validating the bundled TZDB version once. Both use the same loaded timezone object and resolver build.
+- Each endpoint has independent fold selection (`earlier`, `later`, `reject`) and gap behavior (`next-valid`, `reject`).
+- The range response includes `startsAt`, `endsAt`, the full start/end resolution records, canonical zone, one `rulesVersion`, one `resolverVersion`, and `authoritative: true`.
+- The resolver rejects the range unless the resolved end instant is strictly after the resolved start instant. This is checked after DST resolution in UTC, not by comparing local strings.
+- The existing single-wall-time request remains supported for diagnostics and existing isolated tests. Event writes should use the range form exclusively.
+- This remains source code and CI-only. It is not deployed or connected to an Event write path.

@@ -6,6 +6,9 @@ export const MAX_GAP_MINUTES = 1440;
 
 type Resolution = "exact" | "ambiguous-first" | "ambiguous-later" | "gap-adjusted-next-valid";
 type Input = { localDateTime: string; timeZone: string; disambiguation?: "earlier" | "later" | "reject"; gapStrategy?: "next-valid" | "reject" };
+type RangeEndpoint = { localDateTime: string; disambiguation?: "earlier" | "later" | "reject"; gapStrategy?: "next-valid" | "reject" };
+type RangeInput = { timeZone: string; start: RangeEndpoint; end: RangeEndpoint };
+type NormalizedEndpoint = { input: Input; parsed: { parts: Parts; wall: number } };
 type Parts = { year: number; month: number; day: number; hour: number; minute: number; second: number; millisecond: number };
 type ZoneData = { name: string; offsets: number[]; utcOffset(timestamp: number): number };
 const tz = moment.tz as unknown as { dataVersion: string; zone(name: string): ZoneData | null };
@@ -69,19 +72,35 @@ function resolveResult(input: Input, zone: ZoneData, instant: number, wall: numb
   });
 }
 export function getTzdbVersion(): string { return tz.dataVersion; }
-export function resolveLocalDateTime(value: unknown) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("A JSON object is required.");
-  const input = value as Input;
-  for (const key of Object.keys(value)) if (!inputKeys.has(key)) throw new TypeError("Unsupported input field: " + key);
-  if (typeof input.timeZone !== "string" || !input.timeZone.trim()) throw new TypeError("timeZone must be a non-empty IANA identifier.");
+function normalizeEndpoint(value: unknown, timeZone: string, label: "start" | "end"): NormalizedEndpoint {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(label + " must be an object.");
+  }
+  const endpoint = value as RangeEndpoint;
+  const allowed = new Set(["localDateTime", "disambiguation", "gapStrategy"]);
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) throw new TypeError("Unsupported " + label + " field: " + key);
+  }
+  const disambiguation = endpoint.disambiguation || "earlier";
+  const gapStrategy = endpoint.gapStrategy || "next-valid";
+  if (!["earlier", "later", "reject"].includes(disambiguation)) {
+    throw new RangeError("Invalid " + label + " fold disambiguation.");
+  }
+  if (!["next-valid", "reject"].includes(gapStrategy)) {
+    throw new RangeError("Invalid " + label + " gap strategy.");
+  }
+  const input: Input = {
+    localDateTime: endpoint.localDateTime,
+    timeZone,
+    disambiguation,
+    gapStrategy,
+  };
+  return { input, parsed: parse(endpoint.localDateTime) };
+}
+
+function resolveParsed(input: Input, zone: ZoneData, parsed: { parts: Parts; wall: number }) {
   const disambiguation = input.disambiguation || "earlier";
   const gapStrategy = input.gapStrategy || "next-valid";
-  if (!["earlier", "later", "reject"].includes(disambiguation)) throw new RangeError("Invalid fold disambiguation.");
-  if (!["next-valid", "reject"].includes(gapStrategy)) throw new RangeError("Invalid gap strategy.");
-  if (tz.dataVersion !== EXPECTED_TZDB_VERSION) throw new TzdbVersionError(tz.dataVersion);
-  const zone = tz.zone(input.timeZone);
-  if (!zone) throw new RangeError("Unsupported IANA time zone: " + input.timeZone);
-  const parsed = parse(input.localDateTime);
   const exact = candidates(parsed.wall, zone);
   if (exact.length > 2) throw new RangeError("More than two matching instants were found.");
   if (exact.length === 2 && disambiguation === "reject") throw new RangeError("Ambiguous local date-time.");
@@ -99,4 +118,71 @@ export function resolveLocalDateTime(value: unknown) {
     return resolveResult(input, zone, found[later ? 1 : 0], nextWall, "gap-adjusted-next-valid", minutes);
   }
   throw new RangeError("Could not resolve a valid local minute within the v1 gap limit.");
+}
+
+export function resolveLocalDateTime(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("A JSON object is required.");
+  const input = value as Input;
+  for (const key of Object.keys(value)) if (!inputKeys.has(key)) throw new TypeError("Unsupported input field: " + key);
+  if (typeof input.timeZone !== "string" || !input.timeZone.trim()) throw new TypeError("timeZone must be a non-empty IANA identifier.");
+  const disambiguation = input.disambiguation || "earlier";
+  const gapStrategy = input.gapStrategy || "next-valid";
+  if (!["earlier", "later", "reject"].includes(disambiguation)) throw new RangeError("Invalid fold disambiguation.");
+  if (!["next-valid", "reject"].includes(gapStrategy)) throw new RangeError("Invalid gap strategy.");
+  if (tz.dataVersion !== EXPECTED_TZDB_VERSION) throw new TzdbVersionError(tz.dataVersion);
+  const zone = tz.zone(input.timeZone);
+  if (!zone) throw new RangeError("Unsupported IANA time zone: " + input.timeZone);
+  const parsed = parse(input.localDateTime);
+  return resolveParsed(input, zone, parsed);
+}
+
+/**
+ * Resolves an Event's start and end together against one already-verified IANA
+ * dataset and one canonical timezone object. Each endpoint has independent DST
+ * disambiguation, while the range itself is validated using resolved UTC instants.
+ */
+export function resolveLocalDateTimeRange(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("A JSON object is required.");
+  }
+  const input = value as RangeInput;
+  const allowed = new Set(["timeZone", "start", "end"]);
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) throw new TypeError("Unsupported range input field: " + key);
+  }
+  if (typeof input.timeZone !== "string" || !input.timeZone.trim()) {
+    throw new TypeError("timeZone must be a non-empty IANA identifier.");
+  }
+
+  // Read and verify the TZDB release once for the whole operation. Both
+  // endpoints then use this same loaded dataset and the same ZoneData object.
+  const rulesVersion = getTzdbVersion();
+  if (rulesVersion !== EXPECTED_TZDB_VERSION) throw new TzdbVersionError(rulesVersion);
+  const zone = tz.zone(input.timeZone);
+  if (!zone) throw new RangeError("Unsupported IANA time zone: " + input.timeZone);
+
+  // Parse both wall times before resolving either endpoint, so malformed input
+  // cannot produce a partially meaningful result.
+  const start = normalizeEndpoint(input.start, input.timeZone, "start");
+  const end = normalizeEndpoint(input.end, input.timeZone, "end");
+  const startResult = resolveParsed(start.input, zone, start.parsed);
+  const endResult = resolveParsed(end.input, zone, end.parsed);
+  const startsAt = Date.parse(startResult.instant);
+  const endsAt = Date.parse(endResult.instant);
+  if (!Number.isFinite(startsAt) || !Number.isFinite(endsAt) || endsAt <= startsAt) {
+    throw new RangeError("Resolved Event end must be after its start.");
+  }
+
+  return Object.freeze({
+    requestedTimeZone: input.timeZone,
+    timeZone: zone.name,
+    startsAt: startResult.instant,
+    endsAt: endResult.instant,
+    start: startResult,
+    end: endResult,
+    rulesSource: "iana-tzdb",
+    rulesVersion,
+    resolverVersion: RESOLVER_VERSION,
+    authoritative: true as const,
+  });
 }

@@ -1,4 +1,4 @@
-import { EXPECTED_TZDB_VERSION, getTzdbVersion, resolveLocalDateTime } from "../supabase/functions/agenda-time-resolve/resolver.ts";
+import { EXPECTED_TZDB_VERSION, getTzdbVersion, resolveLocalDateTime, resolveLocalDateTimeRange } from "../supabase/functions/agenda-time-resolve/resolver.ts";
 
 function equal<T>(actual:T, expected:T, label:string):void {
   if (actual !== expected) throw new Error(label + ": expected " + String(expected) + ", received " + String(actual));
@@ -48,4 +48,58 @@ Deno.test("invalid local values and zones fail closed",()=>{
   throws(()=>resolveLocalDateTime({localDateTime:"2026-02-29T10:00",timeZone:"America/Havana"}),"invalid calendar date");
   throws(()=>resolveLocalDateTime({localDateTime:"2026-11-01T01:30",timeZone:"Unknown/Zone"}),"unknown zone");
   throws(()=>resolveLocalDateTime({localDateTime:"2026-11-01T01:30-04:00",timeZone:"America/Havana"}),"offset-bearing date-time");
+});
+
+Deno.test("atomic event range resolves exact endpoints under one TZDB release",()=>{
+  const r=resolveLocalDateTimeRange({
+    timeZone:"America/New_York",
+    start:{localDateTime:"2026-11-02T09:00"},
+    end:{localDateTime:"2026-11-02T10:30"},
+  });
+  equal(r.startsAt,"2026-11-02T14:00:00.000Z","range start instant");
+  equal(r.endsAt,"2026-11-02T15:30:00.000Z","range end instant");
+  equal(r.start.rulesVersion,EXPECTED_TZDB_VERSION,"start rules version");
+  equal(r.end.rulesVersion,EXPECTED_TZDB_VERSION,"end rules version");
+  equal(r.rulesVersion,EXPECTED_TZDB_VERSION,"range rules version");
+  equal(r.start.resolverVersion,r.end.resolverVersion,"same resolver version");
+  equal(r.timeZone,"America/New_York","canonical timezone");
+});
+Deno.test("range resolves fold disambiguation independently at each endpoint",()=>{
+  const r=resolveLocalDateTimeRange({
+    timeZone:"America/New_York",
+    start:{localDateTime:"2026-11-01T01:15",disambiguation:"earlier"},
+    end:{localDateTime:"2026-11-01T01:45",disambiguation:"later"},
+  });
+  equal(r.startsAt,"2026-11-01T05:15:00.000Z","fold start instant");
+  equal(r.endsAt,"2026-11-01T06:45:00.000Z","fold end instant");
+  equal(r.start.resolution,"ambiguous-first","start fold selection");
+  equal(r.end.resolution,"ambiguous-later","end fold selection");
+});
+Deno.test("range adjusts a gap endpoint and keeps both results on the same TZDB",()=>{
+  const r=resolveLocalDateTimeRange({
+    timeZone:"America/New_York",
+    start:{localDateTime:"2026-03-08T02:30"},
+    end:{localDateTime:"2026-03-08T03:30"},
+  });
+  equal(r.start.resolution,"gap-adjusted-next-valid","gap start result");
+  equal(r.start.resolvedLocalDateTime,"2026-03-08T03:00:00.000","gap start wall time");
+  equal(r.start.adjustmentMinutes,30,"gap adjustment");
+  equal(r.rulesVersion,r.end.rulesVersion,"range TZDB consistency");
+  equal(r.endsAt,"2026-03-08T07:30:00.000Z","gap range end instant");
+});
+Deno.test("range rejects endpoints whose resolved UTC end is not after start",()=>{
+  throws(()=>resolveLocalDateTimeRange({
+    timeZone:"America/New_York",
+    start:{localDateTime:"2026-11-01T01:45",disambiguation:"later"},
+    end:{localDateTime:"2026-11-01T01:50",disambiguation:"earlier"},
+  }),"UTC end before UTC start during fold");
+  throws(()=>resolveLocalDateTimeRange({
+    timeZone:"America/Havana",
+    start:{localDateTime:"2026-11-02T10:00"},
+    end:{localDateTime:"2026-11-02T10:00"},
+  }),"zero duration");
+});
+Deno.test("range rejects missing endpoints and unsupported nested fields",()=>{
+  throws(()=>resolveLocalDateTimeRange({timeZone:"America/Havana",start:{localDateTime:"2026-11-02T10:00"}}),"missing end");
+  throws(()=>resolveLocalDateTimeRange({timeZone:"America/Havana",start:{localDateTime:"2026-11-02T10:00",offset:"-04:00"},end:{localDateTime:"2026-11-02T11:00"}}),"unsupported endpoint field");
 });

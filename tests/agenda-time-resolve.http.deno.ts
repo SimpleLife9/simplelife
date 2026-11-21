@@ -118,3 +118,35 @@ Deno.test("DST ambiguity reject policy is surfaced as 422", async () => {
   equal(response.status, 422, "ambiguous time status");
   equal((await json(response)).error, "Ambiguous local date-time.", "ambiguous time error");
 });
+
+Deno.test("HTTP accepts an atomic event range and returns both UTC instants", async () => {
+  const response = await handleRequest(new Request(URL, {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({
+      timeZone: "America/New_York",
+      start: { localDateTime: "2026-11-02T09:00" },
+      end: { localDateTime: "2026-11-02T10:30" },
+    }),
+  }));
+  equal(response.status, 200, "range status");
+  const result = await json(response);
+  equal(result.startsAt, "2026-11-02T14:00:00.000Z", "range start");
+  equal(result.endsAt, "2026-11-02T15:30:00.000Z", "range end");
+  equal(result.rulesVersion, "2026f", "atomic range rules version");
+  equal(result.authoritative, true, "atomic range authoritative flag");
+});
+
+Deno.test("HTTP rejects a range whose selected fold endpoints reverse the UTC interval", async () => {
+  const response = await handleRequest(new Request(URL, {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({
+      timeZone: "America/New_York",
+      start: { localDateTime: "2026-11-01T01:45", disambiguation: "later" },
+      end: { localDateTime: "2026-11-01T01:50", disambiguation: "earlier" },
+    }),
+  }));
+  equal(response.status, 422, "reversed fold range status");
+  equal((await json(response)).error, "Resolved Event end must be after its start.", "reversed range error");
+});
