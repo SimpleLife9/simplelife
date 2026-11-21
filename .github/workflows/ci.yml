@@ -83,7 +83,7 @@ jobs:
         with:
           version: 3.2.0
 
-      - name: Start local Postgres without applying migrations
+      - name: Start full local Supabase stack without applying migrations
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -94,15 +94,13 @@ jobs:
               raise SystemExit("Expected [db.migrations] config block was not found")
           path.write_text(config.replace(marker, "[db.migrations]\nenabled = false\nschema_paths = []", 1))
           PY
-          supabase db start
+          supabase start
 
       - name: Reproduce hosted RLS bootstrap in ephemeral local Postgres
         run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/local-supabase-bootstrap.sql
 
-      - name: Restart local Supabase stack with migrations and Edge Runtime services
+      - name: Apply local migrations after platform bootstrap
         run: |
-          # Preserve the bootstrapped local database volume while restarting the full stack.
-          supabase stop
           python - <<'PY'
           from pathlib import Path
           path = Path("supabase/config.toml")
@@ -112,7 +110,7 @@ jobs:
               raise SystemExit("Expected temporary migrations-disabled config was not found")
           path.write_text(config.replace(marker, "[db.migrations]\nenabled = true\nschema_paths = []", 1))
           PY
-          supabase start
+          supabase migration up
 
       - name: Verify Agenda auth in the actual local Edge Runtime
         run: node scripts/agenda-edge-runtime-smoke.mjs
