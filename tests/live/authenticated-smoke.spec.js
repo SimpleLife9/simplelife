@@ -203,3 +203,174 @@ test('real authenticated Supabase smoke: task, note, list item and persistence',
   await listCard.getByRole('button', { name: `Archivar lista: ${LIST_TITLE}` }).click();
   await expect(page.getByText('Lista archivada.')).toBeVisible();
 });
+
+test('real authenticated Supabase smoke: Lote 10 task lifecycle and completion metadata', async ({ page }) => {
+  test.skip(!email || !password, 'Set SIMPLELIFE_QA_EMAIL and SIMPLELIFE_QA_PASSWORD for the opt-in live smoke.');
+
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Vuelve a enfocarte.', exact: true })).toBeVisible();
+  await page.getByLabel('Correo electrónico').fill(email);
+  await page.getByLabel('Contraseña').fill(password);
+  const signInButton = page.getByRole('button', { name: /^Iniciar sesión/ });
+  await expect(signInButton).toBeVisible();
+  await expect(signInButton).toBeEnabled();
+  await signInButton.click();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+
+  await openMoreTab(page, 'Tareas');
+  await waitForPageData(page);
+  const statusFilter = page.getByLabel('Filtrar por estado');
+  const archiveFilter = page.getByLabel('Filtrar por archivo');
+  const search = page.getByLabel('Buscar tareas');
+  const taskRows = page.locator('.task-row').filter({ hasText: TASK_TITLE });
+
+  await statusFilter.selectOption('all');
+  await archiveFilter.selectOption('all');
+  await search.fill(TASK_TITLE);
+  await expect(taskRows).toHaveCount(3);
+
+  // Reuse exactly the three existing task canaries. Recover any interrupted
+  // prior attempt by restoring archived rows; never seed or delete canaries.
+  await archiveFilter.selectOption('archived');
+  let archivedRows = page.locator('.task-row').filter({ hasText: TASK_TITLE });
+  while (await archivedRows.count()) {
+    await archivedRows.first().getByRole('button', { name: `Restaurar tarea: ${TASK_TITLE}` }).click();
+    await expect(page.getByText('Tarea restaurada.', { exact: true })).toBeVisible();
+    await waitForPageData(page);
+  }
+  await archiveFilter.selectOption('active');
+  await expect(taskRows).toHaveCount(3);
+
+  // If a previous interrupted attempt left a completed canary active, reopen
+  // that QA record before repeating the lifecycle from a known open state.
+  let completedRows = taskRows.filter({ hasText: 'Completada' });
+  while (await completedRows.count()) {
+    await completedRows.first().getByRole('button', { name: `Reabrir tarea: ${TASK_TITLE}` }).click();
+    await expect(page.getByText('Tarea reabierta.', { exact: true })).toBeVisible();
+    await waitForPageData(page);
+  }
+  await expect(taskRows).toHaveCount(3);
+
+  // The duration estimate is planning information, not a running timer.
+  await page.getByRole('button', { name: 'Nueva Tarea' }).click();
+  const createDialog = page.getByRole('dialog', { name: 'Nueva tarea' });
+  await expect(createDialog.locator('.task-estimate-help')).toContainText('no inicia un temporizador');
+  await createDialog.getByRole('button', { name: 'Cerrar nueva tarea' }).click();
+
+  let firstRow = taskRows.first();
+  await firstRow.getByRole('button', { name: `Editar tarea: ${TASK_TITLE}` }).click();
+  const editDialog = page.getByRole('dialog', { name: 'Editar tarea' });
+  await expect(editDialog.locator('.task-estimate-help')).toContainText('no inicia un temporizador');
+  await editDialog.getByRole('button', { name: 'Cerrar edición' }).click();
+  await expect(taskRows).toHaveCount(3);
+
+  // Exercise Pendiente → En curso → Bloqueada → Pendiente on the same canary.
+  const firstStatus = () => taskRows.first().getByLabel(`Cambiar estado: ${TASK_TITLE}`);
+  await firstStatus().selectOption('todo');
+  await expect(page.getByText('Estado actualizado: Pendiente.', { exact: true })).toBeVisible();
+  await waitForPageData(page);
+  await expect(firstStatus()).toHaveValue('todo');
+
+  await firstStatus().selectOption('in_progress');
+  await expect(page.getByText('Estado actualizado: En curso.', { exact: true })).toBeVisible();
+  await waitForPageData(page);
+  await expect(firstStatus()).toHaveValue('in_progress');
+
+  await firstStatus().selectOption('blocked');
+  await expect(page.getByText('Estado actualizado: Bloqueada.', { exact: true })).toBeVisible();
+  await waitForPageData(page);
+  await expect(firstStatus()).toHaveValue('blocked');
+
+  await firstStatus().selectOption('todo');
+  await expect(page.getByText('Estado actualizado: Pendiente.', { exact: true })).toBeVisible();
+  await waitForPageData(page);
+  await expect(firstStatus()).toHaveValue('todo');
+
+  // Reload confirms that the work status is actually persisted.
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+  await openMoreTab(page, 'Tareas');
+  await waitForPageData(page);
+  await statusFilter.selectOption('all');
+  await archiveFilter.selectOption('active');
+  await search.fill(TASK_TITLE);
+  await expect(taskRows).toHaveCount(3);
+  await expect(firstStatus()).toHaveValue('todo');
+
+  // Individual archive/restore must preserve the existing work status.
+  firstRow = taskRows.first();
+  await firstRow.getByRole('button', { name: `Archivar tarea: ${TASK_TITLE}` }).click();
+  await expect(page.getByText('Tarea archivada.', { exact: true })).toBeVisible();
+  await waitForPageData(page);
+  await archiveFilter.selectOption('archived');
+  archivedRows = page.locator('.task-row').filter({ hasText: TASK_TITLE });
+  await expect(archivedRows).toHaveCount(1);
+  await archivedRows.first().getByRole('button', { name: `Restaurar tarea: ${TASK_TITLE}` }).click();
+  await expect(page.getByText('Tarea restaurada.', { exact: true })).toBeVisible();
+  await waitForPageData(page);
+  await archiveFilter.selectOption('active');
+  await expect(taskRows).toHaveCount(3);
+  await expect(firstStatus()).toHaveValue('todo');
+
+  // Prepare two different open states, then archive both in one bulk operation.
+  await taskRows.nth(1).getByLabel(`Cambiar estado: ${TASK_TITLE}`).selectOption('blocked');
+  await expect(page.getByText('Estado actualizado: Bloqueada.', { exact: true })).toBeVisible();
+  await waitForPageData(page);
+  await taskRows.nth(0).locator('input.task-select-checkbox').check();
+  await taskRows.nth(1).locator('input.task-select-checkbox').check();
+  await page.getByRole('button', { name: 'Archivar seleccionadas' }).click();
+  await expect(page.getByText('2 tareas archivadas.', { exact: true })).toBeVisible();
+  await waitForPageData(page);
+  await expect(taskRows).toHaveCount(1);
+
+  await archiveFilter.selectOption('archived');
+  archivedRows = page.locator('.task-row').filter({ hasText: TASK_TITLE });
+  await expect(archivedRows).toHaveCount(2);
+  await expect(archivedRows.filter({ hasText: 'Pendiente' })).toHaveCount(1);
+  await expect(archivedRows.filter({ hasText: 'Bloqueada' })).toHaveCount(1);
+
+  // Complete the remaining canary, archive/restore it, and verify after reload.
+  await archiveFilter.selectOption('active');
+  await expect(taskRows).toHaveCount(1);
+  const remainingStatus = taskRows.first().getByLabel(`Cambiar estado: ${TASK_TITLE}`);
+  if (await remainingStatus.inputValue() !== 'todo') {
+    await remainingStatus.selectOption('todo');
+    await expect(page.getByText('Estado actualizado: Pendiente.', { exact: true })).toBeVisible();
+    await waitForPageData(page);
+  }
+  await taskRows.first().getByRole('button', { name: `Completar tarea: ${TASK_TITLE}` }).click();
+  await expect(page.getByText('Tarea completada.', { exact: true })).toBeVisible();
+  await waitForPageData(page);
+  await statusFilter.selectOption('completed');
+  await expect(taskRows).toHaveCount(1);
+  await taskRows.first().getByRole('button', { name: `Archivar tarea: ${TASK_TITLE}` }).click();
+  await expect(page.getByText('Tarea archivada.', { exact: true })).toBeVisible();
+  await waitForPageData(page);
+
+  await archiveFilter.selectOption('archived');
+  await expect(taskRows).toHaveCount(1);
+  await taskRows.first().getByRole('button', { name: `Restaurar tarea: ${TASK_TITLE}` }).click();
+  await expect(page.getByText('Tarea restaurada.', { exact: true })).toBeVisible();
+  await waitForPageData(page);
+  await archiveFilter.selectOption('active');
+  await expect(taskRows).toHaveCount(1);
+  await expect(taskRows.first()).toContainText('Completada');
+
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+  await openMoreTab(page, 'Tareas');
+  await waitForPageData(page);
+  await statusFilter.selectOption('completed');
+  await archiveFilter.selectOption('active');
+  await search.fill(TASK_TITLE);
+  await expect(taskRows).toHaveCount(1);
+  await expect(taskRows.first()).toContainText('Completada');
+
+  // Leave all three existing task canaries archived for the next smoke run.
+  await taskRows.first().getByRole('button', { name: `Archivar tarea: ${TASK_TITLE}` }).click();
+  await expect(page.getByText('Tarea archivada.', { exact: true })).toBeVisible();
+  await waitForPageData(page);
+  await statusFilter.selectOption('all');
+  await archiveFilter.selectOption('archived');
+  await expect(taskRows).toHaveCount(3);
+});
