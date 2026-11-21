@@ -399,9 +399,9 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 | #36 | Auth/session lifecycle hook `src/app/useAppAuth.js` | #151 PASS | #152 PASS | `6c0ffab3a848dfada10e01fe8691e87f9a6cf808` |
 | #37 | Auth session restoration after browser reload (E2E test) | #154 PASS | #155 PASS | `c03d9bbbdfab333a3aa898863cc0d47c2eed781c` |
 | #38 | Notes/Ideas search, filters, edit and archive/restore | #161 PASS | #162 PASS | `c6b681414e3f7b97a4c020632f1abacb888a4e43` |
-| #39 | Lists search, rename, item editing, reorder and archive/restore | PR CI PENDING | Post-merge PENDING | TBD |
+| #39 | Lists search, rename, item editing, reorder and archive/restore | #169 PASS | #170 PASS | `50092bb8f536724fdb9bd08a06088fd0393631f8` |
 
-- The extractions from PRs #19–#35 preserve existing APIs or behavior. PRs #33–#35 were verified with 20 Playwright scenarios; PR #36 adds logout (21) and PR #37 adds session restoration after reload (22). PR #38 adds Notes/Ideas search, lifecycle filters, edit/archive/restore, verified with 24 Playwright scenarios. PR #34 added four isolated unit tests, bringing the unit suite to 21.
+- The extractions from PRs #19–#39 preserve existing APIs or behavior. PRs #33–#35 were verified with 20 Playwright scenarios; PR #36 adds logout (21), PR #37 adds session restoration after reload (22), PR #38 adds Notes/Ideas lifecycle maintenance (24), and PR #39 adds full Lists maintenance (25). PR #34 added four isolated unit tests, bringing the unit suite to 21.
 - No new framework/dependency, schema migration, RLS/grant, auth, secret, Service Worker or deployment change was made in these batches.
 - This is incremental boundary work, not a completed rewrite. `src/App.jsx` now owns session/auth orchestration, cross-feature state and app-level composition; `src/app/` owns the authenticated shell, navigation, shared action orchestration and page mounting. Further session/service/domain extraction and validation gates remain before Phase 0 closes.
 - The real authenticated Supabase browser test and physical-device validation remain open; mocked E2E is not evidence of real persistence.
@@ -486,13 +486,17 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 
 ## PR #39 — Lists search and complete maintenance (21/11/2026)
 
-- PR under preparation on branch `feat/phase0-list-maintenance`; base main SHA `08e3619e8fa90f1395135cecfdaa745ad2508fa0`.
+- PR: https://github.com/SimpleLife9/simplelife/pull/39 — MERGED.
+- Branch `feat/phase0-list-maintenance`; tested head SHA `beef816fd42aa4055773de07e20a177226b5bc2f`; merge SHA `50092bb8f536724fdb9bd08a06088fd0393631f8`.
+- CI #169 PASS on the exact PR head: 21 unit tests, 25/25 Playwright scenarios and production build: https://github.com/SimpleLife9/simplelife/actions/runs/44855943017.
+- CI post-merge #170 PASS on the exact merge SHA: 21 unit tests, 25/25 Playwright scenarios and production build: https://github.com/SimpleLife9/simplelife/actions/runs/44856099007.
 - Lists can be searched by name/purpose and filtered by active/archived/all. Counters show visible versus total lists.
 - Lists can be renamed and their optional purpose edited; archive/restore is reversible, keeps the list and its items, and archived lists are read-only until restored.
 - Items can be edited, checked/unchecked and reordered. Item edits and reordering preserve existing `task_id` links. The established idempotent conversion-to-task flow remains intact.
 - The read-only Supabase audit confirmed column-level UPDATE already present for the exact fields: `user_list` name/purpose/status/archived_at/deleted_at/purge_after; `list_item` content/is_checked/position/task_id. RLS remains owner/parent scoped, and `user_list_touch` / `list_item_touch` triggers update `updated_at`.
+- Read-only index audit found no unique constraint on `position`; `list_item` has primary key on ID and non-unique indexes on list_id/task_id. Position swap does not conflict with a unique position index.
 - No grant, policy, schema, data, row, Auth config, secret, dependency, Service Worker, PWA or deployment change.
-- Added a deterministic E2E scenario covering list rename/purpose, item edit, reorder, check state, preserving a linked task, archive/restore and archived read-only controls.
-- CI #164: 24/25 Playwright PASS; first correction removed an invalid expectation that the owner ID be sent in the UPDATE body (the component correctly keeps ownership immutable). CI #166 then showed the checkbox PATCH and subsequent GET both persisted `is_checked: true`; `locator.check()` failed because the UI refresh is asynchronous. The test now uses click + auto-waiting `toBeChecked()` and still asserts persisted mock state. CI #167 is queued on the corrected head; target remains 21 unit tests, 25 Playwright and production build.
-- No hard delete; all maintenance is reversible except editing content and position. No service-role access or RLS bypass.
+- Added a deterministic E2E scenario covering list rename/purpose, item edit, reorder, checkbox state, preserving a linked task, archive/restore and archived read-only controls.
+- Earlier CI #164/#166/#168 runs exposed test-only issues: immutable owner payload expectation, asynchronous checkbox state refresh, and ambiguous archive badge text. These were corrected without weakening assertions or changing production behavior.
+- No hard delete; archive is reversible and retains list items and task relationships. No service-role access or RLS bypass.
 - Real Supabase CRUD and physical-device Phase 0 gates remain independent; mocked E2E is not real persistence proof.
