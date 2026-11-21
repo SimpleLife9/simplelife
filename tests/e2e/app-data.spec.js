@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { todayInHavana } from '../../src/lib/date-time.js';
 
 const projectUrl = 'https://iybnjrnysiikbtokyshg.supabase.co';
 const authUser = {
@@ -1739,9 +1740,7 @@ test('Lists convert an item into a task, preserve the original and avoid duplica
 
 
 test('Today separates overdue tasks, allows moving them to today and totals estimated time', async ({ page }) => {
-  const today = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Havana', year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(new Date());
+  const today = todayInHavana();
   const dateOffset = (offset) => {
     const [year, month, day] = today.split('-').map(Number);
     const next = new Date(Date.UTC(year, month - 1, day + offset));
@@ -1778,9 +1777,7 @@ test('Today separates overdue tasks, allows moving them to today and totals esti
   await expect(page.getByText('2 h 15 min', { exact: true })).toBeVisible();
 });
 test('Today dashboard derives goal and project progress, weekly execution, blockers and milestones', async ({ page }) => {
-  const today = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Havana', year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(new Date());
+  const today = todayInHavana();
   const dateOffset = (offset) => {
     const [year, month, day] = today.split('-').map(Number);
     const next = new Date(Date.UTC(year, month - 1, day + offset));
@@ -1851,9 +1848,7 @@ test('Today dashboard derives goal and project progress, weekly execution, block
 });
 
 test('Tasks filter by due date and support bulk complete, reschedule and clear date', async ({ page }) => {
-  const today = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Havana', year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(new Date());
+  const today = todayInHavana();
   const dateOffset = (offset) => {
     const [year, month, day] = today.split('-').map(Number);
     const next = new Date(Date.UTC(year, month - 1, day + offset));
