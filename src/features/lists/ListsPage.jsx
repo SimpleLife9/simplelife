@@ -14,7 +14,7 @@ function isArchived(list) {
 
 export function ListsPage({ profile, refreshKey, runAction, busy, setActivePage, setMorePage }) {
   const { rows: lists, loading, localError } = useRows('user_list', profile, refreshKey, (query) => query.is('deleted_at', null).order('created_at', { ascending: false }));
-  const { rows: allItems } = useRows('list_item', profile, refreshKey, (query) => query.order('position').order('created_at'));
+  const { rows: allItems, loading: itemsLoading, localError: itemsError } = useRows('list_item', profile, refreshKey, (query) => query.order('position').order('created_at'));
   const { rows: tasks } = useRows('task', profile, refreshKey, (query) => query.is('deleted_at', null).order('created_at', { ascending: false }));
   const [name, setName] = useState('');
   const [purpose, setPurpose] = useState('');
@@ -276,7 +276,7 @@ export function ListsPage({ profile, refreshKey, runAction, busy, setActivePage,
             </select>
           </label>
         </div>
-        {loading ? <p className="muted">Cargando…</p> : localError ? <div className="form-error">{localError}</div> : lists.length ? (
+        {loading || itemsLoading ? <p className="muted">Cargando…</p> : (localError || itemsError) ? <div className="form-error">{localError || itemsError}</div> : lists.length ? (
           visibleLists.length ? (
             <div className="lists-grid">{visibleLists.map((list) => {
               const items = allItems.filter((item) => item.list_id === list.id)
