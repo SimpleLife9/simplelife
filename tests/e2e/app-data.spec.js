@@ -1628,6 +1628,10 @@ test('Lists support rename, purpose, item editing, reordering and reversible arc
   expect(listItems.find((item) => item.id === existingItems[1].id).position).toBe(0);
   expect(listItems.find((item) => item.id === existingItems[2].id).task_id).toBe(linkedTaskId);
 
+  await page.getByRole('checkbox', { name: 'Comprar frutas' }).check();
+  expect(listItems.find((item) => item.id === existingItems[1].id).is_checked).toBe(true);
+  expect(updatedListItems).toContainEqual({ id: existingItems[1].id, is_checked: true });
+
   await page.getByRole('button', { name: 'Archivar lista: Compras y despensa' }).click();
   await expect(page.getByText('Lista archivada.')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Compras y despensa' })).toHaveCount(0);
@@ -1640,6 +1644,9 @@ test('Lists support rename, purpose, item editing, reordering and reversible arc
   await page.getByLabel('Filtrar listas por archivo').selectOption('archived');
   await expect(page.getByRole('heading', { name: 'Compras y despensa' })).toBeVisible();
   await expect(page.getByText('ARCHIVADA')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Editar lista: Compras y despensa' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Editar elemento: Comprar frutas' })).toBeDisabled();
+  await expect(page.getByRole('checkbox', { name: 'Comprar frutas' })).toBeDisabled();
   await page.getByRole('button', { name: 'Restaurar lista: Compras y despensa' }).click();
   await expect(page.getByText('Lista restaurada.')).toBeVisible();
   expect(lists[0]).toMatchObject({ status: 'active', archived_at: null });
