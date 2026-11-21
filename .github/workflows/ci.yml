@@ -61,6 +61,22 @@ jobs:
       - name: Validate opt-in live smoke suite without connecting to Supabase
         run: npm run test:e2e:live -- --list
 
+      - name: Set up pinned Deno runtime
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: 2.9.8
+          cache: true
+
+      - name: Resolve and commit the exact Deno dependency graph
+        run: |
+          deno install --config supabase/functions/agenda-time-resolve/deno.json --frozen-lockfile --entrypoint supabase/functions/agenda-time-resolve/index.ts tests/agenda-iana-resolver.deno.ts
+
+      - name: Test and type-check Agenda IANA resolver with frozen lockfile
+        run: |
+          deno test --config supabase/functions/agenda-time-resolve/deno.json --frozen-lockfile tests/agenda-iana-resolver.deno.ts
+          deno check --config supabase/functions/agenda-time-resolve/deno.json --frozen-lockfile supabase/functions/agenda-time-resolve/index.ts
+          cat deno.lock
+
       - name: Build production assets
         run: npm run build
 
