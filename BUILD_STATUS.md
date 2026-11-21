@@ -399,6 +399,7 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 | #36 | Auth/session lifecycle hook `src/app/useAppAuth.js` | #151 PASS | #152 PASS | `6c0ffab3a848dfada10e01fe8691e87f9a6cf808` |
 | #37 | Auth session restoration after browser reload (E2E test) | #154 PASS | #155 PASS | `c03d9bbbdfab333a3aa898863cc0d47c2eed781c` |
 | #38 | Notes/Ideas search, filters, edit and archive/restore | #161 PASS | #162 PASS | `c6b681414e3f7b97a4c020632f1abacb888a4e43` |
+| #39 | Lists search, rename, item editing, reorder and archive/restore | PR CI PENDING | Post-merge PENDING | TBD |
 
 - The extractions from PRs #19–#35 preserve existing APIs or behavior. PRs #33–#35 were verified with 20 Playwright scenarios; PR #36 adds logout (21) and PR #37 adds session restoration after reload (22). PR #38 adds Notes/Ideas search, lifecycle filters, edit/archive/restore, verified with 24 Playwright scenarios. PR #34 added four isolated unit tests, bringing the unit suite to 21.
 - No new framework/dependency, schema migration, RLS/grant, auth, secret, Service Worker or deployment change was made in these batches.
@@ -482,3 +483,16 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 - The same column-level audit found `user_list` UPDATE for `name`, `purpose`, `status`, `archived_at`, `deleted_at`, `purge_after`; and `list_item` UPDATE for `content`, `is_checked`, `position`, `task_id`. No grants, policies, schema, data or rows changed in this audit.
 - No service-role access or RLS bypass.
 - The real Supabase authenticated browser CRUD smoke and physical Android/iOS validations remain independent Phase 0 gates. Mocked tests do not count as backend persistence evidence.
+
+## PR #39 — Lists search and complete maintenance (21/11/2026)
+
+- PR under preparation on branch `feat/phase0-list-maintenance`; base main SHA `08e3619e8fa90f1395135cecfdaa745ad2508fa0`.
+- Lists can be searched by name/purpose and filtered by active/archived/all. Counters show visible versus total lists.
+- Lists can be renamed and their optional purpose edited; archive/restore is reversible, keeps the list and its items, and archived lists are read-only until restored.
+- Items can be edited, checked/unchecked and reordered. Item edits and reordering preserve existing `task_id` links. The established idempotent conversion-to-task flow remains intact.
+- The read-only Supabase audit confirmed column-level UPDATE already present for the exact fields: `user_list` name/purpose/status/archived_at/deleted_at/purge_after; `list_item` content/is_checked/position/task_id. RLS remains owner/parent scoped, and `user_list_touch` / `list_item_touch` triggers update `updated_at`.
+- No grant, policy, schema, data, row, Auth config, secret, dependency, Service Worker, PWA or deployment change.
+- Added a deterministic E2E scenario covering list rename/purpose, item edit, reorder, check state, preserving a linked task, archive/restore and archived read-only controls.
+- CI target: 21 unit tests, 25 Playwright scenarios and production build, followed by post-merge CI on exact SHA.
+- No hard delete; all maintenance is reversible except editing content and position. No service-role access or RLS bypass.
+- Real Supabase CRUD and physical-device Phase 0 gates remain independent; mocked E2E is not real persistence proof.
