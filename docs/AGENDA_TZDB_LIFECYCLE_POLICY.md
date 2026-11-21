@@ -63,7 +63,7 @@ A later TZDB update does not change those stored UTC instants. The Event remains
 
 All-day Events remain date-only and must not be shifted through UTC conversion.
 
-## 6. Recurring series and future occurrences — proposed default, approval required
+## 6. Recurring series and future occurrences — APPROVED DEFAULT (21 November 2026)
 
 A recurring series is a civil-time rule, not a sequence of fixed 24-hour UTC intervals. Store the original local wall time, IANA zone, recurrence rule, and a stable occurrence key derived from the series identity and original scheduled local date/time.
 
@@ -76,7 +76,7 @@ Proposed conservative behavior when TZDB changes:
 5. The series keeps its civil-time rule and original IANA zone. A user timezone preference change does not rewrite the series zone.
 6. A user can explicitly edit the series or an occurrence; the edit scope must remain visible (this occurrence / this and following / whole series).
 
-This is a proposal, not an approved product decision. Before implementing recurring Event persistence, Robert must approve or revise this behavior, including how far ahead occurrences are materialized and how review notices are surfaced.
+**Product decision: APPROVED by Robert on 21 November 2026.** This is the default product behavior. Implementation must still specify and test the materialization horizon, idempotency, stable occurrence keys, review/acceptance flow, notifications, and edit scope. Approval of this product rule does not authorize hosted database DDL, migrations, RLS/grants, Auth changes, production data changes, or deployment; those retain a separate technical Human Gate.
 
 ## 7. Browser/server mismatch
 
@@ -91,7 +91,7 @@ This is a proposal, not an approved product decision. Before implementing recurr
 - [ ] Name an operational owner for weekly IANA release review and urgent rule-change review.
 - [ ] Approve an automated alerting mechanism (if desired); none is claimed by this document.
 - [ ] Complete package provenance/security/license review or approve a maintained alternative.
-- [ ] Approve the recurring-occurrence TZDB-change behavior in section 6.
+- [x] Approve the recurring-occurrence TZDB-change behavior in section 6 (Robert, 21 November 2026).
 - [ ] Complete trusted Event write, audit append, RLS/grants and real-auth two-user persistence tests.
 - [ ] Complete a rollback rehearsal in an isolated environment.
 - [ ] Approve the hosted Edge Function deployment and database migration separately.
