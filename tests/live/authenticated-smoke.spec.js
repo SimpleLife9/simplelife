@@ -84,6 +84,7 @@ test('real authenticated Supabase smoke: task, note, list item and persistence',
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
   await openMoreTab(page, 'Tareas');
+  await waitForPageData(page);
   await page.getByLabel('Filtrar por estado').selectOption('all');
   await page.getByLabel('Filtrar por archivo').selectOption('active');
   await page.getByLabel('Buscar tareas').fill(TASK_TITLE);
@@ -128,6 +129,7 @@ test('real authenticated Supabase smoke: task, note, list item and persistence',
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
   await openMoreTab(page, 'Notas e ideas');
+  await waitForPageData(page);
   await page.getByLabel('Filtrar por archivo').selectOption('active');
   await page.getByLabel('Buscar notas e ideas').fill(NOTE_TITLE);
   noteCard = page.locator('.note-card').filter({ has: page.getByRole('heading', { name: NOTE_TITLE, exact: true }) }).first();
@@ -190,6 +192,7 @@ test('real authenticated Supabase smoke: task, note, list item and persistence',
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
   await openMoreTab(page, 'Listas');
+  await waitForPageData(page);
   await page.getByLabel('Filtrar listas por archivo').selectOption('active');
   await page.getByLabel('Buscar listas').fill(LIST_TITLE);
   listCard = page.locator('.list-card').filter({ has: page.getByRole('heading', { name: LIST_TITLE, exact: true }) }).first();
