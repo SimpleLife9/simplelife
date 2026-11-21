@@ -400,9 +400,9 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 | #37 | Auth session restoration after browser reload (E2E test) | #154 PASS | #155 PASS | `c03d9bbbdfab333a3aa898863cc0d47c2eed781c` |
 | #38 | Notes/Ideas search, filters, edit and archive/restore | #161 PASS | #162 PASS | `c6b681414e3f7b97a4c020632f1abacb888a4e43` |
 | #39 | Lists search, rename, item editing, reorder and archive/restore | #169 PASS | #170 PASS | `50092bb8f536724fdb9bd08a06088fd0393631f8` |
-| #40 | Reconcile E2E acceptance for task lifecycle and goal/subgoal contributions | PR CI PENDING | Post-merge PENDING | TBD |
+| #40 | Reconcile E2E acceptance for task lifecycle and goal/subgoal contributions | #172 PASS | #173 PASS | `754d15b33bcb676636bb052cb4af491762870721` |
 
-- The extractions from PRs #19–#39 preserve existing APIs or behavior. PRs #33–#35 were verified with 20 Playwright scenarios; PR #36 adds logout (21), PR #37 adds session restoration after reload (22), PR #38 adds Notes/Ideas lifecycle maintenance (24), and PR #39 adds full Lists maintenance (25). PR #34 added four isolated unit tests, bringing the unit suite to 21.
+- The extractions from PRs #19–#39 preserve existing APIs or behavior. PRs #33–#35 were verified with 20 Playwright scenarios; PR #36 adds logout (21), PR #37 adds session restoration after reload (22), PR #38 adds Notes/Ideas lifecycle maintenance (24), and PR #39 adds full Lists maintenance (25). PR #34 added four isolated unit tests, bringing the unit suite to 21. PR #40 reconciles additional Lote 10/11 lifecycle/contribution assertions within the same 25 Playwright scenarios.
 - No new framework/dependency, schema migration, RLS/grant, auth, secret, Service Worker or deployment change was made in these batches.
 - This is incremental boundary work, not a completed rewrite. `src/App.jsx` now owns session/auth orchestration, cross-feature state and app-level composition; `src/app/` owns the authenticated shell, navigation, shared action orchestration and page mounting. Further session/service/domain extraction and validation gates remain before Phase 0 closes.
 - The real authenticated Supabase browser test and physical-device validation remain open; mocked E2E is not evidence of real persistence.
@@ -517,3 +517,14 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 - Validation target: 21 unit tests, 25 Playwright scenarios, production build; post-merge CI on exact SHA.
 - Important evidence boundary: passing mocks validates the UI/client contract only. The manual localhost checks in Anexo 137/138 remain pending, as does the real authenticated Supabase smoke.
 - Do not mark either Lote 10 or 11 as manual PASS until Robert confirms the listed hands-on checks.
+
+## PR #40 — Lote 10/11 acceptance coverage reconciliation (21/11/2026)
+
+- PR: https://github.com/SimpleLife9/simplelife/pull/40 — MERGED.
+- Branch `test/phase0-reconcile-lotes-10-11`; tested head SHA `aa069761dcc51935904ba0c5c9ae842f8ae27edc`; merge SHA `754d15b33bcb676636bb052cb4af491762870721`.
+- CI #172 PASS on the exact PR head: 21 unit tests, 25/25 Playwright scenarios and production build: https://github.com/SimpleLife9/simplelife/actions/runs/44856769388.
+- CI post-merge #173 PASS on the exact merge SHA: 21 unit tests, 25/25 Playwright scenarios and production build: https://github.com/SimpleLife9/simplelife/actions/runs/44856926235.
+- Lote 10 automated coverage now archives and restores a completed task while checking `status=completed`, `completed_at` and `completion_outcome=complete`; it also asserts the duration-estimate help says it does not start a timer in both create and edit dialogs.
+- Lote 11 automated coverage now asserts that the Goal and Subgoal cards show the right visible task status (Pending/Blocked) for each contributor, in addition to existing direct/subgoal linking, parent Goal filter inclusion, unlink/restore of the same relation, and no duplicates.
+- Test-only change; no application code, data, schema, grants, RLS, secrets, credentials or deployment change.
+- Manual localhost checks for Anexos 137/138 remain pending. Passing mocks is not evidence of real Supabase persistence.
