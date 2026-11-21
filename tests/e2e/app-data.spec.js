@@ -1312,6 +1312,80 @@ test('primary navigation preserves page destinations in the authenticated shell'
 });
 
 
+test('Notes and ideas can be searched by title or content and filtered by kind', async ({ page }) => {
+  const seedNotes = [
+    {
+      id: '00000000-0000-7000-8000-000000000601',
+      owner_user_id: profile.id,
+      created_by_user_id: profile.id,
+      kind: 'note',
+      title: 'Plan de lectura',
+      content: 'Leer veinte páginas antes de dormir.',
+      status: 'active',
+      archived_at: null,
+      deleted_at: null,
+      created_at: '2026-11-20T10:00:00.000Z',
+    },
+    {
+      id: '00000000-0000-7000-8000-000000000602',
+      owner_user_id: profile.id,
+      created_by_user_id: profile.id,
+      kind: 'idea',
+      title: 'Nueva cafetería',
+      content: 'Probar una merienda cubana para los clientes.',
+      status: 'active',
+      archived_at: null,
+      deleted_at: null,
+      created_at: '2026-11-20T11:00:00.000Z',
+    },
+    {
+      id: '00000000-0000-7000-8000-000000000603',
+      owner_user_id: profile.id,
+      created_by_user_id: profile.id,
+      kind: 'idea',
+      title: 'Catálogo de temporada',
+      content: 'Preparar fotografías para el catálogo.',
+      status: 'active',
+      archived_at: null,
+      deleted_at: null,
+      created_at: '2026-11-20T12:00:00.000Z',
+    },
+  ];
+  await mockSupabaseSession(page, { noteIdeas: seedNotes });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+
+  await page.locator('.side-nav').getByRole('button', { name: /Más/ }).click();
+  await page.getByRole('navigation', { name: 'Secciones de Más' }).getByRole('button', { name: 'Notas e ideas' }).click();
+  await expect(page.getByRole('heading', { name: 'Tu biblioteca' })).toBeVisible();
+  await expect(page.getByText('3 registros')).toBeVisible();
+
+  const search = page.getByRole('searchbox', { name: 'Buscar notas e ideas' });
+  await search.fill('Nueva cafetería');
+  await expect(page.getByRole('heading', { name: 'Nueva cafetería' })).toBeVisible();
+  await expect(page.getByText('Plan de lectura')).toHaveCount(0);
+  await expect(page.getByText('1 de 3 registros')).toBeVisible();
+
+  await search.fill('merienda cubana');
+  await expect(page.getByRole('heading', { name: 'Nueva cafetería' })).toBeVisible();
+  await expect(page.getByText('Catálogo de temporada')).toHaveCount(0);
+
+  await search.clear();
+  await page.getByLabel('Filtrar por tipo').selectOption('idea');
+  await expect(page.getByRole('heading', { name: 'Nueva cafetería' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Catálogo de temporada' })).toBeVisible();
+  await expect(page.getByText('Plan de lectura')).toHaveCount(0);
+  await expect(page.getByText('2 de 3 registros')).toBeVisible();
+
+  await page.getByLabel('Filtrar por tipo').selectOption('note');
+  await expect(page.getByRole('heading', { name: 'Plan de lectura' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Nueva cafetería' })).toHaveCount(0);
+  await expect(page.getByText('1 de 3 registros')).toBeVisible();
+});
+
+
 test('More modules remain directly accessible from the mobile navigation', async ({ page }) => {
   await mockSupabaseSession(page);
   await page.setViewportSize({ width: 390, height: 844 });
