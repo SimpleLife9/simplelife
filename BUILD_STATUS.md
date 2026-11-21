@@ -736,7 +736,7 @@ These deferrals are accepted to permit Phase 1 design/build work to begin. They 
 - Adds `tests/agenda-temporal.test.js`: Havana local-time round-trip; New York 2026 spring-forward gap and fall-back fold; invalid calendar dates; all-day range semantics; cross-midnight timed intervals; adjacent versus overlapping ranges.
 - The resolver uses the current runtime `Intl.DateTimeFormat` timezone database and explicitly returns `rulesVersion: null` / `authoritative: false`. It is a client preview and test foundation only, not the canonical server timezone source for confirmed Events. A centrally maintained/versioned IANA rules authority remains required before persisted Event confirmation.
 - No new dependency, lockfile change, page/navigation/UI, database schema, migration, row/data write, RLS/grant, Auth, secrets, service worker, or deployment change in this slice.
-- PR #56 and CI evidence will be recorded after the branch PR is opened and checks complete. Agenda remains not yet user-visible/persisted.
+- PR #56 MERGED by squash at `6a8dbdebb0c1b5a22efd6cd0238199e4f7695592`. CI #212 PASS on corrected PR head `9b8f90d191374c8d8975284615435984570fb31a`: https://github.com/SimpleLife9/simplelife/actions/runs/44932056651. Post-merge CI #215 PASS on the exact merge SHA: https://github.com/SimpleLife9/simplelife/actions/runs/44932551965. Agenda remains not yet user-visible or persisted; only pure domain primitives are integrated.
 
 
 ## Supabase migration source recovery — Phase 1 prerequisite (21/11/2026)
