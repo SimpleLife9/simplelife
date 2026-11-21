@@ -1342,7 +1342,10 @@ test('primary navigation preserves page destinations in the authenticated shell'
   await expect(sideNavigation).toBeVisible();
 
   for (const destination of destinations) {
-    const sideButton = sideNavigation.getByRole('button', { name: new RegExp(destination.label) });
+    const sideButton = destination.label === 'Más'
+      ? sideNavigation.getByRole('button', { name: /Más$/ })
+      : sideNavigation.getByRole('button', { name: new RegExp(destination.label) });
+    await expect(sideButton).toHaveCount(1);
     await sideButton.click();
     await expect(page.locator('.page-heading h1')).toHaveText(destination.heading);
     await expect(sideButton).toHaveClass(/active/);

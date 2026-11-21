@@ -11,8 +11,14 @@ const LIST_PURPOSE = 'Lista técnica estable para verificar persistencia de QA.'
 const ITEM_CONTENT = '__SIMPLELIFE_QA_SMOKE_ITEM__';
 
 async function openMoreTab(page, tabName) {
-  await page.getByRole('button', { name: 'Más', exact: true }).click();
-  await page.getByRole('button', { name: tabName, exact: true }).click();
+  const primaryNavigation = page.getByRole('navigation', { name: 'Navegación principal' });
+  const moreButton = primaryNavigation.getByRole('button', { name: /Más$/ });
+  await expect(moreButton).toHaveCount(1);
+  await expect(moreButton).toBeVisible();
+  await moreButton.click();
+
+  const moreNavigation = page.getByRole('navigation', { name: 'Secciones de Más' });
+  await moreNavigation.getByRole('button', { name: tabName, exact: true }).click();
 }
 
 test('real authenticated Supabase smoke: task, note, list item and persistence', async ({ page }) => {
