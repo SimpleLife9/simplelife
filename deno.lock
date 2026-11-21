@@ -2,6 +2,7 @@
   "version": "5",
   "specifiers": {
     "npm:@playwright/test@1.65.1": "1.65.1",
+    "npm:@supabase/server@1.9.2": "1.9.2_@supabase+supabase-js@2.119.2",
     "npm:@supabase/supabase-js@2.119.2": "2.119.2",
     "npm:moment-timezone@0.6.6": "0.6.6",
     "npm:react-dom@19.3.1": "19.3.1_react@19.3.1",
@@ -207,6 +208,12 @@
         "tslib"
       ]
     },
+    "@supabase/middleware@1.0.0": {
+      "integrity": "sha512-ecA+z/o5E9sB+quuupGt8d7QjrnD4BBwZr+Qthm0uj6CtL/+yvAUTDlknhGuTbUidvx5CxBHJ1R3H96UjDpgyg==",
+      "dependencies": [
+        "std-env"
+      ]
+    },
     "@supabase/phoenix@0.4.5": {
       "integrity": "sha512-aAn9H9ovVyeApKy11OWOrrOGq8DV68yWeH4ud2lN9fzn4aO8Zb5GLL9m1pUg9nLqIcT+ZDfAcsZe0E/nqdv2lw=="
     },
@@ -221,6 +228,14 @@
       "dependencies": [
         "@supabase/phoenix",
         "tslib"
+      ]
+    },
+    "@supabase/server@1.9.2_@supabase+supabase-js@2.119.2": {
+      "integrity": "sha512-zkvU157ivZ268Ffs+2aEaYvavfchZ8IiB/Rt5tW4JTfew2JeX0TN46Do3XD5U8ganGhfAJr3BUsMHswY56+iLA==",
+      "dependencies": [
+        "@supabase/middleware",
+        "@supabase/supabase-js",
+        "jose"
       ]
     },
     "@supabase/storage-js@2.119.2": {
@@ -267,6 +282,9 @@
     },
     "iceberg-js@0.8.1": {
       "integrity": "sha512-1dhVQZXhcHje7798IVM+xoo/1ZdVfzOMIc8/rgVSijRK38EDqOJoGula9N/8ZI5RD8QTxNQtK/Gozpr+qUqRRA=="
+    },
+    "jose@6.2.18": {
+      "integrity": "sha512-doV4thUwgkrycJH4yLeqwTGIIZphHl+pk7CPReuMIhYhncmgzdko85MaCG4YQFTxqMFr1/oEH32tZuKKovcDEg=="
     },
     "lightningcss-android-arm64@1.33.0": {
       "integrity": "sha512-gEpRTalKdosp4Bb8qWtc2iOgE5SeIHlpS1up9bFq2wAyYhl1UdTObYiHe98zEM9SQvSoqQZ1IQD0JNpg3Ml5pg==",
@@ -466,6 +484,9 @@
     "source-map-js@1.2.4": {
       "integrity": "sha512-J7ZjMvHd9O1fcT/5V09QWaaSl2BbWx3F6O08spde82Namf9UB0GxRVIPiNbVsdKkoizHiSpTodo3vp2bAy91MA=="
     },
+    "std-env@4.3.0": {
+      "integrity": "sha512-OtU/EgQ1kIm5KwqQpBC6ZEMXrZRui11w8zgfTWp8cdO9B8OaPsbA8bTHO2P+HNo1VlUTGMVBwPhydu6poeXiag=="
+    },
     "tinyglobby@0.2.17": {
       "integrity": "sha512-wXR/dYpcqKmfWpEdZjiKJOwCNFndD0DMnrW/cYjVGttEkBfVgcLFHoNrlj47mjOVic9yyNu65alsgF4NQyTa2g==",
       "dependencies": [
@@ -493,6 +514,8 @@
   },
   "workspace": {
     "dependencies": [
+      "npm:@supabase/server@1.9.2",
+      "npm:@supabase/supabase-js@2.119.2",
       "npm:moment-timezone@0.6.6"
     ]
   }
