@@ -391,8 +391,9 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 | #28 | Projects page plus shared TextAreaField and ProjectStatusTag | #126 PASS | #127 PASS | `5e8bb1c4108772b294c8c7b3be740611819e9d0f` |
 | #29 | Tasks page `src/features/tasks/TasksPage.jsx` | #128 PASS | #129 PASS | `bbd23f09f18c66eeb28f072759f8c5cfa287c8b5` |
 | #30 | Notes/Ideas page and shared FormCard | PR CI PENDING | Post-merge PENDING | TBD |
+| #31 | Lists page `src/features/lists/ListsPage.jsx` | PR CI PENDING | Post-merge PENDING | TBD |
 
-- The extractions from PRs #19–#29 preserve existing APIs or behavior; the existing Playwright suite remained at 19 scenarios and passed for completed PR checks.
+- The extractions from PRs #19–#30 preserve existing APIs or behavior; the existing Playwright suite remained at 19 scenarios and passed for completed PR checks.
 - No new framework/dependency, schema migration, RLS/grant, auth, secret, Service Worker or deployment change was made in these batches.
 - This is incremental boundary work, not a completed rewrite. `src/App.jsx` remains a legacy composition file and additional page/service extraction is still required before Phase 0 closes.
 - The real authenticated Supabase browser test and physical-device validation remain open; mocked E2E is not evidence of real persistence.
