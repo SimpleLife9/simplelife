@@ -229,17 +229,26 @@ test('real authenticated Supabase smoke: Lote 10 task lifecycle and completion m
   await search.fill(TASK_TITLE);
   await expect(taskRows).toHaveCount(3);
 
-  // Reuse the three existing archived task canaries. Never create another row.
+  // Reuse exactly the three existing task canaries. Recover any interrupted
+  // prior attempt by restoring archived rows; never seed or delete canaries.
   await archiveFilter.selectOption('archived');
   let archivedRows = page.locator('.task-row').filter({ hasText: TASK_TITLE });
-  await expect(archivedRows).toHaveCount(3);
   while (await archivedRows.count()) {
     await archivedRows.first().getByRole('button', { name: `Restaurar tarea: ${TASK_TITLE}` }).click();
     await expect(page.getByText('Tarea restaurada.', { exact: true })).toBeVisible();
     await waitForPageData(page);
   }
-  await expect(archivedRows).toHaveCount(0);
   await archiveFilter.selectOption('active');
+  await expect(taskRows).toHaveCount(3);
+
+  // If a previous interrupted attempt left a completed canary active, reopen
+  // that QA record before repeating the lifecycle from a known open state.
+  let completedRows = taskRows.filter({ hasText: 'Completada' });
+  while (await completedRows.count()) {
+    await completedRows.first().getByRole('button', { name: `Reabrir tarea: ${TASK_TITLE}` }).click();
+    await expect(page.getByText('Tarea reabierta.', { exact: true })).toBeVisible();
+    await waitForPageData(page);
+  }
   await expect(taskRows).toHaveCount(3);
 
   // The duration estimate is planning information, not a running timer.
