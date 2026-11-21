@@ -20,17 +20,11 @@ import { NotesPage } from './features/notes/NotesPage.jsx';
 import { FormCard } from './shared/components/FormCard.jsx';
 import { ListsPage } from './features/lists/ListsPage.jsx';
 import { AuthScreen } from './features/auth/AuthScreen.jsx';
-import { Brand } from './shared/components/Brand.jsx';
 import { ConfigurationScreen } from './shared/components/ConfigurationScreen.jsx';
 import { LoadingScreen } from './shared/components/LoadingScreen.jsx';
+import { AppShell } from './app/AppShell.jsx';
+import { getPageTitle, getPageDescription } from './app/navigation.js';
 
-const NAV = [
-  { id: 'today', label: 'Hoy', icon: '☀️' },
-  { id: 'inbox', label: 'Inbox', icon: '↳' },
-  { id: 'goals', label: 'Objetivos', icon: '◎' },
-  { id: 'projects', label: 'Proyectos', icon: '▤' },
-  { id: 'more', label: 'Más', icon: '•••' },
-];
 
 
 function App() {
@@ -199,94 +193,41 @@ function App() {
     );
   }
 
-  const title = activePage === 'today'
-    ? 'Hoy'
-    : activePage === 'inbox'
-      ? 'Inbox'
-      : activePage === 'goals'
-        ? 'Objetivos'
-        : activePage === 'projects'
-          ? 'Proyectos'
-          : morePage === 'tasks' ? 'Tareas' : morePage === 'notes' ? 'Notas e ideas' : 'Listas';
+  const title = getPageTitle(activePage, morePage);
+  const eyebrow = activePage === 'today'
+    ? new Intl.DateTimeFormat('es', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'America/Havana' }).format(new Date())
+    : 'YOUR LIFE. YOUR SYSTEM.';
+  const description = activePage === 'today'
+    ? 'Un paso claro. Después, el siguiente.'
+    : getPageDescription(activePage, morePage);
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <Brand />
-        <div className="sidebar-label">TU ESPACIO</div>
-        <nav className="side-nav" aria-label="Navegación principal">
-          {NAV.map((item) => (
-            <button key={item.id} className={`nav-item ${activePage === item.id ? 'active' : ''}`} onClick={() => setActivePage(item.id)}>
-              <span className="nav-icon">{item.icon}</span><span>{item.label}</span>
-              {item.id === 'inbox' && <span className="nav-dot" />}
-            </button>
-          ))}
-        </nav>
-
-        <div className="sidebar-bottom">
-          <div className="privacy-note"><span>◈</span><div><strong>Tu espacio es privado</strong><small>Solo tú puedes ver tus datos.</small></div></div>
-          <button className="profile-button" onClick={handleSignOut} title="Cerrar sesión">
-            <span className="avatar">{(profile?.display_name || session.user.email || 'S').slice(0, 1).toUpperCase()}</span>
-            <span className="profile-meta"><strong>{profile?.display_name || 'Mi cuenta'}</strong><small>{session.user.email}</small></span>
-            <span className="profile-exit">↗</span>
-          </button>
-        </div>
-      </aside>
-
-      <main className="main-area">
-        <header className="topbar">
-          <div className="mobile-brand"><Brand compact /></div>
-          <div className="breadcrumb">Mi vida <span>/</span> <strong>{title}</strong></div>
-          <div className="topbar-right"><span className="sync-state"><i /> Sincronizado</span><button className="mobile-signout" onClick={handleSignOut}>Salir</button></div>
-        </header>
-
-        <section className="page-content">
-          <div className="page-heading">
-            <div>
-              <div className="eyebrow">{activePage === 'today' ? new Intl.DateTimeFormat('es', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'America/Havana' }).format(new Date()) : 'YOUR LIFE. YOUR SYSTEM.'}</div>
-              <h1>{title}</h1>
-              <p>{activePage === 'today' ? 'Un paso claro. Después, el siguiente.' : pageDescription(activePage, morePage)}</p>
-            </div>
-          </div>
-          {activePage === 'more' && (
-            <nav className="more-page-tabs" aria-label="Secciones de Más">
-              <button type="button" className={morePage === 'tasks' ? 'selected' : ''} aria-current={morePage === 'tasks' ? 'page' : undefined} onClick={() => setMorePage('tasks')}>Tareas</button>
-              <button type="button" className={morePage === 'notes' ? 'selected' : ''} aria-current={morePage === 'notes' ? 'page' : undefined} onClick={() => setMorePage('notes')}>Notas e ideas</button>
-              <button type="button" className={morePage === 'lists' ? 'selected' : ''} aria-current={morePage === 'lists' ? 'page' : undefined} onClick={() => setMorePage('lists')}>Listas</button>
-            </nav>
-          )}
-
-          {(notice || error) && <div className={`alert ${error ? 'alert-error' : 'alert-success'}`}>{error || notice}<button onClick={() => { setError(''); setNotice(''); }}>×</button></div>}
-
-          {activePage === 'today' && <TodayPage profile={profile} refreshKey={refreshKey} runAction={runAction} busy={busy} setActivePage={setActivePage} setMorePage={setMorePage} />}
-          {activePage === 'inbox' && <InboxPage profile={profile} refreshKey={refreshKey} runAction={runAction} busy={busy} setActivePage={setActivePage} setMorePage={setMorePage} />}
-          {activePage === 'goals' && <GoalsPage profile={profile} refreshKey={refreshKey} runAction={runAction} busy={busy} />}
-          {activePage === 'projects' && <ProjectsPage profile={profile} refreshKey={refreshKey} runAction={runAction} busy={busy} setActivePage={setActivePage} setMorePage={setMorePage} />}
-          {activePage === 'more' && morePage === 'tasks' && <TasksPage profile={profile} refreshKey={refreshKey} runAction={runAction} busy={busy} />}
-          {activePage === 'more' && morePage === 'notes' && <NotesPage profile={profile} refreshKey={refreshKey} runAction={runAction} busy={busy} />}
-          {activePage === 'more' && morePage === 'lists' && <ListsPage profile={profile} refreshKey={refreshKey} runAction={runAction} busy={busy} setActivePage={setActivePage} setMorePage={setMorePage} />}
-        </section>
-        <footer className="app-footer"><span>SimpleLife v0.1 · Desarrollo</span><span>Privado por defecto</span></footer>
-      </main>
-      <nav className="mobile-nav" aria-label="Navegación móvil">
-        {NAV.map((item) => (
-          <button key={item.id} className={activePage === item.id ? 'active' : ''} onClick={() => setActivePage(item.id)}>
-            <span>{item.icon}</span><small>{item.label}</small>
-          </button>
-        ))}
-      </nav>
-    </div>
+    <AppShell
+      profile={profile}
+      email={session.user.email}
+      onSignOut={handleSignOut}
+      activePage={activePage}
+      onNavigate={setActivePage}
+      morePage={morePage}
+      onMorePageChange={setMorePage}
+      title={title}
+      eyebrow={eyebrow}
+      description={description}
+      notice={notice}
+      error={error}
+      onClearAlerts={() => { setError(''); setNotice(''); }}
+    >
+      {activePage === 'today' && <TodayPage profile={profile} refreshKey={refreshKey} runAction={runAction} busy={busy} setActivePage={setActivePage} setMorePage={setMorePage} />}
+      {activePage === 'inbox' && <InboxPage profile={profile} refreshKey={refreshKey} runAction={runAction} busy={busy} setActivePage={setActivePage} setMorePage={setMorePage} />}
+      {activePage === 'goals' && <GoalsPage profile={profile} refreshKey={refreshKey} runAction={runAction} busy={busy} />}
+      {activePage === 'projects' && <ProjectsPage profile={profile} refreshKey={refreshKey} runAction={runAction} busy={busy} setActivePage={setActivePage} setMorePage={setMorePage} />}
+      {activePage === 'more' && morePage === 'tasks' && <TasksPage profile={profile} refreshKey={refreshKey} runAction={runAction} busy={busy} />}
+      {activePage === 'more' && morePage === 'notes' && <NotesPage profile={profile} refreshKey={refreshKey} runAction={runAction} busy={busy} />}
+      {activePage === 'more' && morePage === 'lists' && <ListsPage profile={profile} refreshKey={refreshKey} runAction={runAction} busy={busy} setActivePage={setActivePage} setMorePage={setMorePage} />}
+    </AppShell>
   );
 }
 
 
-function pageDescription(activePage, morePage) {
-  if (activePage === 'inbox') return 'Captura primero. Organiza después.';
-  if (activePage === 'goals') return 'Conecta lo que quieres con la vida que estás construyendo.';
-  if (activePage === 'projects') return 'Resultados concretos, organizados en proyectos.';
-  if (morePage === 'tasks') return 'Acciones claras, con prioridad y contexto.';
-  if (morePage === 'notes') return 'Un lugar para conservar ideas y pensamientos.';
-  return 'Elementos sencillos que puedes organizar y compartir más adelante.';
-}
 
 export default App;
