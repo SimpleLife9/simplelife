@@ -396,6 +396,7 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 | #33 | Authenticated AppShell and navigation metadata `src/app/` | #141 PASS | #142 PASS | `52e9c4eaa1ac70d3020144c05a4bc82fa9614034` |
 | #34 | Shared app action orchestration `src/app/createAppActions.js` | #145 PASS | #146 PASS | `e75f9583bc97b6fe10f6e48a5a63bc2bdf388fb1` |
 | #35 | Feature page composition `src/app/AppPages.jsx` | #147 PASS | #148 PASS | `7ed702a110a6ca155797c868826ea7019c06b14f` |
+| #36 | Auth/session lifecycle hook `src/app/useAppAuth.js` | PR CI PENDING | Post-merge PENDING | TBD |
 
 - The extractions from PRs #19–#35 preserve existing APIs or behavior. PRs #33–#35 were verified with 20 Playwright scenarios; PR #34 added four isolated unit tests, bringing the unit suite to 21.
 - No new framework/dependency, schema migration, RLS/grant, auth, secret, Service Worker or deployment change was made in these batches.
@@ -438,3 +439,15 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 - `src/App.jsx` reduced from 8,516 to 6,509 characters (2,007 fewer).
 - Existing Playwright coverage checks all primary destinations, both navigation layouts and the More submodules.
 - No changes to database, data operations, Auth, schema, RLS/grants, secrets, dependencies, Service Worker, PWA or deployment.
+
+## PR #36 — auth/session lifecycle extraction (21/11/2026)
+
+- PR is being prepared on branch `refactor/phase0-extract-auth-session`; base main SHA `3521b4c75c56930aaa1f2dbe6fbabb4c10fe5203`; current head SHA `6ea896c5c4059a53a6d20157dc861a906463a2e3`.
+- New `src/app/useAppAuth.js` owns the current session/profile initialization, auth-state subscription, login, registration and sign-out actions.
+- `App.jsx` keeps the application error state and passes its stable setter into the hook; rendering and navigation remain in the application shell.
+- Existing Auth behavior is retained: session restore, profile readiness, deferred profile work after auth callbacks, email normalization, registration confirmation message, profile preparation, Spanish error messages and sign-out result handling.
+- Added explicit E2E coverage for signing out from an authenticated session and returning to the sign-in screen. The logout request is mocked and asserted; no real account is used.
+- `src/App.jsx` reduced from 6,509 to 3,016 characters (3,493 fewer).
+- Validation target: all unit tests, 21 Playwright scenarios including the new sign-out case, production build and post-merge CI on exact SHA.
+- No Auth configuration, credential, user data, schema, migration, RLS/grants, secret, dependency, Service Worker, PWA cache or deployment change.
+- Do not merge until CI succeeds on the exact PR head.
