@@ -233,7 +233,7 @@ export function NotesPage({ profile, refreshKey, runAction, busy }) {
                   <option value="idea">Idea</option>
                 </select>
               </label>
-              <Field label="Título (opcional)" name="title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Dale un nombre" />
+              <Field label="Título (opcional)" name="title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Dale un nombre" autoFocus />
               <TextAreaField label="Contenido" name="content" value={content} onChange={(event) => setContent(event.target.value)} placeholder="Escribe lo que quieras conservar…" rows={5} required />
               <div className="task-editor-actions">
                 <button type="button" className="button task-editor-cancel" onClick={closeNewNote} disabled={busy}>Cancelar</button>
