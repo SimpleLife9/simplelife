@@ -28,9 +28,9 @@ This document translates the approved product decisions in ChatBending Anexos 5,
 - `audit_event` is readable by its owner but authenticated direct inserts are intentionally blocked; the established audit append path must not be bypassed by new client writes.
 - Existing core policies resolve the authenticated identity through `user_profile.auth_user_id = auth.uid()`, then scope rows by the profile ID.
 
-### Migration-source recovery — exact forward SQL restored
+### Migration-source recovery — merged and provider-reconciled
 
-All six historic forward SQL bodies have been recovered read-only from `supabase_migrations.schema_migrations`. The source-recovery branch contains six versioned files that match the remote `statements[1]` values character-for-character (6/6 exact matches). The remote `rollback` value was `NULL` for all six versions, so no historical down-migrations were fabricated. After the recovery PR merges, run the Supabase CLI migration-list/status comparison against the linked development project and confirm all six versions reconcile before authorizing the first Agenda DDL. Do not execute SQL or `db push` just to validate this source recovery.
+PR #58 merged the six exact historical forward SQL bodies into `supabase/migrations/` at main SHA `ba2b187009c9169973b73302a4fd50cd760307a8`. Each file was compared character-for-character with the remote `statements[1]` body (6/6 exact matches). A post-merge read-only `list_migrations` call returned the same six version/name pairs as Git (6/6 match); the linked project is ACTIVE_HEALTHY on PostgreSQL 17.12. The local Supabase CLI command `supabase migration list --linked` has not been run, so that CLI-specific check remains open if a local linked CLI environment is available. Remote `rollback` was NULL for all six historical versions; no historical down-migrations were fabricated. No SQL/DDL was executed for this recovery.
 
 ## 2. Domain model
 
@@ -201,7 +201,7 @@ Each slice is a separate small PR with unit/domain tests, mocked Playwright, rea
 
 ## 9. Open implementation blockers
 
-1. **Migration baseline:** six hosted migrations exist, but no corresponding `supabase/migrations/` source directory is tracked in the repository. Reconcile this before DDL.
+1. **Migration baseline:** the six historic forward SQL files are now versioned and provider-reconciled 6/6 after PR #58. The provider's read-only migration list matches Git. The local CLI-only `supabase migration list --linked` check remains open; do not run `db push` as a substitute.
 2. **Timezone rules authority:** the initial client-side domain helper uses the runtime `Intl.DateTimeFormat` IANA database for preview and deterministic tests, but JavaScript exposes no portable tzdb version. This result is explicitly marked `authoritative: false`; it must not be treated as the canonical server-resolved instant for a confirmed Event. Before persisted Event confirmation, adopt a centrally maintained/versioned IANA rules source (including update cadence, version provenance, mismatch handling and rollback) and verify its behavior against the browser preview. Never use fixed UTC offsets or silently trust stale device rules.
 3. **Recurrence engine:** select a tested implementation or a small explicitly supported subset; do not claim general RFC 5545 support by implication.
 4. **Audit append path:** confirm the current trusted append mechanism/trigger contract before recording new Event transitions.
