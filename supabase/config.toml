@@ -1,0 +1,10 @@
+#:schema https://supabase.com/schemas/config/v1.json
+
+# Local CLI project identifier. Remote association is maintained by the Supabase CLI.
+project_id = "simplelife"
+
+[db]
+major_version = 17
+
+[db.migrations]
+schema_paths = []
