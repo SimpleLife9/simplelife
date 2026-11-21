@@ -1,0 +1,52 @@
+name: SimpleLife live Supabase smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_live_writes:
+        description: 'Confirm that this writes only stable QA canaries to the dedicated SimpleLife QA account'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: simplelife-live-supabase-smoke
+  cancel-in-progress: false
+
+jobs:
+  live-smoke:
+    if: ${{ inputs.confirm_live_writes == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      SIMPLELIFE_QA_EMAIL: ${{ secrets.SIMPLELIFE_QA_EMAIL }}
+      SIMPLELIFE_QA_PASSWORD: ${{ secrets.SIMPLELIFE_QA_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Check dedicated QA credentials are configured
+        shell: bash
+        run: |
+          if [[ -z "$SIMPLELIFE_QA_EMAIL" || -z "$SIMPLELIFE_QA_PASSWORD" ]]; then
+            echo "::error::Configure SIMPLELIFE_QA_EMAIL and SIMPLELIFE_QA_PASSWORD in repository Actions secrets."
+            exit 1
+          fi
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run real authenticated smoke
+        run: npm run test:e2e:live
