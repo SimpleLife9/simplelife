@@ -103,3 +103,39 @@ test('half-open intervals allow adjacent events and detect actual overlaps', () 
     { startsAt: '2026-11-22T10:30:00Z', endsAt: '2026-11-22T11:30:00Z' },
   ), true);
 });
+
+
+test('a 30-minute Lord Howe spring-forward gap moves to the first valid local minute', () => {
+  const resolved = resolveLocalDateTime({
+    localDateTime: '2026-10-04T02:15',
+    timeZone: 'Australia/Lord_Howe',
+  });
+  assert.equal(resolved.resolution, 'gap-adjusted-next-valid');
+  assert.equal(resolved.resolvedLocalDateTime, '2026-10-04T02:30:00.000');
+  assert.equal(resolved.adjustmentMinutes, 15);
+});
+
+test('a 30-minute Lord Howe fall-back fold exposes both occurrences', () => {
+  const earlier = resolveLocalDateTime({
+    localDateTime: '2026-04-05T01:45',
+    timeZone: 'Australia/Lord_Howe',
+  });
+  const later = resolveLocalDateTime({
+    localDateTime: '2026-04-05T01:45',
+    timeZone: 'Australia/Lord_Howe',
+    disambiguation: 'later',
+  });
+  assert.equal(earlier.resolution, 'ambiguous-first');
+  assert.equal(later.resolution, 'ambiguous-later');
+  assert.equal(Date.parse(later.instant) - Date.parse(earlier.instant), 30 * 60 * 1000);
+});
+
+test('a skipped civil date resolves to the next valid local minute', () => {
+  const resolved = resolveLocalDateTime({
+    localDateTime: '2011-12-30T12:00',
+    timeZone: 'Pacific/Apia',
+  });
+  assert.equal(resolved.resolution, 'gap-adjusted-next-valid');
+  assert.equal(resolved.resolvedLocalDateTime, '2011-12-31T00:00:00.000');
+  assert.equal(resolved.adjustmentMinutes, 12 * 60);
+});
