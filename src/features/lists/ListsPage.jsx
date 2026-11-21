@@ -6,7 +6,6 @@ import { SectionTitle } from '../../shared/components/SectionTitle.jsx';
 import { EmptyState } from '../../shared/components/EmptyState.jsx';
 import { Field } from '../../shared/components/Field.jsx';
 import { TextAreaField } from '../../shared/components/TextAreaField.jsx';
-import { FormCard } from '../../shared/components/FormCard.jsx';
 
 function isArchived(list) {
   return Boolean(list.archived_at) || list.status === 'archived';
@@ -21,6 +20,7 @@ export function ListsPage({ profile, refreshKey, runAction, busy, setActivePage,
   const [draftItems, setDraftItems] = useState({});
   const [searchTerm, setSearchTerm] = useState('');
   const [archiveFilter, setArchiveFilter] = useState('active');
+  const [showNewList, setShowNewList] = useState(false);
   const [editingList, setEditingList] = useState(null);
   const [editListName, setEditListName] = useState('');
   const [editListPurpose, setEditListPurpose] = useState('');
@@ -60,7 +60,15 @@ export function ListsPage({ profile, refreshKey, runAction, busy, setActivePage,
       if (insertError) throw insertError;
       setName('');
       setPurpose('');
+      setShowNewList(false);
     }, 'Lista creada.');
+  };
+
+  const closeNewList = () => {
+    if (busy) return;
+    setShowNewList(false);
+    setName('');
+    setPurpose('');
   };
 
   const addItem = async (listId) => {
@@ -259,9 +267,14 @@ export function ListsPage({ profile, refreshKey, runAction, busy, setActivePage,
     : `${visibleLists.length} de ${lists.length} listas`;
 
   return <>
-    <div className="management-layout">
+    <div className="management-layout management-layout-single">
       <div className="content-main">
-        <SectionTitle detail={countDetail}>Tus listas</SectionTitle>
+        <div className="section-heading-row">
+          <SectionTitle detail={countDetail}>Tus listas</SectionTitle>
+          <div className="section-create-actions">
+            <button type="button" className="section-create-button" onClick={() => setShowNewList(true)} disabled={busy}>Nueva lista</button>
+          </div>
+        </div>
         <div className="lists-toolbar" role="search" aria-label="Buscar y filtrar listas">
           <label className="lists-toolbar-field" htmlFor="lists-search">
             <span>Buscar</span>
@@ -328,14 +341,26 @@ export function ListsPage({ profile, refreshKey, runAction, busy, setActivePage,
           ) : <EmptyState title="Sin resultados" detail="Cambia el texto de búsqueda o el filtro de archivo." icon="⌕" />
         ) : <EmptyState title="Sin listas por ahora" detail="Compras, preparativos o cualquier conjunto de elementos que quieras ordenar." icon="☷" />}
       </div>
-      <aside className="content-side">
-        <FormCard title="Crear una lista" onSubmit={createList} submitLabel="Crear lista" busy={busy}>
-          <Field label="Nombre de la lista" name="list" value={name} onChange={(event) => setName(event.target.value)} placeholder="Ej. Compras de la semana" required />
-          <TextAreaField label="Propósito (opcional)" name="purpose" value={purpose} onChange={(event) => setPurpose(event.target.value)} placeholder="¿Para qué usarás esta lista?" rows={3} />
-        </FormCard>
-        <div className="side-tip"><strong>Una lista no es una tarea.</strong><p>Sus elementos permanecen simples. Cuando decidas convertir uno, se crea una tarea vinculada y el elemento original permanece en la lista.</p></div>
-      </aside>
     </div>
+
+    {showNewList && (
+      <div className="task-editor-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) closeNewList(); }} onKeyDown={(event) => { if (event.key === 'Escape') closeNewList(); }}>
+        <section className="task-editor-dialog floating-form-dialog" role="dialog" aria-modal="true" aria-labelledby="list-create-title">
+          <div className="task-editor-heading">
+            <div><div className="eyebrow">TUS LISTAS</div><h2 id="list-create-title">Crear una lista</h2></div>
+            <button type="button" className="task-editor-close" onClick={closeNewList} disabled={busy} aria-label="Cerrar nueva lista">×</button>
+          </div>
+          <form className="task-editor-form" onSubmit={createList}>
+            <Field label="Nombre de la lista" name="list" value={name} onChange={(event) => setName(event.target.value)} placeholder="Ej. Compras de la semana" required />
+            <TextAreaField label="Propósito (opcional)" name="purpose" value={purpose} onChange={(event) => setPurpose(event.target.value)} placeholder="¿Para qué usarás esta lista?" rows={3} />
+            <div className="task-editor-actions">
+              <button type="button" className="button task-editor-cancel" onClick={closeNewList} disabled={busy}>Cancelar</button>
+              <button type="submit" className="button button-primary" disabled={busy || !name.trim()}>{busy ? 'Creando…' : 'Crear lista'} <span>→</span></button>
+            </div>
+          </form>
+        </section>
+      </div>
+    )}
 
     {editingList && (
       <div className="task-editor-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) closeListEditor(); }} onKeyDown={(event) => { if (event.key === 'Escape') closeListEditor(); }}>
