@@ -8,3 +8,7 @@ major_version = 17
 
 [db.migrations]
 schema_paths = []
+
+# Require a valid Supabase user JWT before the function handler runs.
+[functions.agenda-time-resolve]
+verify_jwt = true

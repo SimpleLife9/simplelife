@@ -1,5 +1,7 @@
 {
   "imports": {
+    "@supabase/server": "npm:@supabase/server@1.9.2",
+    "@supabase/supabase-js": "npm:@supabase/supabase-js@2.119.2",
     "moment-timezone": "npm:moment-timezone@0.6.6"
   },
   "lock": {
