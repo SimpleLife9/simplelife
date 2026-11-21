@@ -1598,10 +1598,10 @@ test('Lists support rename, purpose, item editing, reordering and reversible arc
   });
   expect(updatedLists[0]).toMatchObject({
     id: existingList.id,
-    owner_user_id: profile.id,
     name: 'Compras y despensa',
     purpose: 'Compras esenciales y reposición',
   });
+  expect(lists[0].owner_user_id).toBe(profile.id);
 
   await page.getByRole('button', { name: 'Editar elemento: Revisar factura' }).click();
   const itemDialog = page.getByRole('dialog', { name: 'Editar elemento' });
