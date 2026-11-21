@@ -73,7 +73,7 @@ jobs:
 
       - name: Test and type-check Agenda IANA resolver with frozen lockfile
         run: |
-          deno test --allow-env=NODE_ENV --config supabase/functions/agenda-time-resolve/deno.json --frozen-lockfile tests/agenda-iana-resolver.deno.ts tests/agenda-time-resolve.http.deno.ts
+          deno test --config supabase/functions/agenda-time-resolve/deno.json --frozen-lockfile tests/agenda-iana-resolver.deno.ts tests/agenda-time-resolve.http.deno.ts
           deno check --config supabase/functions/agenda-time-resolve/deno.json --frozen-lockfile supabase/functions/agenda-time-resolve/index.ts
           cat deno.lock
 
