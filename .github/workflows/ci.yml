@@ -69,7 +69,7 @@ jobs:
 
       - name: Test and type-check Agenda IANA resolver
         run: |
-          deno test --config supabase/functions/agenda-time-resolve/deno.json --lock=deno.lock --lock-write tests/agenda-iana-resolver.test.ts
+          deno test --config supabase/functions/agenda-time-resolve/deno.json --lock=deno.lock --lock-write tests/agenda-iana-resolver.deno.ts
           deno check --config supabase/functions/agenda-time-resolve/deno.json --lock=deno.lock --lock-write supabase/functions/agenda-time-resolve/index.ts
           cat deno.lock
 
