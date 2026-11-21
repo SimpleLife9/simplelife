@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { isSupabaseConfigured } from './lib/supabase.js';
 import { AuthScreen } from './features/auth/AuthScreen.jsx';
 import { ConfigurationScreen } from './shared/components/ConfigurationScreen.jsx';
 import { LoadingScreen } from './shared/components/LoadingScreen.jsx';
