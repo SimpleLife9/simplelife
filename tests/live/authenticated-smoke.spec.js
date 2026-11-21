@@ -77,7 +77,7 @@ test('real authenticated Supabase smoke: task, note, list item and persistence',
   if (await noteCard.count() === 0) {
     await page.locator('.content-side').getByLabel('Título (opcional)').fill(NOTE_TITLE);
     await page.locator('.content-side').getByLabel('Contenido').fill(NOTE_CONTENT);
-    await page.locator('.content-side').getByRole('button', { name: 'Guardar', exact: true }).click();
+    await page.locator('.content-side').getByRole('button', { name: /Guardar/ }).click();
     await expect(page.getByText('Nota guardada.')).toBeVisible();
   } else {
     const restore = noteCard.getByRole('button', { name: `Restaurar nota: ${NOTE_TITLE}` });
@@ -115,7 +115,7 @@ test('real authenticated Supabase smoke: task, note, list item and persistence',
   if (await listCard.count() === 0) {
     await page.locator('.content-side').getByLabel('Nombre de la lista').fill(LIST_TITLE);
     await page.locator('.content-side').getByLabel('Propósito (opcional)').fill(LIST_PURPOSE);
-    await page.locator('.content-side').getByRole('button', { name: 'Crear lista', exact: true }).click();
+    await page.locator('.content-side').getByRole('button', { name: /Crear lista/ }).click();
     await expect(page.getByText('Lista creada.')).toBeVisible();
   } else {
     const restore = listCard.getByRole('button', { name: `Restaurar lista: ${LIST_TITLE}` });
