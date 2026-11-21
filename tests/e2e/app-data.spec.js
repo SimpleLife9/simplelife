@@ -114,6 +114,7 @@ async function mockSupabaseSession(page, initialData = {}) {
   const insertedListItems = [];
   const updatedListItems = [];
   let createdCount = 0;
+  const signedOutRequests = [];
 
   await page.route(`${projectUrl}/**`, async (route) => {
     const request = route.request();
@@ -154,6 +155,12 @@ async function mockSupabaseSession(page, initialData = {}) {
       await json(200, authUser);
       return;
     }
+    if (url.pathname === '/auth/v1/logout' && method === 'POST') {
+      signedOutRequests.push({ authorization: request.headers().authorization || '' });
+      await route.fulfill({ status: 204, headers: corsHeaders, body: '' });
+      return;
+    }
+
 
     if (url.pathname === '/rest/v1/user_profile' && method === 'GET') {
       await json(200, profile);
@@ -524,7 +531,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     await json(404, { message: `Unexpected mocked Supabase request: ${method} ${url.pathname}` });
   });
 
-  return { insertedTasks, updatedTasks, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
+  return { signedOutRequests, insertedTasks, updatedTasks, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
 }
 
 test('mock-authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
@@ -1872,4 +1879,20 @@ test('Tasks can be linked to primary and additional projects and filtered by pro
   const projectBDetail = page.getByRole('dialog', { name: 'Proyecto relacionado' });
   await expect(projectBDetail.getByText('Preparar propuesta')).toBeVisible();
   await expect(projectBDetail.getByText('Proyecto principal de esta tarea')).toBeVisible();
+});
+
+test('authenticated user can sign out and return to the sign-in screen', async ({ page }) => {
+  const { signedOutRequests } = await mockSupabaseSession(page);
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+
+  await expect(page.locator('.page-heading h1')).toHaveText('Hoy');
+  await page.getByTitle('Cerrar sesión').click();
+
+  await expect(page.getByRole('heading', { name: 'Vuelve a enfocarte.' })).toBeVisible();
+  await expect(page.locator('.app-shell')).toHaveCount(0);
+  expect(signedOutRequests).toHaveLength(1);
+  expect(signedOutRequests[0].authorization).toContain('Bearer ');
 });
