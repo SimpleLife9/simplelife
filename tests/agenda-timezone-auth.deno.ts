@@ -1,7 +1,7 @@
 import { authenticatedHandler } from "../supabase/functions/agenda-time-resolve/index.ts";
 
 const URL = "http://127.0.0.1/agenda-time-resolve";
-const SUPABASE_URL = "https://agenda-auth-ci.test.supabase.co";
+const SUPABASE_URL = "https://abcdefghijklmnopqrst.supabase.co";
 const PUBLISHABLE_KEY = "sb_publishable_agenda_auth_ci_mock_key_0123456789";
 const SECRET_KEY = "sb_secret_agenda_auth_ci_mock_key_0123456789";
 const USER_ID = "00000000-0000-4000-8000-000000000001";
