@@ -326,8 +326,8 @@ test('real authenticated Supabase smoke: Lote 10 task lifecycle and completion m
   await archiveFilter.selectOption('archived');
   archivedRows = page.locator('.task-row').filter({ hasText: TASK_TITLE });
   await expect(archivedRows).toHaveCount(2);
-  await expect(archivedRows).toContainText('Pendiente');
-  await expect(archivedRows).toContainText('Bloqueada');
+  await expect(archivedRows.filter({ hasText: 'Pendiente' })).toHaveCount(1);
+  await expect(archivedRows.filter({ hasText: 'Bloqueada' })).toHaveCount(1);
 
   // Complete the remaining canary, archive/restore it, and verify after reload.
   await archiveFilter.selectOption('active');
