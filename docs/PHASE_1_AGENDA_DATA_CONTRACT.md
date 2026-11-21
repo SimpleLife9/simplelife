@@ -28,9 +28,9 @@ This document translates the approved product decisions in ChatBending Anexos 5,
 - `audit_event` is readable by its owner but authenticated direct inserts are intentionally blocked; the established audit append path must not be bypassed by new client writes.
 - Existing core policies resolve the authenticated identity through `user_profile.auth_user_id = auth.uid()`, then scope rows by the profile ID.
 
-### Migration-source blocker
+### Migration-source recovery — verified exact forward SQL
 
-The hosted database reports six applied migrations, but the current GitHub repository tree does not contain their source files. That means a new DDL change would not yet be reproducible from a clean checkout or have a repository-level rollback history. Before the first Agenda migration, restore/reconcile the six-file baseline (or document a verified alternative source of truth) and confirm that the next migration can be created, replayed and rolled back from version-controlled files. **Do not use direct hosted SQL or `apply_migration` as a substitute for that missing repository baseline.**
+The six historic forward SQL bodies have now been recovered read-only from `supabase_migrations.schema_migrations` and compared character-for-character with the versioned files in the recovery branch (6/6 exact matches). The recovery PR is pending review/CI. The remote `rollback` value was `NULL` for all six versions, so no historical down-migrations were fabricated. After the recovery PR merges, run the Supabase CLI migration-list/status comparison against the linked development project and confirm all six versions reconcile before authorizing the first Agenda DDL. Do not execute SQL or `db push` just to validate this source recovery.
 
 ## 2. Domain model
 
