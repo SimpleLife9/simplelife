@@ -83,7 +83,13 @@ jobs:
         with:
           version: 3.2.0
 
-      - name: Start minimal local Supabase stack
+      - name: Start local Postgres before migrations
+        run: supabase db start
+
+      - name: Reproduce hosted RLS bootstrap in ephemeral local Postgres
+        run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/local-supabase-bootstrap.sql
+
+      - name: Start minimal local Supabase stack and apply migrations
         run: supabase start --exclude realtime,storage,rest,studio,mail,analytics,pooler
 
       - name: Verify Agenda auth in the actual local Edge Runtime
