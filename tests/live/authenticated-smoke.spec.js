@@ -21,6 +21,12 @@ async function openMoreTab(page, tabName) {
   await moreNavigation.getByRole('button', { name: tabName, exact: true }).click();
 }
 
+async function waitForPageData(page) {
+  // Data controls remain visible while useRows is resolving; wait before
+  // searching or creating so a slow first fetch cannot create duplicate canaries.
+  await expect(page.locator('.content-main').getByText('Cargando…')).toHaveCount(0, { timeout: 15000 });
+}
+
 test('real authenticated Supabase smoke: task, note, list item and persistence', async ({ page }) => {
   test.skip(!email || !password, 'Set SIMPLELIFE_QA_EMAIL and SIMPLELIFE_QA_PASSWORD for the opt-in live smoke.');
 
@@ -39,6 +45,7 @@ test('real authenticated Supabase smoke: task, note, list item and persistence',
 
   // TASK: restore the stable QA task if needed, change its state, reload and archive it.
   await openMoreTab(page, 'Tareas');
+  await waitForPageData(page);
   // Prefer the active canary. Archived historical canaries stay out of the edit flow.
   await page.getByLabel('Filtrar por estado').selectOption('all');
   await page.getByLabel('Filtrar por archivo').selectOption('active');
@@ -88,6 +95,7 @@ test('real authenticated Supabase smoke: task, note, list item and persistence',
 
   // NOTE: create or restore the stable note, edit it, reload and archive it.
   await page.getByRole('button', { name: 'Notas e ideas', exact: true }).click();
+  await waitForPageData(page);
   await page.getByLabel('Filtrar por archivo').selectOption('active');
   await page.getByLabel('Buscar notas e ideas').fill(NOTE_TITLE);
   let noteCard = page.locator('.note-card').filter({ has: page.getByRole('heading', { name: NOTE_TITLE, exact: true }) });
@@ -130,9 +138,10 @@ test('real authenticated Supabase smoke: task, note, list item and persistence',
 
   // LIST: reuse one stable list/item, check it, reload to prove persistence, then archive the list.
   await page.getByRole('button', { name: 'Listas', exact: true }).click();
+  await waitForPageData(page);
   await page.getByLabel('Filtrar listas por archivo').selectOption('active');
   await page.getByLabel('Buscar listas').fill(LIST_TITLE);
-  let listCard = page.locator('.list-card').filter({ has: page.getByRole('heading', { name: LIST_TITLE, exact: true }) });
+  let listCard = page.locator('.list-card').filter({ has: page.getByRole('heading', { name: LIST_TITLE, exact: true }) }).first();
 
   if (await listCard.count() === 0) {
     await page.getByLabel('Filtrar listas por archivo').selectOption('archived');
@@ -166,11 +175,17 @@ test('real authenticated Supabase smoke: task, note, list item and persistence',
   await itemEditor.getByLabel('Contenido del elemento').fill(ITEM_CONTENT);
   await itemEditor.getByRole('button', { name: 'Guardar cambios' }).click();
   await expect(page.getByText('Elemento actualizado.')).toBeVisible();
+  await waitForPageData(page);
 
   itemRow = listCard.locator('.list-item-wrap').filter({ hasText: ITEM_CONTENT });
   const itemCheckbox = itemRow.first().locator('input[type="checkbox"]');
-  if (!(await itemCheckbox.isChecked())) await itemCheckbox.check();
-  await expect(itemCheckbox).toBeChecked();
+  if (!(await itemCheckbox.isChecked())) {
+    // This is a controlled React checkbox. Click once, then wait for the
+    // Supabase-backed refresh instead of Playwright's immediate check() assertion.
+    await itemCheckbox.click();
+    await expect(itemCheckbox).toBeChecked({ timeout: 15000 });
+  }
+  await expect(itemCheckbox).toBeChecked({ timeout: 15000 });
 
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
