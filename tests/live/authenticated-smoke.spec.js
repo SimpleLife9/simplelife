@@ -85,13 +85,15 @@ test('real authenticated Supabase smoke: task, note, list item and persistence',
       await restore.click();
       await expect(page.getByText('Nota restaurada.')).toBeVisible();
     }
-    await noteCard.getByRole('button', { name: `Editar nota: ${NOTE_TITLE}` }).click();
-    const editor = page.getByRole('dialog', { name: 'Editar nota o idea' });
-    await editor.getByLabel('Título (opcional)').fill(NOTE_TITLE);
-    await editor.getByLabel('Contenido').fill(NOTE_CONTENT);
-    await editor.getByRole('button', { name: 'Guardar cambios' }).click();
-    await expect(page.getByText('Nota actualizada.')).toBeVisible();
   }
+
+  noteCard = page.locator('.note-card').filter({ has: page.getByRole('heading', { name: NOTE_TITLE, exact: true }) });
+  await noteCard.getByRole('button', { name: `Editar nota: ${NOTE_TITLE}` }).click();
+  const noteEditor = page.getByRole('dialog', { name: 'Editar nota o idea' });
+  await noteEditor.getByLabel('Título (opcional)').fill(NOTE_TITLE);
+  await noteEditor.getByLabel('Contenido').fill(NOTE_CONTENT);
+  await noteEditor.getByRole('button', { name: 'Guardar cambios' }).click();
+  await expect(page.getByText('Nota actualizada.')).toBeVisible();
 
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
@@ -131,6 +133,13 @@ test('real authenticated Supabase smoke: task, note, list item and persistence',
     await addItem.press('Enter');
     await expect(itemRow).toBeVisible();
   }
+
+  itemRow = listCard.locator('.list-item').filter({ hasText: ITEM_CONTENT });
+  await itemRow.getByRole('button', { name: `Editar elemento: ${ITEM_CONTENT}` }).click();
+  const itemEditor = page.getByRole('dialog', { name: 'Editar elemento' });
+  await itemEditor.getByLabel('Contenido del elemento').fill(ITEM_CONTENT);
+  await itemEditor.getByRole('button', { name: 'Guardar cambios' }).click();
+  await expect(page.getByText('Elemento actualizado.')).toBeVisible();
 
   itemRow = listCard.locator('.list-item').filter({ hasText: ITEM_CONTENT });
   const itemCheckbox = itemRow.locator('input[type="checkbox"]');
