@@ -60,7 +60,7 @@ function assertEqual(actual, expected, label) {
   }
 }
 
-const statusOutput = run("supabase", ["status", "--env", "--output-format", "text"]);
+const statusOutput = run("supabase", ["status", "-o", "env"]);
 const statusValues = Object.fromEntries(
   statusOutput.split(/\r?\n/).map((line) => {
     const separator = line.indexOf("=");
@@ -70,7 +70,7 @@ const statusValues = Object.fromEntries(
   }).filter(([key]) => key),
 );
 const localApiKey = statusValues.PUBLISHABLE_KEY || statusValues.ANON_KEY;
-if (!localApiKey) fail("Could not read local PUBLISHABLE_KEY or ANON_KEY from supabase status --env.");
+if (!localApiKey) fail("Could not read local PUBLISHABLE_KEY or ANON_KEY from supabase status -o env.");
 const apiUrl = statusValues.API_URL || API_URL;
 const functionUrl = apiUrl.replace(/\/$/, "") + "/functions/v1/" + FUNCTION_NAME;
 
