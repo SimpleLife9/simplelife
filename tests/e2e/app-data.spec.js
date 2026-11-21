@@ -1645,7 +1645,7 @@ test('Lists support rename, purpose, item editing, reordering and reversible arc
 
   await page.getByLabel('Filtrar listas por archivo').selectOption('archived');
   await expect(page.getByRole('heading', { name: 'Compras y despensa' })).toBeVisible();
-  await expect(page.getByText('ARCHIVADA')).toBeVisible();
+  await expect(page.locator('.list-archive-tag')).toHaveText('ARCHIVADA');
   await expect(page.getByRole('button', { name: 'Editar lista: Compras y despensa' })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Editar elemento: Comprar frutas' })).toBeDisabled();
   await expect(page.getByRole('checkbox', { name: 'Comprar frutas' })).toBeDisabled();
