@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { isSupabaseConfigured, supabase } from './lib/supabase.js';
 import { ensureUserProfile } from './lib/profile.js';
 import { uuidv7 } from './lib/uuidv7.js';
@@ -24,6 +24,7 @@ import { ConfigurationScreen } from './shared/components/ConfigurationScreen.jsx
 import { LoadingScreen } from './shared/components/LoadingScreen.jsx';
 import { AppShell } from './app/AppShell.jsx';
 import { getPageTitle, getPageDescription } from './app/navigation.js';
+import { createAppActions } from './app/createAppActions.js';
 
 
 
@@ -100,33 +101,12 @@ function App() {
     };
   }, []);
 
-  const showNotice = useCallback((message) => {
-    setNotice(message);
-    setError('');
-    window.setTimeout(() => setNotice((current) => current === message ? '' : current), 3500);
-  }, []);
-
-  const showError = useCallback((message) => {
-    setError(message);
-    setNotice('');
-  }, []);
-
-  const runAction = useCallback(async (operation, successMessage) => {
-    setBusy(true);
-    setError('');
-    setNotice('');
-    try {
-      await operation();
-      setRefreshKey((key) => key + 1);
-      if (successMessage) showNotice(successMessage);
-      return true;
-    } catch (actionError) {
-      showError(actionError?.message || 'No se pudo completar la operación.');
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  }, [showError, showNotice]);
+  const { showNotice, showError, runAction } = useMemo(() => createAppActions({
+    setBusy,
+    setError,
+    setNotice,
+    setRefreshKey,
+  }), []);
 
   const handleAuth = async (event) => {
     event.preventDefault();
