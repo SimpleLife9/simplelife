@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   addDaysToDateKey,
+  dateKeyInTimeZone,
   formatDate,
   formatDuration,
   todayInHavana,
@@ -9,6 +10,11 @@ import {
 
 test('todayInHavana returns a calendar date key', () => {
   assert.match(todayInHavana(), /^\d{4}-\d{2}-\d{2}$/);
+});
+
+test('dateKeyInTimeZone keeps ISO date keys stable across Havana midnight', () => {
+  assert.equal(dateKeyInTimeZone(new Date('2026-11-21T04:59:59.000Z'), 'America/Havana'), '2026-11-20');
+  assert.equal(dateKeyInTimeZone(new Date('2026-11-21T05:00:00.000Z'), 'America/Havana'), '2026-11-21');
 });
 
 test('addDaysToDateKey handles month, year and leap-day boundaries', () => {
