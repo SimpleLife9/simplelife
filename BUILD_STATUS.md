@@ -393,11 +393,13 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 | #30 | Notes/Ideas page and shared FormCard | #131 PASS | #132 PASS | `87855169e005a71e4234ed6a94658280bd72f90d` |
 | #31 | Lists page `src/features/lists/ListsPage.jsx` | #133 PASS | #134 PASS | `70ff390af213a59cdd10e26f8af9948e5b7d8073` |
 | #32 | AuthScreen and shared Brand/Configuration/Loading screens | #136 PASS | #137 PASS | `33f2e2c3300c7f3a0fb5edec96cdffb7ba2d7cbb` |
-| #33 | Authenticated AppShell and navigation metadata `src/app/` | PR CI PENDING | Post-merge PENDING | TBD |
+| #33 | Authenticated AppShell and navigation metadata `src/app/` | #141 PASS | #142 PASS | `52e9c4eaa1ac70d3020144c05a4bc82fa9614034` |
+| #34 | Shared app action orchestration `src/app/createAppActions.js` | #145 PASS | #146 PASS | `e75f9583bc97b6fe10f6e48a5a63bc2bdf388fb1` |
+| #35 | Feature page composition `src/app/AppPages.jsx` | #147 PASS | #148 PASS | `7ed702a110a6ca155797c868826ea7019c06b14f` |
 
-- The extractions from PRs #19–#32 preserve existing APIs or behavior; PRs #19–#32 passed the 19-scenario Playwright suite. PR #33 adds a dedicated navigation regression, bringing its suite to 20 scenarios.
+- The extractions from PRs #19–#35 preserve existing APIs or behavior. PRs #33–#35 were verified with 20 Playwright scenarios; PR #34 added four isolated unit tests, bringing the unit suite to 21.
 - No new framework/dependency, schema migration, RLS/grant, auth, secret, Service Worker or deployment change was made in these batches.
-- This is incremental boundary work, not a completed rewrite. `src/App.jsx` now owns session/auth orchestration, cross-feature state and page composition; the authenticated visual shell and navigation metadata are in `src/app/`. Further service/domain extraction and validation gates remain before Phase 0 closes.
+- This is incremental boundary work, not a completed rewrite. `src/App.jsx` now owns session/auth orchestration, cross-feature state and app-level composition; `src/app/` owns the authenticated shell, navigation, shared action orchestration and page mounting. Further session/service/domain extraction and validation gates remain before Phase 0 closes.
 - The real authenticated Supabase browser test and physical-device validation remain open; mocked E2E is not evidence of real persistence.
 
 
@@ -427,10 +429,12 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 
 ## PR #35 — feature page composition extraction (21/11/2026)
 
-- PR is being prepared on branch `refactor/phase0-extract-page-composition`, based on merge SHA `e75f9583bc97b6fe10f6e48a5a63bc2bdf388fb1`.
-- New `src/app/AppPages.jsx` owns the conditional mounting of Today, Inbox, Goals, Projects, Tasks, Notes and Lists.
-- `src/App.jsx` now owns only app-level session/auth state, shared action orchestration, page selection and shell composition; unused legacy imports were removed.
+- PR: https://github.com/SimpleLife9/simplelife/pull/35 — MERGED.
+- Branch `refactor/phase0-extract-page-composition`; tested head SHA `72883c3ecefd84dd7cc1bf99d3fe75aa930d4d52`; merge SHA `7ed702a110a6ca155797c868826ea7019c06b14f`.
+- CI #147 PASS on the exact PR head: unit tests, 20/20 Playwright scenarios and production build: https://github.com/SimpleLife9/simplelife/actions/runs/44849617615.
+- CI post-merge #148 PASS on the exact merge SHA: https://github.com/SimpleLife9/simplelife/actions/runs/44849792618.
+- `src/app/AppPages.jsx` owns the conditional mounting of Today, Inbox, Goals, Projects, Tasks, Notes and Lists.
+- `src/App.jsx` delegates feature mounting and no longer imports those seven page modules or unused legacy utilities/components.
 - `src/App.jsx` reduced from 8,516 to 6,509 characters (2,007 fewer).
-- Existing Playwright tests already cover all primary destinations, both navigation layouts and the More submodules. They will be retained as the regression gate.
-- CI and post-merge checks pending. Do not merge until unit, all 20 Playwright scenarios and production build pass.
+- Existing Playwright coverage checks all primary destinations, both navigation layouts and the More submodules.
 - No changes to database, data operations, Auth, schema, RLS/grants, secrets, dependencies, Service Worker, PWA or deployment.
