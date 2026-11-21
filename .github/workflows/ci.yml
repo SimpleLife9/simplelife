@@ -58,6 +58,9 @@ jobs:
       - name: Run browser smoke and mobile layout tests
         run: npm run test:e2e
 
+      - name: Validate opt-in live smoke suite without connecting to Supabase
+        run: npm run test:e2e:live -- --list
+
       - name: Build production assets
         run: npm run build
 
