@@ -595,3 +595,22 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 4. Reconcile account/profile/preferences and device/PWA validation against the approved Phase 0 acceptance scope. Do not expand database schema or permissions merely to satisfy a checklist.
 5. Keep Phase 0 OPEN until the mandatory remaining gates are either validated or explicitly deferred with Robert's decision.
 
+
+
+## Update — Lote 10 live-smoke readiness (21/11/2026)
+
+- Current main verified: 8abcfa031e6f2e387b582eb933186092faac2a92.
+- PR #48 integrated: https://github.com/SimpleLife9/simplelife/pull/48.
+- PR CI #196 PASS on head d83efbd89bc7ddff4384874d268070bad131cea5: 22 unit tests, 25 Playwright tests, live-suite discovery and production build: https://github.com/SimpleLife9/simplelife/actions/runs/44900996522.
+- Post-merge CI #197 PASS on the exact current main SHA: 22 unit tests, 25 Playwright tests, live-suite discovery and production build: https://github.com/SimpleLife9/simplelife/actions/runs/44901157427.
+- PR #48 extends only tests/live/authenticated-smoke.spec.js with a manually gated real-auth task-lifecycle scenario. It reuses the three existing task canaries and does not create additional rows or issue DELETE.
+- New real scenario coverage: task status transitions among Pendiente/En curso/Bloqueada; persisted status after reload; duration-estimate explanation in create/edit forms; individual archive/restore; bulk archive preserving distinct task states; completion metadata (completed_at, completion_outcome) surviving archive/restore and reload; three rows archived at the end.
+- Pre-run Supabase audit (read-only): dedicated QA profile exists; exactly three task canaries match the stable title; all three are archived with existing status in_progress, no completed_at, and no completion_outcome. This is the safe baseline before the new scenario; no writes or duplicate rows have been made.
+- Live smoke #6 remains PASS for its original, bounded Auth/Task/Note/List/ListItem scenario. Do not repeat it.
+- Live smoke #7: NOT RUN. It requires a manual GitHub Actions workflow_dispatch on branch main with input confirm_live_writes=true. The available GitHub connection is read-only for workflow dispatch; do not claim the run was started or bypass the gate.
+- Workflow link: https://github.com/SimpleLife9/simplelife/actions/workflows/live-supabase-smoke.yml.
+- Existing Actions secrets SIMPLELIFE_QA_EMAIL and SIMPLELIFE_QA_PASSWORD are already configured. Do not request new credentials, recreate the account, or paste secrets into chat/terminal.
+- After smoke #7: audit by read-only SQL that there remain exactly three task canaries, all archived; verify one canary is completed with non-null completed_at and completion_outcome='complete'; verify the other two retain their prior work states; inspect timestamps and the workflow log. Do not clean up or physically delete the QA canaries.
+- Automated live-smoke PASS will not by itself replace Robert's manual localhost acceptance. Lote 10 manual gate and the broader Phase 0 acceptance gates remain OPEN.
+- ChatBending continuity: Anexo 142 has been updated with PR #48, CI #196/#197, baseline audit and smoke #7 gate: https://app.notion.com/p/41efeb355ec18137a1a0edb81f229554.
+
