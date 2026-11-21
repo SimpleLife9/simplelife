@@ -401,6 +401,7 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 | #38 | Notes/Ideas search, filters, edit and archive/restore | #161 PASS | #162 PASS | `c6b681414e3f7b97a4c020632f1abacb888a4e43` |
 | #39 | Lists search, rename, item editing, reorder and archive/restore | #169 PASS | #170 PASS | `50092bb8f536724fdb9bd08a06088fd0393631f8` |
 | #40 | Reconcile E2E acceptance for task lifecycle and goal/subgoal contributions | #172 PASS | #173 PASS | `754d15b33bcb676636bb052cb4af491762870721` |
+| #41 | Gated live Supabase Auth and Data API smoke harness | PR CI PENDING | Live dispatch NOT RUN | TBD |
 
 - The extractions from PRs #19–#39 preserve existing APIs or behavior. PRs #33–#35 were verified with 20 Playwright scenarios; PR #36 adds logout (21), PR #37 adds session restoration after reload (22), PR #38 adds Notes/Ideas lifecycle maintenance (24), and PR #39 adds full Lists maintenance (25). PR #34 added four isolated unit tests, bringing the unit suite to 21. PR #40 reconciles additional Lote 10/11 lifecycle/contribution assertions within the same 25 Playwright scenarios.
 - No new framework/dependency, schema migration, RLS/grant, auth, secret, Service Worker or deployment change was made in these batches.
@@ -528,3 +529,17 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 - Lote 11 automated coverage now asserts that the Goal and Subgoal cards show the right visible task status (Pending/Blocked) for each contributor, in addition to existing direct/subgoal linking, parent Goal filter inclusion, unlink/restore of the same relation, and no duplicates.
 - Test-only change; no application code, data, schema, grants, RLS, secrets, credentials or deployment change.
 - Manual localhost checks for Anexos 137/138 remain pending. Passing mocks is not evidence of real Supabase persistence.
+
+## PR #41 — Gated live Supabase authenticated smoke harness (21/11/2026)
+
+- Test/config/workflow/docs only; based on main SHA `4627a913fd1a6b51055ce60f14d1729dcb7c63c1`.
+- Adds `npm run test:e2e:live`, isolated Playwright config, a dedicated real-Auth smoke spec, and manual-only GitHub Actions workflow `.github/workflows/live-supabase-smoke.yml`.
+- The normal CI only runs the live suite in list/discovery mode; it does not connect to Supabase and performs no writes.
+- The live workflow is `workflow_dispatch` only, defaults its explicit `confirm_live_writes` gate to false, serializes runs, uses a single browser worker, and requires repo secrets `SIMPLELIFE_QA_EMAIL` / `SIMPLELIFE_QA_PASSWORD`.
+- No sign-up, Auth admin calls, service-role/secret key, SQL writes, DELETE, schema, grants, RLS, or data changes in this PR.
+- Supabase schema inspection found `user_profile.auth_user_id → auth.users.id ON DELETE RESTRICT`; user-owned records also reference profiles with RESTRICT. Do not call this a disposable account. The smoke requires a persistent, dedicated QA-only identity, provisioned by an authorized human; it never creates or deletes that identity.
+- Stable canary Task/Note/List records are reused on each run and end archived. One stable list item remains under the archived canary list because list_item has no soft-delete field and authenticated has no physical DELETE privilege.
+- The test checks authenticated login/profile bootstrap, Task status write/read after reload, Note insert/update/read after reload, List and ListItem insert/update/read after reload. This is scoped QA smoke, not comprehensive RLS security coverage.
+- Playwright trace, screenshots and video are disabled to avoid credential-entry artifacts.
+- No live workflow dispatch has been run. It must not run until the dedicated QA account exists and the secrets are configured.
+- PR CI target: 21 unit tests, 25 mocked Playwright, live-suite --list validation (no connection), and production build.
