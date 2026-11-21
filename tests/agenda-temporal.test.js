@@ -8,7 +8,7 @@ import {
   parseCalendarDate,
   resolveLocalDateTime,
   validateTimedRange,
-} from '../../../src/features/agenda/domain/temporal.js';
+} from '../src/features/agenda/domain/temporal.js';
 
 test('calendar dates are validated as dates, not instants', () => {
   assert.deepEqual(parseCalendarDate('2024-02-29'), {
