@@ -1888,7 +1888,7 @@ test('authenticated user can sign out and return to the sign-in screen', async (
   await page.getByLabel('Contraseña').fill('not-a-real-password');
   await page.getByRole('button', { name: 'Iniciar sesión' }).click();
 
-  await expect(page.getByRole('heading', { name: 'Hoy' })).toBeVisible();
+  await expect(page.locator('.page-heading h1')).toHaveText('Hoy');
   await page.getByTitle('Cerrar sesión').click();
 
   await expect(page.getByRole('heading', { name: 'Vuelve a enfocarte.' })).toBeVisible();
