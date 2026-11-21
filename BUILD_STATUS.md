@@ -736,4 +736,15 @@ These deferrals are accepted to permit Phase 1 design/build work to begin. They 
 - Adds `tests/agenda-temporal.test.js`: Havana local-time round-trip; New York 2026 spring-forward gap and fall-back fold; invalid calendar dates; all-day range semantics; cross-midnight timed intervals; adjacent versus overlapping ranges.
 - The resolver uses the current runtime `Intl.DateTimeFormat` timezone database and explicitly returns `rulesVersion: null` / `authoritative: false`. It is a client preview and test foundation only, not the canonical server timezone source for confirmed Events. A centrally maintained/versioned IANA rules authority remains required before persisted Event confirmation.
 - No new dependency, lockfile change, page/navigation/UI, database schema, migration, row/data write, RLS/grant, Auth, secrets, service worker, or deployment change in this slice.
-- PR #56 and CI evidence will be recorded after the branch PR is opened and checks complete. Agenda remains not yet user-visible/persisted.
+- PR #56 MERGED by squash at `6a8dbdebb0c1b5a22efd6cd0238199e4f7695592`. CI #212 PASS on corrected PR head `9b8f90d191374c8d8975284615435984570fb31a`: https://github.com/SimpleLife9/simplelife/actions/runs/44932056651. Post-merge CI #215 PASS on the exact merge SHA: https://github.com/SimpleLife9/simplelife/actions/runs/44932551965. Agenda remains not yet user-visible or persisted; only pure domain primitives are integrated.
+
+
+## Supabase migration source recovery — Phase 1 prerequisite (21/11/2026)
+
+- Recovered the six historic migration SQL bodies read-only from `supabase_migrations.schema_migrations` in `Simplelife_dev` (`iybnjrnysiikbtokyshg`, PostgreSQL 17.12).
+- Added the exact forward SQL bodies to conventional versioned files under `supabase/migrations/`. All six files were read back from the recovery branch and compared character-for-character with their remote `statements[1]` values: 6/6 EXACT MATCH.
+- Added a minimal `supabase/config.toml` with local CLI project identifier `simplelife` and Postgres major version 17; no connection credentials are stored.
+- Important: remote `rollback` was NULL for all six historical migrations. The recovery restores forward source only; it does not fabricate reverse SQL.
+- Recovery record: `docs/SUPABASE_MIGRATION_BASELINE_RECOVERY.md`.
+- Current state: source recovery PR is being prepared on the updated main. No SQL was executed, no DDL/data/RLS/grants/Auth/secrets were changed, and no deployment occurred.
+- Before any new Agenda DDL: run the Supabase CLI migration-list/status comparison in read-only mode against the linked dev project; confirm the six local files reconcile with the six remote applied versions. New Agenda migrations require an explicit, reviewed rollback/compensation plan.
