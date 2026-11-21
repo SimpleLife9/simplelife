@@ -202,7 +202,7 @@ Each slice is a separate small PR with unit/domain tests, mocked Playwright, rea
 ## 9. Open implementation blockers
 
 1. **Migration baseline:** the six historic forward SQL files are now versioned and provider-reconciled 6/6 after PR #58. The provider's read-only migration list matches Git. The local CLI-only `supabase migration list --linked` check remains open; do not run `db push` as a substitute.
-2. **Timezone rules authority:** the client preview remains `authoritative: false`. PR #61 has merged a server-side proof of concept (`supabase/functions/agenda-time-resolve`) pinned to IANA TZDB `2026f`, with runtime version assertion and fail-closed drift handling. This is not yet deployed or connected to Event writes. Before persisted Event confirmation, complete dependency/supply-chain review, local Edge Runtime HTTP/auth contract tests, TZDB update monitoring and rollback, browser/server mismatch behavior, and the policy for future recurring occurrences after rule changes. Never use fixed UTC offsets or silently trust stale device rules.
+2. **Timezone rules authority:** the client preview remains `authoritative: false`. PR #61 has merged a server-side proof of concept (`supabase/functions/agenda-time-resolve`) pinned to IANA TZDB `2026f`, with runtime version assertion and fail-closed drift handling. This is not yet deployed or connected to Event writes. Before persisted Event confirmation, complete dependency/supply-chain review, operational TZDB release review and rollback ownership, browser/server mismatch UX, and hosted deployment acceptance. Local Edge Runtime HTTP/auth tests and the recurring TZDB-change product policy are now complete (PRs #67–#69). Never use fixed UTC offsets or silently trust stale device rules.
 3. **Recurrence engine:** select a tested implementation or a small explicitly supported subset; do not claim general RFC 5545 support by implication.
 4. **Audit append path:** confirm the current trusted append mechanism/trigger contract before recording new Event transitions.
 5. **Real-auth smoke lifecycle:** create a reproducible, bounded QA fixture lifecycle without physical DELETE or modifying the existing canaries.
@@ -255,7 +255,7 @@ No Event, database table, migration, RLS/grant, audit record, Auth setting, secr
 
 ## TZDB lifecycle and recurring occurrence policy
 
-The operational update/rollback proposal is documented in [AGENDA_TZDB_LIFECYCLE_POLICY.md](./AGENDA_TZDB_LIFECYCLE_POLICY.md). It preserves confirmed one-off UTC instants and proposes explicit review for materialized future recurring occurrences when a new TZDB release changes their resolution. That recurring behavior remains a product Human Gate; do not implement it as approved behavior until Robert accepts it.
+The operational update/rollback policy and approved recurring-occurrence behavior are documented in [AGENDA_TZDB_LIFECYCLE_POLICY.md](./AGENDA_TZDB_LIFECYCLE_POLICY.md). Robert approved on 21 November 2026 that materialized future occurrences preserve confirmed UTC instants and require explicit user acceptance before applying a new TZDB resolution. The technical series/occurrence contract is in [AGENDA_RECURRING_SERIES_CONTRACT.md](./AGENDA_RECURRING_SERIES_CONTRACT.md). Remaining open decisions are listed there; the separate technical Human Gate for hosted DDL/deploy remains mandatory.
 
 ## Trusted Event write and audit append design (PR #66)
 
