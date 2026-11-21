@@ -74,7 +74,7 @@ jobs:
       - name: Test and type-check Agenda IANA resolver with frozen lockfile
         run: |
           deno test --config supabase/functions/agenda-time-resolve/deno.json --frozen-lockfile tests/agenda-iana-resolver.deno.ts tests/agenda-time-resolve.http.deno.ts
-          deno test --allow-env=NODE_ENV,AI_AGENT,SUPABASE_URL,SUPABASE_PUBLISHABLE_KEYS,SUPABASE_SECRET_KEYS,SUPABASE_JWKS --config supabase/functions/agenda-time-resolve/deno.json --frozen-lockfile tests/agenda-timezone-auth.deno.ts
+          AI_AGENT=simplelife-auth-test deno test --allow-env=NODE_ENV,AI_AGENT,SUPABASE_URL,SUPABASE_PUBLISHABLE_KEYS,SUPABASE_SECRET_KEYS,SUPABASE_JWKS --config supabase/functions/agenda-time-resolve/deno.json --frozen-lockfile tests/agenda-timezone-auth.deno.ts
           deno check --config supabase/functions/agenda-time-resolve/deno.json --frozen-lockfile supabase/functions/agenda-time-resolve/index.ts
 
       - name: Build production assets
