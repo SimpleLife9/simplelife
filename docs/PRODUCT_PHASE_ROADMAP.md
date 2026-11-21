@@ -21,6 +21,8 @@ This is a preparation phase, not a new product module. It prevents new features 
 
 **Exit gate:** current modules can be safely extended; behavior is covered; unresolved validation gates are explicit; no silent backend/security changes.
 
+**Closeout decision (21 Nov 2026):** CLOSED WITH ACCEPTED DEFERRALS, on Robert's explicit instruction. Pending manual checks remain deferred—not PASS—and are itemized in `BUILD_STATUS.md`. Phase 1 Agenda may begin; its first schema migration remains blocked on the open design contracts below.
+
 ### Phase 1 — Agenda and time management (Vision Phase A)
 
 **Objective:** make time visible and manageable without confusing tasks with calendar commitments.
