@@ -545,3 +545,53 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 - CI #175 PASS on the exact PR head: 21 unit tests, 25/25 mocked Playwright, live-suite --list validation (no connection), and production build: https://github.com/SimpleLife9/simplelife/actions/runs/44859626984.
 - CI post-merge #176 PASS on exact merge SHA `966a438b3fe220c191852b158c09743d035f8b97`: same 21 unit tests, 25/25 Playwright, live-suite --list, and build: https://github.com/SimpleLife9/simplelife/actions/runs/44859841847.
 - Live workflow dispatch: NOT RUN. Pending a human-provisioned, persistent QA-only Auth account and repository Actions secrets `SIMPLELIFE_QA_EMAIL` / `SIMPLELIFE_QA_PASSWORD`.
+
+
+## Continuity update — live Supabase smoke and Phase 0 open gates (21/11/2026)
+
+### Authenticated Supabase smoke — completed gate
+
+- Latest verified `main`: `2da04ebb88874c910fe733fa14914a5caaedad1d`.
+- PR #42 — login selector and Havana date fixtures: MERGED at `7d09d23e2dfe1e494bd907b2f4c24e440ebd6a31`; PR CI #182 PASS; post-merge CI #183 PASS.
+- PR #43 — accessible `Más` navigation selector: MERGED at `7135a2475699691888d8614468cc6ca21b966401`; PR CI #185 PASS; post-merge CI #186 PASS.
+- PR #44 — list-item wrapper locator: MERGED at `ce9d3c68ad959245dc3a4b7c66e3701cf5b95776`; PR CI #187 PASS; post-merge CI #188 PASS.
+- PR #45 — reuse active QA canaries: MERGED at `cbeff8d4854e158c121b742c62b2ef430809d300`; PR CI #189 PASS; post-merge CI #190 PASS.
+- PR #46 — wait for all list data and verify checkbox persistence: MERGED at `2da04ebb88874c910fe733fa14914a5caaedad1d`; PR CI #191 PASS; post-merge CI #192 PASS.
+- PR #46 CI runs use 22 unit tests, 25 Playwright scenarios, live-suite discovery and production build.
+- Live smoke #2 failed after login at the More navigation selector: https://github.com/SimpleLife9/simplelife/actions/runs/44866444687.
+- Live smoke #3 failed on an incorrectly scoped list-item action locator: https://github.com/SimpleLife9/simplelife/actions/runs/44894221686.
+- Live smoke #4 failed because historical note canaries made the edit locator ambiguous: https://github.com/SimpleLife9/simplelife/actions/runs/44894942878.
+- Live smoke #5 failed while Playwright attempted to check the controlled list-item checkbox; a read-only audit showed the latest item had nevertheless persisted as checked: https://github.com/SimpleLife9/simplelife/actions/runs/44895643770.
+- **Live smoke #6: PASS** on exact main SHA `2da04ebb88874c910fe733fa14914a5caaedad1d`: https://github.com/SimpleLife9/simplelife/actions/runs/44897930442. The dedicated real-auth browser scenario passed end-to-end (1 test passed in 13.4s): Auth/profile bootstrap, task state change/reload/archive, note edit/reload/archive, list item edit/check/reload and final list archive.
+- Post-run Supabase audit (read-only): QA user signed in; 3 task canaries (all archived); 3 note canaries (all archived); 2 list canaries (one archived, one older active); 2 list-item canaries (latest item `is_checked=true`, older item `false`). Counts did not increase during run #6; no new duplicates were created.
+- No SQL writes, physical DELETE, cleanup, DDL, migration, RLS/grant, Auth configuration, or secret changes were made during the smoke/audit.
+- **Evidence status:** real Auth sign-in/profile bootstrap and authenticated Task/Note/List/ListItem CRUD + reload persistence = PASS for this bounded QA scenario. This does not certify every account/preferences flow, all owner-isolation security cases, physical Android/iOS, or public deployment.
+
+### Reconciled Phase 0 validation register
+
+| Area | Existing evidence | Current state | Remaining gate |
+|---|---|---|---|
+| Shared date/time and app modularization PRs #19–#39 | PR and post-merge CI recorded above | CI PASS / integrated | Continue only if a concrete boundary or regression requires it; no broad rewrite |
+| Lote 5 — Areas/Goals/Subgoals | Anexo 131 confirms manual validation for area ordering, separate navigation, goal/subgoal editing, subgoal creation and persistence | Manual PASS for those listed cases | Keep untested modal/edge cases separate; do not reopen confirmed checks |
+| Lote 6 — Project ↔ Goal/Subgoal relations | Robert confirmed links and persistence in localhost | Manual PASS for linking/persistence | E2E covers unlink/restore and archived-project restrictions; those are not separately claimed as manual PASS |
+| Lote 7 — Inbox organization and destination navigation | Anexo 134 confirms Notes/Ideas and Lists are discoverable and show organized records | Manual PASS for browsing organized destinations | Inbox review/archive lifecycle is separate and remains pending below |
+| Lote 8 — List item to task conversion | Anexo 135 confirms conversion works | Manual PASS | No known blocker in this scope |
+| Lote 9 — Daily planning / task batches | Anexo 136 confirms the lot and clarifies estimated duration is not a timer | Manual PASS | No known blocker in this scope |
+| Lote 10 — Task lifecycle | PR #40 expanded mocked E2E for status, archive/restore completed tasks and retained completion metadata; 25 scenarios pass | Automated PASS; manual acceptance NOT COMPLETE | Execute the five localhost checks in the Lote 10 section above, including bulk archive and completed-task archive/restore |
+| Lote 11 — Task ↔ Goal/Subgoal contributions | PR #40 expanded mocked E2E for direct/subgoal links, parent filtering, unlink/restore, deduplication and status display; Robert earlier gave a generally favorable but non-exhaustive review | Automated PASS; manual acceptance NOT COMPLETE | Execute the five localhost checks in the Lote 11 section above |
+| Lote 12 — Task ↔ Project associations | Existing manual record confirms principal/additional roles, switching the principal, filters and project details | Manual PASS | Do not repeat |
+| Lote 13 — Today execution dashboard | Anexo 140 confirms manual review PASS | Manual PASS | Do not repeat |
+| Inbox review/archive (separate from Lote 7 organization) | PR #4 automated E2E/CI covers search, review/unreview, archive/restore and preservation of original capture; manual browser record is still pending | Automated PASS; manual PENDING | Validate the real user flow once in authenticated localhost |
+| Project management base lifecycle / creation modals | PRs #5/#6 automated tests cover search, filters, editing, dates, archive/restore and modal behavior; original manual records remain pending | Automated PASS; manual PENDING | Validate project create/edit/filter/archive/restore and modal create/cancel behavior once |
+| Auth, profile and preferences | Smoke #6 proves real Auth sign-in/profile bootstrap in the dedicated QA account; mocked E2E covers logout/session restore | Bounded real Auth PASS; broader account/preferences PENDING | Reconcile account/profile/preferences against approved scope before declaring this domain closed |
+| Notes/Ideas and Lists | Mocked lifecycle E2E, plus smoke #6 real edit/check/archive/reload | Bounded automated + real persistence PASS | Search/restore edge cases retain mocked coverage; no further live canary expansion required now |
+| Physical Android/iOS and PWA behavior | Not included in hosted-browser smoke | NOT RUN / PENDING | Manual physical-device check only if platform-specific behavior is in Phase 0 acceptance |
+
+### Execution order from this register
+
+1. Do not repeat the real Auth/CRUD smoke #6; it has a recorded PASS for its defined scope.
+2. First complete the unresolved Lote 10 manual checklist, then Lote 11, using Robert's authenticated localhost session; record each as PASS only after explicit confirmation.
+3. Then close the separate manual gates for Inbox review/archive and project base lifecycle/modals.
+4. Reconcile account/profile/preferences and device/PWA validation against the approved Phase 0 acceptance scope. Do not expand database schema or permissions merely to satisfy a checklist.
+5. Keep Phase 0 OPEN until the mandatory remaining gates are either validated or explicitly deferred with Robert's decision.
+
