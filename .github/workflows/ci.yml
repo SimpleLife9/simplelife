@@ -110,7 +110,7 @@ jobs:
               raise SystemExit("Expected temporary migrations-disabled config was not found")
           path.write_text(config.replace(marker, "[db.migrations]\nenabled = true\nschema_paths = []", 1))
           PY
-          supabase start --exclude realtime,storage,rest,studio,mail,analytics,pooler
+          supabase start --exclude realtime,storage-api,postgrest,studio,mailpit,logflare,supavisor,imgproxy,vector,postgres-meta
 
       - name: Verify Agenda auth in the actual local Edge Runtime
         run: node scripts/agenda-edge-runtime-smoke.mjs
