@@ -139,7 +139,7 @@ test('real authenticated Supabase smoke: task, note, list item and persistence',
   }
 
   listCard = page.locator('.list-card').filter({ has: page.getByRole('heading', { name: LIST_TITLE, exact: true }) });
-  let itemRow = listCard.locator('.list-item').filter({ hasText: ITEM_CONTENT });
+  let itemRow = listCard.locator('.list-item-wrap').filter({ hasText: ITEM_CONTENT });
   if (await itemRow.count() === 0) {
     const addItem = listCard.locator('input[placeholder="Añadir elemento…"]');
     await addItem.fill(ITEM_CONTENT);
@@ -147,14 +147,14 @@ test('real authenticated Supabase smoke: task, note, list item and persistence',
     await expect(itemRow).toBeVisible();
   }
 
-  itemRow = listCard.locator('.list-item').filter({ hasText: ITEM_CONTENT });
+  itemRow = listCard.locator('.list-item-wrap').filter({ hasText: ITEM_CONTENT });
   await itemRow.getByRole('button', { name: `Editar elemento: ${ITEM_CONTENT}` }).click();
   const itemEditor = page.getByRole('dialog', { name: 'Editar elemento' });
   await itemEditor.getByLabel('Contenido del elemento').fill(ITEM_CONTENT);
   await itemEditor.getByRole('button', { name: 'Guardar cambios' }).click();
   await expect(page.getByText('Elemento actualizado.')).toBeVisible();
 
-  itemRow = listCard.locator('.list-item').filter({ hasText: ITEM_CONTENT });
+  itemRow = listCard.locator('.list-item-wrap').filter({ hasText: ITEM_CONTENT });
   const itemCheckbox = itemRow.locator('input[type="checkbox"]');
   if (!(await itemCheckbox.isChecked())) await itemCheckbox.check();
   await expect(itemCheckbox).toBeChecked();
@@ -166,7 +166,7 @@ test('real authenticated Supabase smoke: task, note, list item and persistence',
   await page.getByLabel('Buscar listas').fill(LIST_TITLE);
   listCard = page.locator('.list-card').filter({ has: page.getByRole('heading', { name: LIST_TITLE, exact: true }) });
   await expect(listCard).toBeVisible();
-  itemRow = listCard.locator('.list-item').filter({ hasText: ITEM_CONTENT });
+  itemRow = listCard.locator('.list-item-wrap').filter({ hasText: ITEM_CONTENT });
   await expect(itemRow.locator('input[type="checkbox"]')).toBeChecked();
 
   await listCard.getByRole('button', { name: `Archivar lista: ${LIST_TITLE}` }).click();
