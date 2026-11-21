@@ -2282,3 +2282,92 @@ test('authenticated user can sign out and return to the sign-in screen', async (
   expect(signedOutRequests).toHaveLength(1);
   expect(signedOutRequests[0].authorization).toContain('Bearer ');
 });
+
+test('Notes and ideas creation opens in a top-level dialog and saves from the dialog', async ({ page }) => {
+  const { insertedNoteIdeas } = await mockSupabaseSession(page);
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+
+  await page.locator('.side-nav').getByRole('button', { name: /Más/ }).click();
+  await page.getByRole('navigation', { name: 'Secciones de Más' }).getByRole('button', { name: 'Notas e ideas' }).click();
+
+  const createButton = page.getByRole('button', { name: 'Nueva nota o idea' });
+  await expect(createButton).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Nueva nota o idea' })).toHaveCount(0);
+
+  await createButton.click();
+  const dialog = page.getByRole('dialog', { name: 'Nueva nota o idea' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel('Tipo de nota').selectOption('idea');
+  await dialog.getByLabel('Título (opcional)').fill('Idea desde diálogo');
+  await dialog.getByLabel('Contenido').fill('Probar la ventana flotante de notas e ideas.');
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+
+  await createButton.click();
+  const reopenedDialog = page.getByRole('dialog', { name: 'Nueva nota o idea' });
+  await expect(reopenedDialog.getByLabel('Título (opcional)')).toHaveValue('');
+  await expect(reopenedDialog.getByLabel('Contenido')).toHaveValue('');
+  await reopenedDialog.getByLabel('Tipo de nota').selectOption('idea');
+  await reopenedDialog.getByLabel('Título (opcional)').fill('Idea desde diálogo');
+  await reopenedDialog.getByLabel('Contenido').fill('Probar la ventana flotante de notas e ideas.');
+  await reopenedDialog.getByRole('button', { name: /Guardar/ }).click();
+
+  await expect(page.getByText('Idea guardada.')).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Nueva nota o idea' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Idea desde diálogo' })).toBeVisible();
+  expect(insertedNoteIdeas).toHaveLength(1);
+  expect(insertedNoteIdeas[0]).toMatchObject({
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    kind: 'idea',
+    title: 'Idea desde diálogo',
+    content: 'Probar la ventana flotante de notas e ideas.',
+    status: 'active',
+  });
+});
+
+test('List creation opens in a top-level dialog and saves from the dialog', async ({ page }) => {
+  const { lists, insertedLists } = await mockSupabaseSession(page);
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+
+  await page.locator('.side-nav').getByRole('button', { name: /Más/ }).click();
+  await page.getByRole('navigation', { name: 'Secciones de Más' }).getByRole('button', { name: 'Listas' }).click();
+
+  const createButton = page.getByRole('button', { name: 'Nueva lista' });
+  await expect(createButton).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Crear una lista' })).toHaveCount(0);
+
+  await createButton.click();
+  const dialog = page.getByRole('dialog', { name: 'Crear una lista' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel('Nombre de la lista').fill('Lista desde diálogo');
+  await dialog.getByLabel('Propósito (opcional)').fill('Comprobar la creación en ventana flotante.');
+  await dialog.getByRole('button', { name: 'Cancelar' }).click();
+  await expect(dialog).toHaveCount(0);
+
+  await createButton.click();
+  const reopenedDialog = page.getByRole('dialog', { name: 'Crear una lista' });
+  await expect(reopenedDialog.getByLabel('Nombre de la lista')).toHaveValue('');
+  await expect(reopenedDialog.getByLabel('Propósito (opcional)')).toHaveValue('');
+  await reopenedDialog.getByLabel('Nombre de la lista').fill('Lista desde diálogo');
+  await reopenedDialog.getByLabel('Propósito (opcional)').fill('Comprobar la creación en ventana flotante.');
+  await reopenedDialog.getByRole('button', { name: /Crear lista/ }).click();
+
+  await expect(page.getByText('Lista creada.')).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Crear una lista' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Lista desde diálogo' })).toBeVisible();
+  expect(insertedLists).toHaveLength(1);
+  expect(lists[0]).toMatchObject({
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    name: 'Lista desde diálogo',
+    purpose: 'Comprobar la creación en ventana flotante.',
+    status: 'active',
+  });
+});
