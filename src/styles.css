@@ -342,3 +342,13 @@
 @media(max-width:1050px){.today-insight-grid{grid-template-columns:minmax(0,1.2fr) minmax(240px,.8fr)}.today-progress-columns{gap:14px}}
 @media(max-width:820px){.today-insight-grid{grid-template-columns:1fr;margin-top:0}.today-progress-columns{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:600px){.today-insight-grid{gap:11px;margin-bottom:24px}.today-insight-card{padding:16px 14px}.today-insight-heading{margin-bottom:12px}.today-insight-heading h2{font-size:.98rem}.today-progress-columns{grid-template-columns:1fr;gap:14px}.today-progress-copy strong{font-size:.74rem}.today-progress-copy>span{font-size:.61rem}.today-progress-note{font-size:.59rem}.today-week-stat strong{font-size:2.1rem}.today-week-counters{padding:11px 0}.today-watch-row{font-size:.67rem}}
+
+
+/* Notes and ideas — local text search and kind filter */
+.notes-toolbar{display:grid;grid-template-columns:minmax(180px,1.7fr) minmax(130px,.6fr);gap:9px;margin:0 0 13px;padding:13px;background:#fff;border:1px solid var(--line);border-radius:13px}
+.notes-toolbar-field{display:grid;gap:6px;min-width:0}
+.notes-toolbar-field>span{font-size:.62rem;font-weight:700;letter-spacing:.06em;color:#819087}
+.notes-toolbar-field input,.notes-toolbar-field select{width:100%;min-width:0;height:37px;border:1px solid #e1e8e1;border-radius:8px;padding:8px 10px;background:#fbfcfa;color:#34483f;outline:none;font-size:.71rem}
+.notes-toolbar-field input:focus,.notes-toolbar-field select:focus{border-color:#7aab87;box-shadow:0 0 0 3px rgba(110,157,121,.12)}
+.notes-toolbar-field input::placeholder{color:#a9b4ac}
+@media(max-width:600px){.notes-toolbar{grid-template-columns:1fr;gap:9px;padding:11px}}
