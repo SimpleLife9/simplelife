@@ -388,8 +388,9 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 | #24 | Today page and owner-scoped task operations | #118 PASS | #119 PASS | `84f849ed761217cf9e69ed445e9536dd6da24c2e` |
 | #25 | Inbox page `src/features/inbox/InboxPage.jsx` | #120 PASS | #121 PASS | `1835738d467abba2db96489f9fe4cb1558190673` |
 | #26 | Goals / Areas / Subgoals page plus shared Field and StatusTag | #122 PASS | #123 PASS | `b9fe21da20d14d316678019ee36706607028573f` |
+| #27 | Projects page plus shared TextAreaField and ProjectStatusTag | #125 PENDING | #126 PENDING | TBD |
 
-- The extractions from PRs #19–#26 preserve existing APIs or behavior; the existing Playwright suite remained at 19 scenarios and passed for completed PR checks.
+- The extractions from PRs #19–#27 preserve existing APIs or behavior; the existing Playwright suite remained at 19 scenarios and passed for completed PR checks.
 - No new framework/dependency, schema migration, RLS/grant, auth, secret, Service Worker or deployment change was made in these batches.
 - This is incremental boundary work, not a completed rewrite. `src/App.jsx` remains a legacy composition file and additional page/service extraction is still required before Phase 0 closes.
 - The real authenticated Supabase browser test and physical-device validation remain open; mocked E2E is not evidence of real persistence.
