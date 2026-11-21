@@ -111,6 +111,7 @@ async function mockSupabaseSession(page, initialData = {}) {
   const updatedNoteIdeas = [];
   const lists = [...(initialData.lists || [])];
   const insertedLists = [];
+  const updatedLists = [];
   const listItems = [...(initialData.listItems || [])];
   const insertedListItems = [];
   const updatedListItems = [];
@@ -415,7 +416,7 @@ async function mockSupabaseSession(page, initialData = {}) {
 
     if (url.pathname === '/rest/v1/user_list' && method === 'GET') {
       const idFilter = url.searchParams.get('id') || '';
-      const rows = lists.filter((row) => !row.deleted_at && !row.archived_at && row.status === 'active' && (!idFilter || idFilter === 'eq.' + row.id));
+      const rows = lists.filter((row) => !row.deleted_at && (!idFilter || idFilter === 'eq.' + row.id));
       await json(200, rows);
       return;
     }
@@ -425,6 +426,19 @@ async function mockSupabaseSession(page, initialData = {}) {
       lists.push(...rows);
       insertedLists.push(...rows);
       await json(201, rows, { 'content-range': '0-0/*' });
+      return;
+    }
+    if (url.pathname === '/rest/v1/user_list' && method === 'PATCH') {
+      const payload = request.postDataJSON();
+      const idFilter = url.searchParams.get('id') || '';
+      const ownerFilter = url.searchParams.get('owner_user_id') || '';
+      const row = lists.find((list) => !list.deleted_at
+        && idFilter === 'eq.' + list.id
+        && (!ownerFilter || ownerFilter === 'eq.' + list.owner_user_id));
+      if (!row) { await json(200, []); return; }
+      Object.assign(row, payload);
+      updatedLists.push({ id: row.id, ...payload });
+      await json(200, [{ id: row.id }], { 'content-range': '0-0/*' });
       return;
     }
 
@@ -447,8 +461,15 @@ async function mockSupabaseSession(page, initialData = {}) {
       const payload = request.postDataJSON();
       const idFilter = url.searchParams.get('id') || '';
       const listFilter = url.searchParams.get('list_id') || '';
-      const row = listItems.find((item) => idFilter === 'eq.' + item.id && listFilter === 'eq.' + item.list_id && item.task_id == null);
+      const taskFilter = url.searchParams.get('task_id') || '';
+      const row = listItems.find((item) => idFilter === 'eq.' + item.id
+        && listFilter === 'eq.' + item.list_id
+        && (!taskFilter || taskFilter === 'is.null' ? item.task_id == null : taskFilter === 'eq.' + item.task_id));
       if (!row) { await json(200, []); return; }
+      if (Object.hasOwn(payload, 'task_id') && row.task_id != null && row.task_id !== payload.task_id) {
+        await json(200, []);
+        return;
+      }
       Object.assign(row, payload);
       updatedListItems.push({ id: row.id, ...payload });
       await json(200, [{ id: row.id }], { 'content-range': '0-0/*' });
@@ -544,7 +565,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     await json(404, { message: `Unexpected mocked Supabase request: ${method} ${url.pathname}` });
   });
 
-  return { signedOutRequests, insertedTasks, updatedTasks, updatedNoteIdeas, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
+  return { signedOutRequests, insertedTasks, updatedTasks, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
 }
 
 test('mock-authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
