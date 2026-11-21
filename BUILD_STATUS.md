@@ -614,3 +614,37 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 - Automated live-smoke PASS will not by itself replace Robert's manual localhost acceptance. Lote 10 manual gate and the broader Phase 0 acceptance gates remain OPEN.
 - ChatBending continuity: Anexo 142 has been updated with PR #48, CI #196/#197, baseline audit and smoke #7 gate: https://app.notion.com/p/41efeb355ec18137a1a0edb81f229554.
 
+
+
+## Checkpoint — Live smoke #9 PASS; Lote 11 manual gate remains (21/11/2026)
+
+### Lote 10 — evidencia de smoke autenticado real
+
+- Main probado: `d2ade1f014d14f9747c6a8e739ee73c891fd9f0c`.
+- Workflow live smoke #9: SUCCESS, evento `workflow_dispatch`, branch `main`, SHA exacto. Run: https://github.com/SimpleLife9/simplelife/actions/runs/44906906069.
+- Job `live-smoke`: SUCCESS. Playwright live ejecutó 2/2 pruebas: persistencia autenticada de Task/Note/ListItem y ciclo de vida del Lote 10 con estados, archivo/restauración y metadatos de finalización. La suite reportó 18.6 s.
+- Auditoría SQL posterior, solo lectura, en `public.task`: exactamente 3 canarios QA; los 3 archivados; 1 `completed` con `completed_at` no nulo y `completion_outcome=complete`; los otros 2 conservaron `blocked` y `todo`; 0 `deleted_at`; sin duplicados.
+- Los fallos #7 y #8 permanecen como histórico y no se reetiquetan. El smoke #9 valida la corrección de aserciones de avisos transitorios incorporada en PR #50.
+- **Límite:** este PASS cubre el smoke automatizado real del Lote 10; no reemplaza la aceptación manual punto por punto de Lote 10 ni cierra Fase 0.
+
+### Lote 11 — estado y próxima puerta
+
+- Implementación original PR #15 integrada en main; CI PR #90 y post-merge #91 PASS.
+- Reconciliación adicional de cobertura automatizada PR #40 integrada; CI #172 y post-merge #173 PASS. Los 25 escenarios Playwright incluyen vínculos directos y por Submeta, filtro de Meta padre, retirada/restauración sin duplicados y visualización de estados Pendiente/Bloqueada en tarjetas de Meta y Submeta.
+- **Aceptación manual: PENDING**, no se infiere PASS de la revisión general favorable previa. Los cinco pasos siguen siendo:
+  1. En Más → Tareas, vincular una tarea a una Meta y también a una Submeta.
+  2. Filtrar por esa Meta y por esa Submeta y comprobar los resultados.
+  3. Vincular otra tarea únicamente a una Submeta y verificar que aparece al filtrar por su Meta principal.
+  4. Desvincular la relación directa con la Meta y restaurarla desde el mismo diálogo; comprobar que no se crea otra relación.
+  5. En Objetivos → Metas y Submetas, comprobar las tareas contribuyentes y sus estados.
+- No se han hecho escrituras reales de QA para Lote 11 ni se ha ampliado el smoke live a relaciones Goal/Subgoal. No añadir pruebas que escriban nuevas relaciones reales sin diseñar antes canarios reversibles y una ejecución manualmente autorizada.
+- Próxima acción: completar la sesión manual del Lote 11 en la aplicación autenticada/local y registrar PASS solo tras confirmación explícita. No repetir Lote 10 ni alterar canarios para conseguirlo.
+
+### Fase 0 — registro consolidado
+
+- Lote 10: automatización mock PASS + smoke autenticado real PASS; aceptación manual PENDING.
+- Lote 11: automatización mock PASS; aceptación manual PENDING.
+- Inbox review/archive y ciclo base de Proyectos/modales: automatización PASS; aceptación manual PENDING.
+- Auth real y perfil: PASS dentro del alcance acotado del smoke; preferencias y cuenta más amplias pendientes de reconciliación.
+- Android/iOS físico y PWA: NOT RUN; confirmar si forman parte del alcance obligatorio.
+- **Fase 0 permanece OPEN.** No cerrar hasta completar o aplazar expresamente cada puerta humana obligatoria.
