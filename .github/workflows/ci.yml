@@ -83,14 +83,34 @@ jobs:
         with:
           version: 3.2.0
 
-      - name: Start local Postgres before migrations
-        run: supabase db start
+      - name: Start local Postgres without applying migrations
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("supabase/config.toml")
+          config = path.read_text()
+          marker = "[db.migrations]\nschema_paths = []"
+          if marker not in config:
+              raise SystemExit("Expected [db.migrations] config block was not found")
+          path.write_text(config.replace(marker, "[db.migrations]\nenabled = false\nschema_paths = []", 1))
+          PY
+          supabase db start
 
       - name: Reproduce hosted RLS bootstrap in ephemeral local Postgres
         run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/local-supabase-bootstrap.sql
 
       - name: Start minimal local Supabase stack and apply migrations
-        run: supabase start --exclude realtime,storage,rest,studio,mail,analytics,pooler
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("supabase/config.toml")
+          config = path.read_text()
+          marker = "[db.migrations]\nenabled = false\nschema_paths = []"
+          if marker not in config:
+              raise SystemExit("Expected temporary migrations-disabled config was not found")
+          path.write_text(config.replace(marker, "[db.migrations]\nenabled = true\nschema_paths = []", 1))
+          PY
+          supabase start --exclude realtime,storage,rest,studio,mail,analytics,pooler
 
       - name: Verify Agenda auth in the actual local Edge Runtime
         run: node scripts/agenda-edge-runtime-smoke.mjs
