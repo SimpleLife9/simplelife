@@ -111,6 +111,7 @@ async function mockSupabaseSession(page, initialData = {}) {
   const updatedNoteIdeas = [];
   const lists = [...(initialData.lists || [])];
   const insertedLists = [];
+  const updatedLists = [];
   const listItems = [...(initialData.listItems || [])];
   const insertedListItems = [];
   const updatedListItems = [];
@@ -415,7 +416,7 @@ async function mockSupabaseSession(page, initialData = {}) {
 
     if (url.pathname === '/rest/v1/user_list' && method === 'GET') {
       const idFilter = url.searchParams.get('id') || '';
-      const rows = lists.filter((row) => !row.deleted_at && !row.archived_at && row.status === 'active' && (!idFilter || idFilter === 'eq.' + row.id));
+      const rows = lists.filter((row) => !row.deleted_at && (!idFilter || idFilter === 'eq.' + row.id));
       await json(200, rows);
       return;
     }
@@ -425,6 +426,19 @@ async function mockSupabaseSession(page, initialData = {}) {
       lists.push(...rows);
       insertedLists.push(...rows);
       await json(201, rows, { 'content-range': '0-0/*' });
+      return;
+    }
+    if (url.pathname === '/rest/v1/user_list' && method === 'PATCH') {
+      const payload = request.postDataJSON();
+      const idFilter = url.searchParams.get('id') || '';
+      const ownerFilter = url.searchParams.get('owner_user_id') || '';
+      const row = lists.find((list) => !list.deleted_at
+        && idFilter === 'eq.' + list.id
+        && (!ownerFilter || ownerFilter === 'eq.' + list.owner_user_id));
+      if (!row) { await json(200, []); return; }
+      Object.assign(row, payload);
+      updatedLists.push({ id: row.id, ...payload });
+      await json(200, [{ id: row.id }], { 'content-range': '0-0/*' });
       return;
     }
 
@@ -447,8 +461,15 @@ async function mockSupabaseSession(page, initialData = {}) {
       const payload = request.postDataJSON();
       const idFilter = url.searchParams.get('id') || '';
       const listFilter = url.searchParams.get('list_id') || '';
-      const row = listItems.find((item) => idFilter === 'eq.' + item.id && listFilter === 'eq.' + item.list_id && item.task_id == null);
+      const taskFilter = url.searchParams.get('task_id') || '';
+      const row = listItems.find((item) => idFilter === 'eq.' + item.id
+        && listFilter === 'eq.' + item.list_id
+        && (!taskFilter || (taskFilter === 'is.null' ? item.task_id == null : taskFilter === 'eq.' + item.task_id)));
       if (!row) { await json(200, []); return; }
+      if (Object.hasOwn(payload, 'task_id') && row.task_id != null && row.task_id !== payload.task_id) {
+        await json(200, []);
+        return;
+      }
       Object.assign(row, payload);
       updatedListItems.push({ id: row.id, ...payload });
       await json(200, [{ id: row.id }], { 'content-range': '0-0/*' });
@@ -544,7 +565,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     await json(404, { message: `Unexpected mocked Supabase request: ${method} ${url.pathname}` });
   });
 
-  return { signedOutRequests, insertedTasks, updatedTasks, updatedNoteIdeas, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
+  return { signedOutRequests, insertedTasks, updatedTasks, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
 }
 
 test('mock-authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
@@ -1489,6 +1510,158 @@ test('More modules remain directly accessible from the mobile navigation', async
   await expect(page.getByRole('heading', { name: 'Tu biblioteca' })).toBeVisible();
   await sectionNav.getByRole('button', { name: 'Listas' }).click();
   await expect(page.getByRole('heading', { name: 'Tus listas' })).toBeVisible();
+});
+
+
+test('Lists support rename, purpose, item editing, reordering and reversible archive', async ({ page }) => {
+  const linkedTaskId = '00000000-0000-7000-8000-000000000580';
+  const existingList = {
+    id: '00000000-0000-7000-8000-000000000581',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    name: 'Compras de la semana',
+    purpose: 'Organizar compras para casa',
+    status: 'active',
+    archived_at: null,
+    deleted_at: null,
+  };
+  const existingItems = [
+    {
+      id: '00000000-0000-7000-8000-000000000582',
+      list_id: existingList.id,
+      task_id: null,
+      content: 'Comprar leche',
+      position: 0,
+      is_checked: false,
+      created_at: '2026-11-20T10:00:00.000Z',
+    },
+    {
+      id: '00000000-0000-7000-8000-000000000583',
+      list_id: existingList.id,
+      task_id: null,
+      content: 'Comprar frutas',
+      position: 1,
+      is_checked: false,
+      created_at: '2026-11-20T11:00:00.000Z',
+    },
+    {
+      id: '00000000-0000-7000-8000-000000000584',
+      list_id: existingList.id,
+      task_id: linkedTaskId,
+      content: 'Revisar factura',
+      position: 2,
+      is_checked: false,
+      created_at: '2026-11-20T12:00:00.000Z',
+    },
+  ];
+  const linkedTask = {
+    id: linkedTaskId,
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    action: 'Revisar factura del proveedor',
+    description: null,
+    status: 'todo',
+    priority: 3,
+    due_date: null,
+    time_zone: 'America/Havana',
+    archived_at: null,
+    deleted_at: null,
+    created_at: '2026-11-20T12:00:00.000Z',
+  };
+  const { lists, listItems, updatedLists, updatedListItems } = await mockSupabaseSession(page, {
+    lists: [existingList],
+    listItems: existingItems,
+    tasks: [linkedTask],
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+
+  await page.locator('.side-nav').getByRole('button', { name: /Más/ }).click();
+  await page.getByRole('navigation', { name: 'Secciones de Más' }).getByRole('button', { name: 'Listas' }).click();
+  await expect(page.getByRole('heading', { name: 'Compras de la semana' })).toBeVisible();
+  await expect(page.getByText('Organizar compras para casa')).toBeVisible();
+  await expect(page.getByText('Tarea vinculada · Pendiente')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Editar lista: Compras de la semana' }).click();
+  const listDialog = page.getByRole('dialog', { name: 'Editar lista' });
+  await listDialog.getByLabel('Nombre de la lista').fill('Compras y despensa');
+  await listDialog.getByLabel('Propósito (opcional)').fill('Compras esenciales y reposición');
+  await listDialog.getByRole('button', { name: 'Guardar cambios' }).click();
+
+  await expect(page.getByText('Lista actualizada.')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Compras y despensa' })).toBeVisible();
+  expect(lists[0]).toMatchObject({
+    name: 'Compras y despensa',
+    purpose: 'Compras esenciales y reposición',
+  });
+  expect(updatedLists[0]).toMatchObject({
+    id: existingList.id,
+    name: 'Compras y despensa',
+    purpose: 'Compras esenciales y reposición',
+  });
+  expect(lists[0].owner_user_id).toBe(profile.id);
+
+  await page.getByRole('button', { name: 'Editar elemento: Revisar factura' }).click();
+  const itemDialog = page.getByRole('dialog', { name: 'Editar elemento' });
+  await itemDialog.getByLabel('Contenido del elemento').fill('Revisar factura del proveedor');
+  await itemDialog.getByRole('button', { name: 'Guardar cambios' }).click();
+
+  await expect(page.getByText('Elemento actualizado.')).toBeVisible();
+  await expect(page.getByText('Revisar factura del proveedor')).toBeVisible();
+  expect(listItems.find((item) => item.id === existingItems[2].id)).toMatchObject({
+    content: 'Revisar factura del proveedor',
+    task_id: linkedTaskId,
+  });
+  expect(updatedListItems).toContainEqual({
+    id: existingItems[2].id,
+    content: 'Revisar factura del proveedor',
+  });
+
+  await page.getByRole('button', { name: 'Mover abajo: Comprar leche' }).click();
+  await expect(page.getByText('Orden de elementos actualizado.')).toBeVisible();
+  const orderedItems = page.locator('.list-card .list-items .list-item-wrap');
+  await expect(orderedItems.nth(0).getByText('Comprar frutas')).toBeVisible();
+  await expect(orderedItems.nth(1).getByText('Comprar leche')).toBeVisible();
+  expect(listItems.find((item) => item.id === existingItems[0].id).position).toBe(1);
+  expect(listItems.find((item) => item.id === existingItems[1].id).position).toBe(0);
+  expect(listItems.find((item) => item.id === existingItems[2].id).task_id).toBe(linkedTaskId);
+
+  const fruitCheckbox = page.getByRole('checkbox', { name: 'Comprar frutas' });
+  await fruitCheckbox.click();
+  await expect(fruitCheckbox).toBeChecked();
+  expect(listItems.find((item) => item.id === existingItems[1].id).is_checked).toBe(true);
+  expect(updatedListItems).toContainEqual({ id: existingItems[1].id, is_checked: true });
+
+  await page.getByRole('button', { name: 'Archivar lista: Compras y despensa' }).click();
+  await expect(page.getByText('Lista archivada.')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Compras y despensa' })).toHaveCount(0);
+  expect(lists[0]).toMatchObject({ status: 'archived' });
+  expect(updatedLists.at(-1)).toMatchObject({
+    id: existingList.id,
+    status: 'archived',
+  });
+
+  await page.getByLabel('Filtrar listas por archivo').selectOption('archived');
+  await expect(page.getByRole('heading', { name: 'Compras y despensa' })).toBeVisible();
+  await expect(page.locator('.list-archive-tag')).toHaveText('ARCHIVADA');
+  await expect(page.getByRole('button', { name: 'Editar lista: Compras y despensa' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Editar elemento: Comprar frutas' })).toBeDisabled();
+  await expect(page.getByRole('checkbox', { name: 'Comprar frutas' })).toBeDisabled();
+  await page.getByRole('button', { name: 'Restaurar lista: Compras y despensa' }).click();
+  await expect(page.getByText('Lista restaurada.')).toBeVisible();
+  expect(lists[0]).toMatchObject({ status: 'active', archived_at: null });
+  expect(updatedLists.at(-1)).toMatchObject({
+    id: existingList.id,
+    status: 'active',
+    archived_at: null,
+  });
+
+  await page.getByLabel('Filtrar listas por archivo').selectOption('active');
+  await expect(page.getByRole('heading', { name: 'Compras y despensa' })).toBeVisible();
+  await expect(page.getByText('Revisar factura del proveedor')).toBeVisible();
+  expect(listItems.find((item) => item.id === existingItems[2].id).task_id).toBe(linkedTaskId);
 });
 
 
