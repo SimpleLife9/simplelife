@@ -392,9 +392,22 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 | #29 | Tasks page `src/features/tasks/TasksPage.jsx` | #128 PASS | #129 PASS | `bbd23f09f18c66eeb28f072759f8c5cfa287c8b5` |
 | #30 | Notes/Ideas page and shared FormCard | #131 PASS | #132 PASS | `87855169e005a71e4234ed6a94658280bd72f90d` |
 | #31 | Lists page `src/features/lists/ListsPage.jsx` | #133 PASS | #134 PASS | `70ff390af213a59cdd10e26f8af9948e5b7d8073` |
-| #32 | AuthScreen and shared Brand/Configuration/Loading screens | PR CI PENDING | Post-merge PENDING | TBD |
+| #32 | AuthScreen and shared Brand/Configuration/Loading screens | #136 PASS | #137 PASS | `33f2e2c3300c7f3a0fb5edec96cdffb7ba2d7cbb` |
+| #33 | Authenticated AppShell and navigation metadata `src/app/` | PR CI PENDING | Post-merge PENDING | TBD |
 
-- The extractions from PRs #19–#31 preserve existing APIs or behavior; the existing Playwright suite remained at 19 scenarios and passed for completed PR checks.
+- The extractions from PRs #19–#32 preserve existing APIs or behavior; PRs #19–#32 passed the 19-scenario Playwright suite. PR #33 adds a dedicated navigation regression, bringing its suite to 20 scenarios.
 - No new framework/dependency, schema migration, RLS/grant, auth, secret, Service Worker or deployment change was made in these batches.
-- This is incremental boundary work, not a completed rewrite. `src/App.jsx` remains a legacy composition file and additional page/service extraction is still required before Phase 0 closes.
+- This is incremental boundary work, not a completed rewrite. `src/App.jsx` now owns session/auth orchestration, cross-feature state and page composition; the authenticated visual shell and navigation metadata are in `src/app/`. Further service/domain extraction and validation gates remain before Phase 0 closes.
 - The real authenticated Supabase browser test and physical-device validation remain open; mocked E2E is not evidence of real persistence.
+
+
+## PR #33 — authenticated app shell and navigation extraction (21/11/2026)
+
+- PR: https://github.com/SimpleLife9/simplelife/pull/33.
+- Branch `refactor/phase0-extract-app-shell`; head SHA `46fb555a8846a949084bdff0e54cec429864ecbc`; base SHA `33f2e2c3300c7f3a0fb5edec96cdffb7ba2d7cbb`.
+- `src/app/AppShell.jsx` now owns the authenticated visual shell, sidebar, top bar, page heading, alerts, section tabs, footer and mobile navigation.
+- `src/app/navigation.js` owns the existing navigation metadata and pure title/description mapping. Existing menu labels and destinations are intentionally unchanged.
+- `src/App.jsx` is reduced from 12,958 to 9,087 characters in this cut (3,871 fewer); session/auth, profile loading, shared action orchestration and page composition remain there.
+- A new Playwright scenario covers all five primary destinations and active states on the authenticated shell; the existing mobile navigation coverage remains. PR CI target: 20 browser scenarios, unit tests and production build.
+- No database/schema, migration, RLS/grants, Auth configuration, secret, dependency, Service Worker, PWA cache or deployment change.
+- CI and post-merge validation are pending. Do not merge before PR CI passes.
