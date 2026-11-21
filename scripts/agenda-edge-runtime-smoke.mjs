@@ -80,13 +80,19 @@ server.stderr.on("data", capture);
 let serverExit = null;
 server.on("exit", (code) => { serverExit = code; });
 
-async function request(headers, body) {
-  return await fetch(functionUrl, {
-    method: body === undefined ? "GET" : "POST",
-    headers: { apikey: localPublishableKey, ...headers },
-    body,
-    signal: AbortSignal.timeout(5000),
-  });
+async function request(headers, body, timeoutMs = 5000) {
+  try {
+    return await fetch(functionUrl, {
+      method: body === undefined ? "GET" : "POST",
+      headers: { apikey: localPublishableKey, ...headers },
+      body,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (error) {
+    fail("Edge Runtime request failed: " + String(error)
+      + "\\nURL: " + functionUrl
+      + "\\nEdge Runtime logs:\\n" + serverLogs);
+  }
 }
 
 try {
@@ -129,13 +135,13 @@ try {
   const apiKeyAsBearer = await request({
     authorization: "Bearer " + localPublishableKey,
     "content-type": "application/json",
-  }, rangePayload);
+  }, rangePayload, 15000);
   assertEqual(apiKeyAsBearer.status, 401, "publishable key used as Bearer");
 
   const invalidJwt = await request({
     authorization: "Bearer not.a.valid.jwt",
     "content-type": "application/json",
-  }, rangePayload);
+  }, rangePayload, 15000);
   assertEqual(invalidJwt.status, 401, "malformed JWT response status");
 
   console.log("PASS: Supabase Edge Runtime served agenda-time-resolve locally.");

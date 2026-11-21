@@ -32,6 +32,10 @@ Cuba 2026 rule; New York spring gap and fall fold; Lord Howe half-hour transitio
 ## Explicit non-effects
 No tables, migrations, database functions, triggers, RLS, grants, audit rows, user data, Auth settings, secrets, hosted Supabase functions or deployments are changed. This is not yet integrated into the Agenda UI or Event persistence path.
 
+## Lifecycle and recurring occurrence policy
+
+See [AGENDA_TZDB_LIFECYCLE_POLICY.md](./AGENDA_TZDB_LIFECYCLE_POLICY.md) for the release review, dependency update, rollback, browser/server mismatch and proposed recurring-occurrence behavior. The recurring behavior is a proposal and requires explicit product approval before recurring Event persistence.
+
 ## Atomic Event range resolution (21 November 2026)
 
 The resolver accepts an optional range form for a timed Event:
