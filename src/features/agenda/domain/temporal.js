@@ -1,5 +1,5 @@
-const DATE_KEY_PATTERN = /^(\\d{4})-(\\d{2})-(\\d{2})$/;
-const LOCAL_DATE_TIME_PATTERN = /^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2})(?::(\\d{2})(?:\\.(\\d{1,3}))?)?$/;
+const DATE_KEY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+const LOCAL_DATE_TIME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/;
 const formatterCache = new Map();
 const OFFSET_SAMPLE_HOURS = 48;
 const OFFSET_SAMPLE_STEP_HOURS = 6;
