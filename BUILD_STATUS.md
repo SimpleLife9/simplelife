@@ -679,3 +679,38 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 - Phase 0 manual gates still open: exhaustive Lote 10 and Lote 11 acceptance; separate Inbox review/archive acceptance; Projects/base creation modal lifecycle; account/profile/preferences reconciliation; and decision on physical Android/iOS scope. The real authenticated Task/Note/List/ListItem smoke and Lote 10 live smoke are PASS within their bounded scopes and should not be repeated.
 - Previously manually confirmed lots not to repeat absent a regression: Lote 5, Lote 6, Lote 7 navigation/destinations (distinct from Inbox review/archive), Lote 8, Lote 9, Lote 12 and Lote 13.
 - Next product objective: Phase 0 closeout, resolving or explicitly deferring remaining human gates. Then begin Phase 1 using `docs/PHASE_1_AGENDA_SPEC.md`; settle its open decisions before creating migrations.
+
+
+## Phase 0 closeout — approved with accepted deferrals (21/11/2026)
+
+**Decision:** Robert explicitly instructed to close Phase 0. The phase transition is approved with the unresolved human-validation items below formally deferred. This decision does not convert any pending check into MANUAL PASS.
+
+**Status:** CLOSED — ACCEPTED DEFERRALS. Closure is a scope/phase decision, not a claim that every listed workflow has passed manual testing. The documentation PR and exact-SHA CI remain part of the normal technical closeout.
+
+### Evidence retained as PASS
+
+- PR #52 Notes/Ideas and Lists floating create dialogs: merged at `67b43af031c96255a8140624360cd018dbd9f212`; Robert confirmed the two requested localhost flows work. CI #204 and post-merge CI #205 PASS.
+- PR #53 roadmap/evidence reconciliation: merged at `c9907827b0a1ad561260d60e0e6e503136bc105c`; PR CI #206 PASS: https://github.com/SimpleLife9/simplelife/actions/runs/44928036552. Post-merge CI #207 on this exact SHA was still IN_PROGRESS when this closeout record was prepared: https://github.com/SimpleLife9/simplelife/actions/runs/44929798861.
+- Authenticated real Supabase Auth/profile bootstrap and Task/Note/List/ListItem CRUD + reload persistence: PASS for the bounded live smoke #6 scenario. This is not comprehensive account/preferences or RLS-isolation certification.
+- Lote 10 real live smoke #9: PASS for its automated task lifecycle and canary audit, including completed-task metadata and archived canaries: https://github.com/SimpleLife9/simplelife/actions/runs/44906906069. The separate exhaustive manual checklist remains deferred.
+- Prior recorded manual PASS remains valid for Lotes 5, 6, 7 destination navigation, 8, 9, 12 and 13. Inbox review/archive is separate from Lote 7 navigation.
+- Mocked automated coverage for Lotes 10/11 and the existing project/Inbox lifecycle remains PASS only within the scenarios covered by tests.
+
+### Human-validation items explicitly deferred (not PASS)
+
+1. **Lote 10 manual acceptance:** full localhost checklist for individual state changes, archive/restore, bulk archive, preservation of completed-task metadata and duration-estimate clarity.
+2. **Lote 11 manual acceptance:** five real-user checks for Goal/Subgoal linking, filters, parent Goal inclusion, unlink/restore without duplicates and contributor status display. No new live QA relation writes are authorized by this closeout.
+3. **Inbox review/archive:** one authenticated real-user pass for review/unreview, search and archive/restore, separate from already accepted destination navigation.
+4. **Projects base lifecycle/modals:** real-user pass for create/edit/filter/archive/restore and modal create/cancel.
+5. **Account/profile/preferences:** broader reconciliation beyond the bounded Auth/profile bootstrap. No assumption that all profile preferences or account recovery flows are complete.
+6. **Physical Android/iOS and platform-specific PWA behavior:** not run; moved to the dedicated mobile/operational validation scope in Phase 9 unless a platform-specific defect blocks an earlier feature.
+
+These deferrals are accepted to permit Phase 1 design/build work to begin. They remain visible as deferred acceptance debt and must be revisited before any dependent capability, before public/production release, or sooner if a regression, data-integrity issue, authorization/RLS concern or user-facing blocker appears. They must never be reported as PASS without fresh evidence.
+
+### Phase 1 entry conditions
+
+- Phase 1 Agenda may begin from `docs/PHASE_1_AGENDA_SPEC.md`.
+- Before any Agenda schema migration, settle the open contracts: event categories and links to tasks/goals/projects; recurrence and series-edit scope; timezone/DST and timezone-change behavior; one-off/weekly protected blocks and hard/flexible semantics; events spanning midnight; task scheduling into slots; cancellation/history/audit; and reminder guarantees by platform.
+- No schema migration, production deployment, secret change or broad permission change is included in this Phase 0 closeout.
+- Reopen Phase 0 only for a regression or evidence that one of its accepted deferrals is a prerequisite/blocker for the next capability or release.
+
