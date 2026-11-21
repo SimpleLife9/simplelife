@@ -403,11 +403,12 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 
 ## PR #33 — authenticated app shell and navigation extraction (21/11/2026)
 
-- PR: https://github.com/SimpleLife9/simplelife/pull/33.
-- Branch `refactor/phase0-extract-app-shell`; head SHA `46fb555a8846a949084bdff0e54cec429864ecbc`; base SHA `33f2e2c3300c7f3a0fb5edec96cdffb7ba2d7cbb`.
-- `src/app/AppShell.jsx` now owns the authenticated visual shell, sidebar, top bar, page heading, alerts, section tabs, footer and mobile navigation.
-- `src/app/navigation.js` owns the existing navigation metadata and pure title/description mapping. Existing menu labels and destinations are intentionally unchanged.
-- `src/App.jsx` is reduced from 12,958 to 9,087 characters in this cut (3,871 fewer); session/auth, profile loading, shared action orchestration and page composition remain there.
-- A new Playwright scenario covers all five primary destinations and active states on the authenticated shell; the existing mobile navigation coverage remains. PR CI target: 20 browser scenarios, unit tests and production build.
+- PR: https://github.com/SimpleLife9/simplelife/pull/33 — MERGED.
+- Branch `refactor/phase0-extract-app-shell`; tested head SHA `2e5447147bd47b79ec0fd432a1d516a00d2acf14`; merge SHA `52e9c4eaa1ac70d3020144c05a4bc82fa9614034`.
+- CI #141 PASS on the exact PR head: unit tests, all 20 Playwright scenarios and production build: https://github.com/SimpleLife9/simplelife/actions/runs/44848428701.
+- CI post-merge #142 PASS on the exact merge SHA: https://github.com/SimpleLife9/simplelife/actions/runs/44848675770.
+- `src/app/AppShell.jsx` owns the authenticated visual shell, sidebar, top bar, page heading, alerts, section tabs, footer and mobile navigation.
+- `src/app/navigation.js` owns the existing navigation metadata and pure title/description mapping. Existing menu labels and destinations remain unchanged.
+- `src/App.jsx` was reduced from 12,958 to 9,087 characters in this cut (3,871 fewer); session/auth, profile loading, shared action orchestration and page composition remain there.
+- New Playwright coverage checks all five primary destinations and active states in desktop and mobile viewports (20 total scenarios).
 - No database/schema, migration, RLS/grants, Auth configuration, secret, dependency, Service Worker, PWA cache or deployment change.
-- First CI #139: FAIL (19/20 browser scenarios passed). The new test queried the mobile navigation while the desktop viewport hid it from the accessibility tree; the test now switches to 390px and validates the visible mobile navigation separately. Corrected CI is pending; do not merge before unit, all 20 Playwright scenarios and build pass.
