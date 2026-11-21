@@ -412,3 +412,15 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 - `src/App.jsx` was reduced from 12,958 to 9,087 characters in this cut (3,871 fewer); session/auth, profile loading, shared action orchestration and page composition remain there.
 - New Playwright coverage checks all five primary destinations and active states in desktop and mobile viewports (20 total scenarios).
 - No database/schema, migration, RLS/grants, Auth configuration, secret, dependency, Service Worker, PWA cache or deployment change.
+
+## PR #34 — shared app action orchestration (21/11/2026)
+
+- PR: https://github.com/SimpleLife9/simplelife/pull/34 — OPEN, CI pending.
+- Branch `refactor/phase0-extract-action-orchestration`; base SHA `5ed085010941d943079053bf9e4569cb209548aa`; current head SHA `f5cd6f33315c56b17981c97049d8914837046bc8`.
+- Added `src/app/createAppActions.js` to extract the existing `showNotice`, `showError` and `runAction` lifecycle.
+- React state remains owned by `App`; the factory receives stable React setters and is memoized once. Existing behavior retained: busy state, shared refresh increment, 3.5-second notice, old-timeout/new-notice race guard, error clearing and fallback.
+- Added four Node unit tests: successful operation, failed operation, notice timeout race and clearing a notice on error.
+- `src/App.jsx` reduced from 9,087 to 8,516 characters in this cut (571 fewer).
+- Validation target: existing unit tests plus four new tests, 20 Playwright scenarios, production build and post-merge CI on exact SHA.
+- No Supabase Auth, data operation, schema, migration, RLS/grants, secret, dependency, Service Worker, PWA cache or deployment change.
+- Do not merge until the complete PR CI passes.
