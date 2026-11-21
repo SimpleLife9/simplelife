@@ -1628,7 +1628,9 @@ test('Lists support rename, purpose, item editing, reordering and reversible arc
   expect(listItems.find((item) => item.id === existingItems[1].id).position).toBe(0);
   expect(listItems.find((item) => item.id === existingItems[2].id).task_id).toBe(linkedTaskId);
 
-  await page.getByRole('checkbox', { name: 'Comprar frutas' }).check();
+  const fruitCheckbox = page.getByRole('checkbox', { name: 'Comprar frutas' });
+  await fruitCheckbox.click();
+  await expect(fruitCheckbox).toBeChecked();
   expect(listItems.find((item) => item.id === existingItems[1].id).is_checked).toBe(true);
   expect(updatedListItems).toContainEqual({ id: existingItems[1].id, is_checked: true });
 
