@@ -410,4 +410,4 @@ Robert confirmó PASS en localhost: puede encontrar y consultar correctamente la
 - `src/App.jsx` is reduced from 12,958 to 9,087 characters in this cut (3,871 fewer); session/auth, profile loading, shared action orchestration and page composition remain there.
 - A new Playwright scenario covers all five primary destinations and active states on the authenticated shell; the existing mobile navigation coverage remains. PR CI target: 20 browser scenarios, unit tests and production build.
 - No database/schema, migration, RLS/grants, Auth configuration, secret, dependency, Service Worker, PWA cache or deployment change.
-- CI and post-merge validation are pending. Do not merge before PR CI passes.
+- First CI #139: FAIL (19/20 browser scenarios passed). The new test queried the mobile navigation while the desktop viewport hid it from the accessibility tree; the test now switches to 390px and validates the visible mobile navigation separately. Corrected CI is pending; do not merge before unit, all 20 Playwright scenarios and build pass.
