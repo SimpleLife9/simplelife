@@ -13,7 +13,7 @@ import { resolveLocalDateTimeRange, TzdbVersionError } from "../agenda-time-reso
 export const MAX_REQUEST_BYTES = 32 * 1024;
 const JSON_HEADERS = {
   "access-control-allow-origin": "*",
-  "access-control-allow-headers": "authorization, apikey, x-client-info, content-type",
+  "access-control-allow-headers": "authorization, apikey, x-client-info, x-supabase-api-version, content-type",
   "access-control-allow-methods": "PATCH, OPTIONS",
   "access-control-max-age": "86400",
   "content-type": "application/json; charset=utf-8",
