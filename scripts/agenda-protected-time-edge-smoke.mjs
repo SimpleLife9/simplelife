@@ -173,10 +173,20 @@ try {
   equal(invalidBearer.status, 401, "publishable key as Bearer");
 
   const createKey = newKey();
-  const createdResponse = await invoke(ownerA.accessToken, createKey, { action: "create", block: oneOff });
-  const created = await expectStatus(createdResponse, 201, "authenticated one-off Protected Time create");
+  // Force two requests to race before either receipt is committed. Each handler
+  // may generate a different provisional UUIDv7; the owner/key claim must still
+  // return one winning block identity to both callers.
+  const raceResponses = await Promise.all([
+    invoke(ownerA.accessToken, createKey, { action: "create", block: oneOff }),
+    invoke(ownerA.accessToken, createKey, { action: "create", block: oneOff }),
+  ]);
+  const raceResults = await Promise.all(raceResponses.map((response, index) =>
+    expectStatus(response, 201, "concurrent Protected Time create " + index)
+  ));
+  const created = raceResults[0];
   const blockId = created.blockId;
   assertUuid(blockId, UUID_V7_PATTERN, "created Protected Time id");
+  equal(raceResults[1].blockId, blockId, "concurrent callers receive one winning block id");
   equal(created.lifecycle, "active", "created lifecycle");
   equal(created.protectionMode, "hard", "created protection mode");
 
