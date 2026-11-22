@@ -391,6 +391,7 @@ BEGIN
       FROM public.task_schedule
       WHERE owner_user_id = p_owner_user_id
         AND schedule_status IN ('proposed', 'confirmed')
+        AND id <> p_task_schedule_id
     ),
     supplied AS (
       SELECT resource_type, id, updated_at
