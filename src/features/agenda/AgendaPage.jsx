@@ -292,7 +292,7 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
           startDate,
           endDateExclusive: addCalendarDays(endDate, 1),
         };
-      } else {
+      } else if (temporalKind === 'zoned_civil') {
         draftInput = {
           title,
           description,
@@ -307,6 +307,21 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
           endDisambiguation: 'earlier',
           startGapStrategy: 'next-valid',
           endGapStrategy: 'next-valid',
+        };
+      } else {
+        if (!editingEvent || !fixedStartsAt || !fixedEndsAt) {
+          throw new Error('Los eventos de instante fijo solo conservan su intervalo original al editar.');
+        }
+        draftInput = {
+          title,
+          description,
+          locationLabel,
+          locationKind: locationKind || null,
+          eventStatus: editingEvent.event_status,
+          temporalKind: 'fixed_instant',
+          startsAt: fixedStartsAt,
+          endsAt: fixedEndsAt,
+          sourceTimeZone: editingEvent.time_zone || null,
         };
       }
       const draft = createEventDraft(draftInput);
