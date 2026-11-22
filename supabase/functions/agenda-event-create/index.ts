@@ -3,12 +3,19 @@ import { handleRequest } from "./handler.ts";
 
 export { handleRequest, MAX_REQUEST_BYTES } from "./handler.ts";
 
-// Authentication is verified by @supabase/server before the handler runs.
-// The handler derives owner identity from ctx.userClaims and uses the admin
-// client only for the server-only idempotency receipt/RPC.
+// Keep the SDK's deeply generic SupabaseContext out of the domain handler's
+// inferred callback signature. The runtime context is narrowed at this single
+// authenticated adapter boundary; auth is still enforced by withSupabase.
+async function handleAuthenticatedEventCreate(
+  request: Request,
+  ctx: unknown,
+): Promise<Response> {
+  return handleRequest(request, ctx as Parameters<typeof handleRequest>[1]);
+}
+
 export const authenticatedHandler = withSupabase(
   { auth: "user" },
-  async (request, ctx) => await handleRequest(request, ctx),
+  handleAuthenticatedEventCreate,
 );
 
 if (import.meta.main) Deno.serve(authenticatedHandler);
