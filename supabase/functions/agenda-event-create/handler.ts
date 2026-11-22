@@ -134,9 +134,7 @@ export async function handleRequest(
       .maybeSingle();
     if (existing.error) return json({ error: "IDEMPOTENCY_LOOKUP_FAILED" }, 503);
     if (existing.data) {
-      const hashHex = Array.from(new Uint8Array(
-        await crypto.subtle.digest("SHA-256", new TextEncoder().encode(intent.canonicalPayload)),
-      )).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+      const hashHex = intent.payloadHash;
       const storedHash = existing.data.payload_hash instanceof Uint8Array
         ? Array.from(existing.data.payload_hash).map((byte: number) => byte.toString(16).padStart(2, "0")).join("")
         : typeof existing.data.payload_hash === "string"
