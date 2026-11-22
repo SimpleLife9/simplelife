@@ -17,6 +17,7 @@ import { createEventDraft } from './domain/event.js';
 import { formatInstantInTimeZone, isSupportedTimeZone } from './domain/temporal.js';
 import './AgendaPage.css';
 import { ProtectedTimePage } from './ProtectedTimePage.jsx';
+import { TaskSchedulePage } from './TaskSchedulePage.jsx';
 import './AgendaMutations.css';
 
 const DEFAULT_TIME_ZONE = 'America/Havana';
@@ -888,13 +889,18 @@ export function AgendaPage(props) {
         <button type="button" aria-pressed={panel === 'calendar'} onClick={() => setPanel('calendar')}>
           Calendario
         </button>
+        <button type="button" aria-pressed={panel === 'tasks'} onClick={() => setPanel('tasks')}>
+          Tareas programadas
+        </button>
         <button type="button" aria-pressed={panel === 'protected'} onClick={() => setPanel('protected')}>
           Tiempo protegido
         </button>
       </nav>
       {panel === 'calendar'
         ? <AgendaCalendarPage {...props} />
-        : <ProtectedTimePage {...props} />}
+        : panel === 'tasks'
+          ? <TaskSchedulePage {...props} />
+          : <ProtectedTimePage {...props} />}
     </div>
   );
 }
