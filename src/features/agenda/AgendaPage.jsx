@@ -16,6 +16,7 @@ import {
 import { createEventDraft } from './domain/event.js';
 import { formatInstantInTimeZone, isSupportedTimeZone } from './domain/temporal.js';
 import './AgendaPage.css';
+import './AgendaMutations.css';
 
 const DEFAULT_TIME_ZONE = 'America/Havana';
 const VIEW_OPTIONS = [
@@ -612,7 +613,7 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
                 </label>
                 <label className="agenda-field">
                   <span>Estado</span>
-                  <input value="Confirmado" readOnly />
+                  <input value={statusLabel(editingEvent?.event_status || 'confirmed')} readOnly />
                 </label>
               </div>
               {temporalKind === 'all_day' ? (
