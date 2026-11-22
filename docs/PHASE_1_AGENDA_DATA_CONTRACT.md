@@ -326,3 +326,16 @@ New public tables are not automatically exposed to the Data API on existing Supa
 ### Still not authorized
 
 This refresh is a design/read-only milestone only. It created no SQL file, migration, table, function, trigger, grant, policy, secret, row or deployment. The first database migration and any Edge Function deployment remain separate Human Gates.
+
+
+## 14. Event-create idempotency — implementation contract (22 November 2026)
+
+The implementation contract is recorded in [AGENDA_EVENT_CREATE_IDEMPOTENCY.md](./AGENDA_EVENT_CREATE_IDEMPOTENCY.md).
+
+- A UUIDv4 idempotency key is generated per intentional create action and is separate from the server-generated Event UUIDv7. Retries of that action reuse the key.
+- Scope is owner profile + key. The trusted Event writer derives the owner from the verified user JWT and never accepts a client owner ID.
+- SHA-256 is computed server-side over the canonical normalized user intent. For zoned-civil Events, the hash includes the requested IANA zone, original local wall times and fold/gap choices, but excludes resolved UTC instants and TZDB/resolver metadata so an uncertain retry after a rules update still replays the original committed Event.
+- Same owner/key/hash returns the original Event ID and immutable creation timestamp without another Event insert or audit append. Same owner/key with another hash returns conflict (HTTP 409). The same key may be independently used by another owner.
+- The private ledger stores no Event text or response snapshot and has no arbitrary expiry window. A foreign key retains the reservation for as long as the Event row exists.
+- The owner-scoped key reservation, Event insert and audit append share one PostgreSQL transaction. An audit append failure rolls all of them back. Direct service-role Event INSERT is revoked; Event creates must use the backend-only atomic RPC.
+- The code and SQL migration are source only; CI applies them only to ephemeral local Postgres. No hosted migration or writer deployment is authorized by this contract.
