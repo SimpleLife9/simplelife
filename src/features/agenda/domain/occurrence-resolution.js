@@ -2,7 +2,7 @@ import { parseCalendarDate } from './temporal.js';
 
 export const IANA_RANGE_BATCH_LIMIT = 25;
 
-const LOCAL_DATE_TIME_PATTERN = /^(\\d{4}-\\d{2}-\\d{2})T(\\d{2}):(\\d{2})(?::(\\d{2})(?:\\.(\\d{1,3}))?)?$/;
+const LOCAL_DATE_TIME_PATTERN = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/;
 
 function assert(condition, message) {
   if (!condition) throw new RangeError(message);
@@ -67,8 +67,10 @@ export function planOccurrenceResolutionBatches({
     assert(!seen.has(occurrenceKey), 'Duplicate occurrenceKey in resolution plan: ' + occurrenceKey);
     seen.add(occurrenceKey);
 
+    assert(occurrence.status == null || occurrence.status === 'scheduled', 'Only scheduled future occurrences may be sent for new time resolution.');
+    const originalLocalDate = parseCalendarDate(occurrence.originalLocalDate).key;
+
     if (temporalKind === 'all_day') {
-      const originalLocalDate = parseCalendarDate(occurrence.originalLocalDate).key;
       const actualLocalDate = parseCalendarDate(occurrence.actualLocalDate ?? originalLocalDate).key;
       allDayOccurrences.push(Object.freeze({
         occurrenceKey,
@@ -83,7 +85,7 @@ export function planOccurrenceResolutionBatches({
     assert(temporalKind === 'zoned_civil', 'Occurrence temporalKind must be all_day or zoned_civil.');
     assert(typeof occurrence.timeZone === 'string' && occurrence.timeZone.trim().length > 0, 'Timed occurrence requires an IANA timeZone.');
     assert(Number.isInteger(occurrence.durationMinutes) && occurrence.durationMinutes > 0, 'Timed occurrence requires a positive durationMinutes.');
-    const actualLocalDate = parseCalendarDate(occurrence.actualLocalDate ?? occurrence.originalLocalDate).key;
+    const actualLocalDate = parseCalendarDate(occurrence.actualLocalDate ?? originalLocalDate).key;
     assert(typeof occurrence.actualLocalTime === 'string', 'Timed occurrence requires actualLocalTime.');
     const actualLocalTime = occurrence.actualLocalTime;
     const startLocalDateTime = normalizeLocalDateTime(`${actualLocalDate}T${actualLocalTime}`, 'start.localDateTime');
@@ -136,12 +138,13 @@ export function planOccurrenceResolutionBatches({
 export function joinOccurrenceResolutionBatch(batch, response) {
   assert(batch && typeof batch === 'object' && Array.isArray(batch.occurrenceKeys), 'A planned resolver batch is required.');
   assert(batch.payload && Array.isArray(batch.payload.ranges), 'Planned batch payload is missing.');
+  assert(batch.payload.ranges.length === batch.occurrenceKeys.length, 'Planned batch keys and ranges must have the same length.');
   assert(response && typeof response === 'object' && !Array.isArray(response), 'Resolver response must be an object.');
   assert(response.authoritative === true, 'Resolver response must be authoritative.');
   assert(response.rulesSource === 'iana-tzdb', 'Resolver response must use the pinned IANA TZDB source.');
   assert(typeof response.rulesVersion === 'string' && response.rulesVersion.length > 0, 'Resolver response requires a TZDB version.');
   assert(typeof response.resolverVersion === 'string' && response.resolverVersion.length > 0, 'Resolver response requires a resolver version.');
-  assert(response.count === batch.occurrenceKeys.length, 'Resolver response count does not match the planned batch.');
+  assert(Number.isInteger(response.count) && response.count === batch.occurrenceKeys.length, 'Resolver response count does not match the planned batch.');
   assert(Array.isArray(response.results) && response.results.length === batch.occurrenceKeys.length,
     'Resolver response results do not match the planned batch size.');
 
@@ -157,11 +160,21 @@ export function joinOccurrenceResolutionBatch(batch, response) {
       'Resolver result start does not match the planned occurrence order.');
     assert(result.end?.requestedLocalDateTime === range.end.localDateTime,
       'Resolver result end does not match the planned occurrence order.');
+    assert(result.start.rulesVersion === response.rulesVersion
+      && result.end.rulesVersion === response.rulesVersion,
+    'Resolver endpoint TZDB versions differ from batch metadata.');
+    assert(result.start.resolverVersion === response.resolverVersion
+      && result.end.resolverVersion === response.resolverVersion,
+    'Resolver endpoint resolver versions differ from batch metadata.');
+    assert(result.start.timeZone === result.timeZone && result.end.timeZone === result.timeZone,
+      'Resolver endpoint canonical timezones differ from range metadata.');
     const startsAt = Date.parse(result.startsAt);
     const endsAt = Date.parse(result.endsAt);
     assert(Number.isFinite(startsAt) && Number.isFinite(endsAt) && endsAt > startsAt,
       'Resolver result must contain a positive, valid UTC interval.');
     assert(result.start && result.end, 'Resolver result must include endpoint resolution metadata.');
+    assert(result.start.instant === result.startsAt && result.end.instant === result.endsAt,
+      'Resolver endpoint instants differ from the returned UTC interval.');
 
     return Object.freeze({
       occurrenceKey: batch.occurrenceKeys[index],
