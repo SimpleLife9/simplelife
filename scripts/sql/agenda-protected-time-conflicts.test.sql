@@ -6,7 +6,7 @@ INSERT INTO auth.users (
   id, instance_id, aud, role, email, encrypted_password,
   email_confirmed_at, raw_app_meta_data, raw_user_meta_data
 ) VALUES (
-  'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+  '12121212-1212-4212-8212-121212121212',
   '00000000-0000-0000-0000-000000000000',
   'authenticated', 'authenticated', 'agenda-conflict-audit@example.invalid',
   '', now(), '{"provider":"email","providers":["email"]}'::jsonb, '{}'::jsonb
@@ -16,7 +16,7 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.user_profile (id, auth_user_id, display_name)
 VALUES (
   '019a0000-0000-7000-8000-000000000041',
-  'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+  '12121212-1212-4212-8212-121212121212',
   'Conflict audit owner'
 )
 ON CONFLICT (id) DO NOTHING;
