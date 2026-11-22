@@ -281,6 +281,78 @@ Deno.test("authenticated edit invokes only the atomic owner-scoped mutation RPC 
   assertEquals(patch.owner_user_id, undefined, "no owner identity in patch");
 });
 
+Deno.test("a detail-only Event edit preserves the original Protected Time consent timestamp", async () => {
+  const blockId = "019a0000-0000-7000-8000-000000000211";
+  const blockUpdatedAt = "2026-11-20T10:00:00.000000+00:00";
+  const occurrenceStartsAt = "2026-12-24T06:00:00.000Z";
+  const priorConsent = {
+    policyVersion: "protected-time-decision-v1",
+    blockId,
+    blockUpdatedAt,
+    protectionMode: "hard",
+    occurrenceDate: null,
+    occurrenceStartsAt,
+    occurrenceEndsAt: "2026-12-24T07:00:00.000Z",
+    overlapStartsAt: occurrenceStartsAt,
+    overlapEndsAt: "2026-12-24T07:00:00.000Z",
+    timeZone: "America/Havana",
+    decision: "override_hard",
+    consentedAt: "2026-11-20T12:00:00.000Z",
+  };
+  const currentEvent = {
+    temporal_kind: "all_day",
+    start_date: "2026-12-24",
+    end_date_exclusive: "2026-12-26",
+    starts_at: null,
+    ends_at: null,
+    protected_time_decisions: [priorConsent],
+  };
+  const protectedBlock = {
+    id: blockId,
+    updated_at: blockUpdatedAt,
+    label: "Sueño protegido",
+    category: "salud",
+    protection_mode: "hard",
+    pattern_kind: "one_off",
+    time_zone: "America/Havana",
+    starts_at: occurrenceStartsAt,
+    ends_at: "2026-12-24T07:00:00.000Z",
+    archived_at: null,
+    deleted_at: null,
+  };
+  const { ctx, calls } = mockContext({
+    currentEvent,
+    protectedBlocks: [protectedBlock],
+  });
+  const response = await handleRequest(request({
+    eventId: EVENT_ID,
+    expectedUpdatedAt: VERSION,
+    action: "edit",
+    event: {
+      title: "Reunión actualizada",
+      description: "Sólo cambió la descripción",
+      locationLabel: "Sala A",
+      locationKind: "physical",
+      eventStatus: "confirmed",
+      temporalKind: "all_day",
+      startDate: "2026-12-24",
+      endDateExclusive: "2026-12-26",
+    },
+  }), ctx, { now: () => "2026-11-22T18:10:00.000Z" });
+
+  assertEquals(response.status, 200, "detail-only edit succeeds with existing consent");
+  const args = calls.rpcArgs as Record<string, unknown>;
+  const patch = args.p_event_patch as Record<string, unknown>;
+  const decisions = patch.protected_time_decisions as Array<Record<string, unknown>>;
+  assertEquals(decisions.length, 1, "one still-current overlap decision remains");
+  assertEquals(decisions[0].consentedAt, priorConsent.consentedAt,
+    "original user consent timestamp is preserved");
+  assertEquals(decisions[0].blockUpdatedAt, blockUpdatedAt,
+    "decision stays tied to the exact Protected Time version");
+  assertEquals((patch.protected_time_snapshot as unknown[]).length, 1,
+    "current full owner snapshot accompanies the Event write");
+});
+
 Deno.test("finish action is a distinct terminal Event transition", async () => {
   const { ctx, calls } = mockContext({
     rpcResult: [{
