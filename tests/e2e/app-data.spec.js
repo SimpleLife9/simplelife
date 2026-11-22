@@ -53,6 +53,8 @@ async function mockSupabaseSession(page, initialData = {}) {
   const insertedAgendaEvents = [];
   const idempotencyRequests = [];
   const mutationRequests = [];
+  const protectedTimeConsentRequests = [];
+  let requireProtectedTimeConsent = initialData.eventProtectedTimeConflict === true;
   const taskRows = [...(initialData.tasks || [])];
   const projects = [...(initialData.projects || [])];
   const insertedProjects = [];
@@ -771,7 +773,39 @@ async function mockSupabaseSession(page, initialData = {}) {
       const requestBody = request.postDataJSON();
       const event = requestBody.event;
       const key = request.headers()['idempotency-key'] || '';
-      idempotencyRequests.push({ key, event });
+      idempotencyRequests.push({ key, event, conflictDecisions: requestBody.conflictDecisions || [] });
+      if (requireProtectedTimeConsent && !(requestBody.conflictDecisions || []).length) {
+        await json(409, {
+          error: 'PROTECTED_TIME_CONFLICTS',
+          conflicts: [
+            {
+              blockId: '0190f47a-7b2c-7abc-8def-0123456789b2',
+              label: 'Sueño',
+              category: 'Personal',
+              protectionMode: 'hard',
+              patternKind: 'one_off',
+              timeZone: 'America/Havana',
+              blockUpdatedAt: '2026-11-22T18:00:00.123456Z',
+              occurrences: [{ startsAt: '2026-11-23T15:00:00.000Z', endsAt: '2026-11-23T16:00:00.000Z' }],
+            },
+            {
+              blockId: '0190f47a-7b2c-7abc-8def-0123456789b3',
+              label: 'Lectura',
+              category: 'Personal',
+              protectionMode: 'flexible',
+              patternKind: 'weekly',
+              timeZone: 'America/Havana',
+              blockUpdatedAt: '2026-11-22T18:01:00.123456Z',
+              occurrences: [{ startsAt: '2026-11-23T15:30:00.000Z', endsAt: '2026-11-23T16:30:00.000Z' }],
+            },
+          ],
+        });
+        return;
+      }
+      if (requireProtectedTimeConsent) {
+        protectedTimeConsentRequests.push({ key, conflictDecisions: requestBody.conflictDecisions });
+        requireProtectedTimeConsent = false;
+      }
       const createdAt = '2026-11-22T18:00:00.000Z';
       const row = {
         id: '0190f47a-7b2c-7abc-8def-0123456789be',
@@ -810,7 +844,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     await json(404, { message: `Unexpected mocked Supabase request: ${method} ${url.pathname}` });
   });
 
-  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, protectedTimeBlocks, protectedTimeMutationRequests, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
+  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, protectedTimeBlocks, protectedTimeMutationRequests, protectedTimeConsentRequests, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
 }
 
 test('mock-authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
@@ -3054,4 +3088,73 @@ test('Tiempo protegido funciona en móvil a 390px sin desbordar el documento', a
   }));
   expect(dimensions.document).toBeLessThanOrEqual(dimensions.viewport + 1);
   await expect(page.getByRole('button', { name: 'Nuevo bloque' })).toBeVisible();
+});
+
+
+test('Agenda requires explicit consent for every hard and flexible Protected Time overlap before creating an Event', async ({ page }) => {
+  const today = await todayInBrowserHavana(page);
+  const tomorrow = await page.evaluate((value) => {
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
+  }, today);
+  const { insertedAgendaEvents, idempotencyRequests, protectedTimeConsentRequests } = await mockSupabaseSession(page, {
+    eventProtectedTimeConflict: true,
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.getByRole('navigation', { name: 'Navegación principal' })
+    .getByRole('button', { name: /Agenda/ }).click();
+
+  await page.getByRole('button', { name: 'Nuevo evento' }).click();
+  const composer = page.getByRole('dialog', { name: 'Crear evento' });
+  await composer.getByLabel('Nombre del evento').fill('Reunión sobre horario protegido');
+  await composer.getByLabel('Desde', { exact: true }).fill(today);
+  await composer.getByLabel('Hasta (incluido)', { exact: true }).fill(today);
+  await composer.getByRole('button', { name: 'Guardar evento' }).click();
+
+  const consent = page.getByRole('alertdialog', { name: 'Este horario coincide con tiempo protegido' });
+  await expect(consent).toBeVisible();
+  await expect(consent.getByText('Sueño')).toBeVisible();
+  await expect(consent.getByText('Lectura')).toBeVisible();
+  const confirm = consent.getByRole('button', { name: 'Confirmar y guardar' });
+  await expect(confirm).toBeDisabled();
+
+  const checkboxes = consent.getByRole('checkbox');
+  await checkboxes.nth(0).check();
+  await expect(confirm).toBeDisabled();
+  await checkboxes.nth(1).check();
+  await expect(confirm).toBeEnabled();
+  await confirm.click();
+
+  await expect(page.getByText('Evento guardado en Agenda.')).toBeVisible();
+  await expect(consent).toHaveCount(0);
+  await expect(page.getByText('Reunión sobre horario protegido')).toBeVisible();
+  expect(insertedAgendaEvents).toHaveLength(1);
+  expect(idempotencyRequests).toHaveLength(2);
+  expect(idempotencyRequests[0].key).toBe(idempotencyRequests[1].key);
+  expect(idempotencyRequests[0].conflictDecisions).toEqual([]);
+  expect(idempotencyRequests[1].conflictDecisions).toEqual([
+    {
+      blockId: '0190f47a-7b2c-7abc-8def-0123456789b2',
+      blockUpdatedAt: '2026-11-22T18:00:00.123456Z',
+      protectionMode: 'hard',
+      decision: 'override',
+    },
+    {
+      blockId: '0190f47a-7b2c-7abc-8def-0123456789b3',
+      blockUpdatedAt: '2026-11-22T18:01:00.123456Z',
+      protectionMode: 'flexible',
+      decision: 'keep',
+    },
+  ]);
+  expect(protectedTimeConsentRequests).toHaveLength(1);
+  expect(insertedAgendaEvents[0]).toMatchObject({
+    owner_user_id: profile.id,
+    title: 'Reunión sobre horario protegido',
+    temporal_kind: 'all_day',
+    start_date: today,
+    end_date_exclusive: tomorrow,
+  });
 });
