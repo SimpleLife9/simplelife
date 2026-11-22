@@ -127,6 +127,9 @@ jobs:
       - name: Verify Event Create JWT gate in the actual local Edge Runtime
         run: node scripts/agenda-event-create-edge-smoke.mjs
 
+      - name: Verify authenticated Event mutation lifecycle in the actual local Edge Runtime
+        run: node scripts/agenda-event-mutate-edge-smoke.mjs
+
       - name: Stop local Supabase stack
         if: always()
         run: |
