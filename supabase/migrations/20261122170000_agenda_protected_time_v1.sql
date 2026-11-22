@@ -72,8 +72,8 @@ CREATE TABLE public.protected_time_block (
     CHECK (archived_at IS NULL OR deleted_at IS NULL),
   CONSTRAINT protected_time_block_resolver_check
     CHECK (
-      resolver_metadata->>'rulesSource' = 'iana-tzdb'
-      AND resolver_metadata->>'authoritative' = 'true'
+      coalesce(resolver_metadata->>'rulesSource', '') = 'iana-tzdb'
+      AND coalesce(resolver_metadata->>'authoritative', '') = 'true'
       AND length(coalesce(resolver_metadata->>'rulesVersion', '')) > 0
       AND length(coalesce(resolver_metadata->>'resolverVersion', '')) > 0
     ),
@@ -82,6 +82,8 @@ CREATE TABLE public.protected_time_block (
       pattern_kind = 'one_off'
       AND start_local IS NOT NULL
       AND end_local IS NOT NULL
+      AND isfinite(start_local)
+      AND isfinite(end_local)
       AND starts_at IS NOT NULL
       AND ends_at IS NOT NULL
       AND isfinite(starts_at)
