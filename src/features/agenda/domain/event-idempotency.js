@@ -1,4 +1,5 @@
 // Stable, server-recomputable request identity for one-off Event creation.
+import { normalizeProtectedTimeConflictDecisions } from './protected-time.js';
 // This is not an Event ID and does not authorize a database write.
 
 export const EVENT_CREATE_INTENT_VERSION = 'event-create-v1';
@@ -123,8 +124,12 @@ function createIntentTuple(eventDraft) {
  * This function intentionally excludes owner/actor IDs, Event IDs, timestamps,
  * lifecycle columns, and authoritative resolver outputs.
  */
-export function buildEventCreateIntent(eventDraft) {
-  const canonicalPayload = JSON.stringify(createIntentTuple(eventDraft));
+export function buildEventCreateIntent(eventDraft, conflictDecisions = []) {
+  const basePayload = JSON.stringify(createIntentTuple(eventDraft));
+  const decisions = normalizeProtectedTimeConflictDecisions(conflictDecisions);
+  const canonicalPayload = decisions.length
+    ? JSON.stringify([basePayload, 'protected-time-consent-v1', decisions])
+    : basePayload;
   return Object.freeze({
     version: EVENT_CREATE_INTENT_VERSION,
     canonicalPayload,
@@ -135,9 +140,9 @@ export function buildEventCreateIntent(eventDraft) {
  * Compute the server-recomputable SHA-256 hash for an Event create intent.
  * Uses the Web Crypto API available in browsers, Deno Edge Runtime and Node.
  */
-export async function hashEventCreateIntent(eventDraft, cryptoProvider = globalThis.crypto) {
+export async function hashEventCreateIntent(eventDraft, cryptoProvider = globalThis.crypto, conflictDecisions = []) {
   assert(cryptoProvider?.subtle?.digest, 'Web Crypto SHA-256 is unavailable.');
-  const intent = buildEventCreateIntent(eventDraft);
+  const intent = buildEventCreateIntent(eventDraft, conflictDecisions);
   const digest = await cryptoProvider.subtle.digest(
     'SHA-256',
     new TextEncoder().encode(intent.canonicalPayload),
