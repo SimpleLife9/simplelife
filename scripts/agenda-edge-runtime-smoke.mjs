@@ -118,10 +118,13 @@ try {
     end: { localDateTime: "2026-11-01T01:45", disambiguation: "later" },
   });
 
+  // The first authenticated invocation may cold-start the local Edge Runtime
+  // and load the pinned TZDB bundle. Keep the request bounded, but allow the
+  // same 15-second window already used by the negative JWT checks below.
   const valid = await request({
     authorization: "Bearer " + session.access_token,
     "content-type": "application/json",
-  }, rangePayload);
+  }, rangePayload, 15000);
   const validBody = await valid.text();
   if (valid.status !== 200) {
     fail("Auth-issued user JWT response status: expected 200, received " + valid.status
