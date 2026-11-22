@@ -138,6 +138,8 @@ function createCommonRecord({ eventDraft, eventId, ownerProfileId, timestamp }) 
  *   now: string,
  *   protectedTimeDecisions?: readonly Record<string, unknown>[],
  *   protectedTimeSnapshot?: readonly { id: string; updated_at: string }[],
+ *   taskScheduleDecisions?: readonly Record<string, unknown>[],
+ *   taskScheduleSnapshot?: readonly { id: string; updated_at: string }[],
  * }} input
  */
 export function buildEventInsertRecord({
@@ -147,6 +149,8 @@ export function buildEventInsertRecord({
   now,
   protectedTimeDecisions = /** @type {Record<string, unknown>[]} */ ([]),
   protectedTimeSnapshot = /** @type {{ id: string; updated_at: string }[]} */ ([]),
+  taskScheduleDecisions = /** @type {Record<string, unknown>[]} */ ([]),
+  taskScheduleSnapshot = /** @type {{ id: string; updated_at: string }[]} */ ([]),
 }) {
   const timestamp = normalizeTimestamp(now);
   const record = createCommonRecord({
@@ -169,6 +173,21 @@ export function buildEventInsertRecord({
   // Transient RPC evidence: the SQL writer compares this full owner snapshot after
   // acquiring the same advisory lock as Protected Time mutations. It is not stored.
   record.protected_time_snapshot = protectedTimeSnapshot.map((item) => ({
+    id: item.id.toLowerCase(),
+    updated_at: item.updated_at,
+  }));
+  assert(Array.isArray(taskScheduleDecisions) && taskScheduleDecisions.length <= 500,
+    'taskScheduleDecisions must be an array with at most 500 entries.');
+  assert(taskScheduleDecisions.every((item) => item && typeof item === 'object' && !Array.isArray(item)),
+    'Every TaskSchedule decision must be an object.');
+  assert(Array.isArray(taskScheduleSnapshot) && taskScheduleSnapshot.length <= 500,
+    'taskScheduleSnapshot must be an array with at most 500 entries.');
+  assert(taskScheduleSnapshot.every((item) => item && typeof item.id === 'string'
+    && UUID_V7_PATTERN.test(item.id) && typeof item.updated_at === 'string'
+    && Number.isFinite(Date.parse(item.updated_at))),
+  'Every TaskSchedule snapshot entry must contain UUIDv7 and updated_at.');
+  record.task_schedule_decisions = taskScheduleDecisions.map((item) => ({ ...item }));
+  record.task_schedule_snapshot = taskScheduleSnapshot.map((item) => ({
     id: item.id.toLowerCase(),
     updated_at: item.updated_at,
   }));
