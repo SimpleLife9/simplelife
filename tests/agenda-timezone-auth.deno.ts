@@ -102,6 +102,44 @@ Deno.test("user auth wrapper accepts a signed user JWT and rejects API keys or i
     const resolved = await valid.json() as Record<string, unknown>;
     equal(resolved.instant, "2026-11-01T05:30:00.000Z", "valid user JWT reaches resolver");
 
+    const batchPayload = JSON.stringify({
+      ranges: [
+        {
+          timeZone: "America/Havana",
+          start: { localDateTime: "2026-10-30T09:00" },
+          end: { localDateTime: "2026-10-30T10:00" },
+        },
+        {
+          timeZone: "America/New_York",
+          start: { localDateTime: "2026-11-02T09:00" },
+          end: { localDateTime: "2026-11-02T10:30" },
+        },
+      ],
+    });
+    const validBatch = await authenticatedHandler(new Request(URL, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer " + token,
+        apikey: PUBLISHABLE_KEY,
+        "content-type": "application/json",
+      },
+      body: batchPayload,
+    }));
+    equal(validBatch.status, 200, "valid user JWT batch status");
+    const batchResult = await validBatch.json() as {
+      count: number;
+      results: Array<{ startsAt: string; endsAt: string }>;
+      rulesVersion: string;
+      authoritative: boolean;
+    };
+    equal(batchResult.count, 2, "authenticated batch count");
+    equal(batchResult.results[0].startsAt, "2026-10-30T13:00:00.000Z", "authenticated batch first start");
+    equal(batchResult.results[0].endsAt, "2026-10-30T14:00:00.000Z", "authenticated batch first end");
+    equal(batchResult.results[1].startsAt, "2026-11-02T14:00:00.000Z", "authenticated batch second start");
+    equal(batchResult.results[1].endsAt, "2026-11-02T15:30:00.000Z", "authenticated batch second end");
+    equal(batchResult.rulesVersion, "2026f", "authenticated batch TZDB version");
+    equal(batchResult.authoritative, true, "authenticated batch authoritative flag");
+
     const apiKeyAsBearer = await authenticatedHandler(new Request(URL, {
       method: "POST",
       headers: {
