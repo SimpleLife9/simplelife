@@ -285,7 +285,7 @@ The pure domain module `src/features/agenda/domain/event.js` defines the three a
 
 The resolver promotion check verifies requested zone and wall values, canonical timezone, authoritative IANA source, shared TZDB and resolver versions, per-endpoint version/source metadata, requested earlier/later fold behavior, endpoint instant equality and a positive UTC interval. Runtime `Intl` preview data cannot be promoted to a canonical persisted interval.
 
-Direct user-created Events default to `confirmed`; `preparing` and `proposed` remain valid draft states. `cancelled` and `finished` are lifecycle transitions, not new-record creation states. Lifecycle remains separate from functional status. The input rejects owner/creator, ID, audit, timestamp and other server-owned/unknown fields.
+Direct user-created Events default to `confirmed`; `preparing` and `proposed` remain valid draft states. `cancelled` and `finished` are valid functional statuses for later Event transitions, not initial creation states. Lifecycle remains a separate dimension, initialized as active. The input rejects owner/creator, ID, audit, timestamp and other server-owned/unknown fields.
 
 Technical input bounds in this domain slice: title 200 characters, description 5,000, location label 500. They are validation safeguards for this implementation, not database constraints or a change to product behavior.
 
