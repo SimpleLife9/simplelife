@@ -145,8 +145,8 @@ export function buildEventInsertRecord({
   eventId,
   ownerProfileId,
   now,
-  protectedTimeDecisions = [],
-  protectedTimeSnapshot = [],
+  protectedTimeDecisions = /** @type {Record<string, unknown>[]} */ ([]),
+  protectedTimeSnapshot = /** @type {{ id: string; updated_at: string }[]} */ ([]),
 }) {
   const timestamp = normalizeTimestamp(now);
   const record = createCommonRecord({
