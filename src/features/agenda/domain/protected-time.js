@@ -443,3 +443,40 @@ export async function hashProtectedTimeMutationIntent({
     payloadHash,
   });
 }
+
+
+const PROTECTED_TIME_CONFLICT_DECISION_FIELDS = Object.freeze([
+  'blockId', 'blockUpdatedAt', 'protectionMode', 'decision',
+]);
+
+/**
+ * Normalize the explicit, per-block consent that is bound to one Event write.
+ * Hard blocks require an explicit override; flexible blocks require an explicit
+ * choice to keep the overlap. "Reschedule" is a UI cancellation, never a write.
+ */
+export function normalizeProtectedTimeConflictDecisions(value = []) {
+  assert(Array.isArray(value), 'conflictDecisions must be an array.');
+  assert(value.length <= 50, 'conflictDecisions may contain at most 50 blocks.');
+  const seen = new Set();
+  const normalized = value.map((item) => {
+    assert(item && typeof item === 'object' && !Array.isArray(item),
+      'Each conflict decision must be an object.');
+    const keys = Object.keys(item).sort();
+    assert(keys.length === PROTECTED_TIME_CONFLICT_DECISION_FIELDS.length
+      && keys.every((key, index) => key === [...PROTECTED_TIME_CONFLICT_DECISION_FIELDS].sort()[index]),
+    'A conflict decision contains missing or unsupported fields.');
+    const blockId = normalizeProtectedTimeBlockId(item.blockId);
+    assert(!seen.has(blockId), 'A block can have only one conflict decision.');
+    seen.add(blockId);
+    const blockUpdatedAt = normalizeProtectedTimeExpectedVersion(item.blockUpdatedAt);
+    const protectionMode = item.protectionMode;
+    assert(PROTECTION_MODES.includes(protectionMode), 'Conflict decision protectionMode is invalid.');
+    const decision = item.decision;
+    assert((protectionMode === 'hard' && decision === 'override')
+      || (protectionMode === 'flexible' && decision === 'keep'),
+    'Hard blocks require override and flexible blocks require keep.');
+    return Object.freeze({ blockId, blockUpdatedAt, protectionMode, decision });
+  });
+  normalized.sort((a, b) => a.blockId.localeCompare(b.blockId));
+  return Object.freeze(normalized);
+}
