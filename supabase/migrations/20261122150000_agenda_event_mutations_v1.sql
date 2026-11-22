@@ -136,7 +136,7 @@ BEGIN
   END IF;
   v_payload_hash := decode(p_payload_hash_hex, 'hex');
 
-  IF p_mutation IS NULL OR p_mutation NOT IN ('edit', 'cancel', 'reopen', 'archive', 'restore', 'trash') THEN
+  IF p_mutation IS NULL OR p_mutation NOT IN ('edit', 'cancel', 'reopen', 'finish', 'archive', 'restore', 'trash') THEN
     RAISE EXCEPTION 'Unsupported Event mutation'
       USING ERRCODE = '22023';
   END IF;
@@ -295,6 +295,17 @@ BEGIN
         ELSE
           UPDATE public.calendar_event
           SET event_status = 'confirmed'
+          WHERE id = p_event_id AND owner_user_id = p_owner_user_id;
+          v_status := 200;
+        END IF;
+
+      WHEN 'finish' THEN
+        IF v_lifecycle <> 'active' OR v_event.event_status <> 'confirmed' THEN
+          v_status := 409;
+          v_response := jsonb_build_object('error', 'EVENT_CANNOT_BE_FINISHED');
+        ELSE
+          UPDATE public.calendar_event
+          SET event_status = 'finished'
           WHERE id = p_event_id AND owner_user_id = p_owner_user_id;
           v_status := 200;
         END IF;
