@@ -16,6 +16,7 @@ import {
 import { createEventDraft } from './domain/event.js';
 import { formatInstantInTimeZone, isSupportedTimeZone } from './domain/temporal.js';
 import './AgendaPage.css';
+import { ProtectedTimePage } from './ProtectedTimePage.jsx';
 import './AgendaMutations.css';
 
 const DEFAULT_TIME_ZONE = 'America/Havana';
@@ -133,7 +134,7 @@ function EventChip({ event, timeZone, onClick, compact = false }) {
   );
 }
 
-export function AgendaPage({ profile, refreshKey, runAction, busy }) {
+function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [localError, setLocalError] = useState('');
@@ -733,6 +734,26 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
           </section>
         </div>
       )}
+    </div>
+  );
+}
+
+
+export function AgendaPage(props) {
+  const [panel, setPanel] = useState('calendar');
+  return (
+    <div className="agenda-shell">
+      <nav className="agenda-panel-switch" aria-label="Secciones de Agenda">
+        <button type="button" aria-pressed={panel === 'calendar'} onClick={() => setPanel('calendar')}>
+          Calendario
+        </button>
+        <button type="button" aria-pressed={panel === 'protected'} onClick={() => setPanel('protected')}>
+          Tiempo protegido
+        </button>
+      </nav>
+      {panel === 'calendar'
+        ? <AgendaCalendarPage {...props} />
+        : <ProtectedTimePage {...props} />}
     </div>
   );
 }
