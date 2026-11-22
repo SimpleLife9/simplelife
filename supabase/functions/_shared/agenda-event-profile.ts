@@ -37,7 +37,8 @@ interface ProfileQueryResult {
 
 interface ProfileQuery {
   eq(column: string, value: string): {
-    maybeSingle(): Promise<ProfileQueryResult>;
+    // Supabase Postgrest builders are PromiseLike (thenable), not native Promises.
+    maybeSingle(): PromiseLike<ProfileQueryResult>;
   };
 }
 
