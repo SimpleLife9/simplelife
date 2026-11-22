@@ -268,9 +268,11 @@ export async function assessOwnerTaskScheduleConflicts({
     ...protectedBlocks.map((item: Record<string, unknown>) => ({
       resource_type: "protected_time_block", id: item.id, updated_at: item.updated_at,
     })),
-    ...schedules.map((item: Record<string, unknown>) => ({
-      resource_type: "task_schedule", id: item.id, updated_at: item.updated_at,
-    })),
+    ...schedules
+      .filter((item: Record<string, unknown>) => item.id !== taskScheduleId)
+      .map((item: Record<string, unknown>) => ({
+        resource_type: "task_schedule", id: item.id, updated_at: item.updated_at,
+      })),
   ].sort((a, b) => String(a.resource_type).localeCompare(String(b.resource_type))
     || String(a.id).localeCompare(String(b.id)));
 
