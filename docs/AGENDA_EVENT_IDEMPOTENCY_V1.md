@@ -83,7 +83,7 @@ The next database implementation must add a server-only \`public.event_create_re
 | \`response_event_status\` | Original creation status |
 | \`created_at\` | Server timestamp for the ledger receipt |
 
-Primary/unique identity is \`(owner_user_id, idempotency_key)\`; \`result_event_id\` is also unique. Do not store the original JSON body, title, description, location, local timestamps or a full Event snapshot in this ledger. It is an idempotency receipt, not a second Event store.
+Primary/unique identity is \`(owner_user_id, idempotency_key)\`; \`result_event_id\` is also unique. Do not store the original JSON body, title, description, location, local timestamps or a full Event snapshot in this ledger. It is an idempotency receipt, not a second Event store. `result_event_id` is a receipt value, not a cascading foreign key to `calendar_event`; retaining the minimal receipt after a physical Event purge is what prevents a very late retry from recreating the same operation.
 
 The record is retained while the owner profile exists, including after an Event is moved to trash or permanently purged. This small tombstone prevents a very late offline retry from creating a second Event. Account deletion must remove its idempotency receipts as part of the same approved account-purge procedure. The ledger has RLS enabled, no policy or table privileges for \`anon\` or \`authenticated\`, and only the trusted server role receives the minimum SELECT/INSERT/UPDATE privileges. No DELETE, TRUNCATE, browser access, generic client RPC or audit INSERT is granted.
 
