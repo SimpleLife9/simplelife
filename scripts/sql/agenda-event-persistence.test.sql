@@ -1,6 +1,6 @@
 
--- Ephemeral CI integration test for the first Agenda Event persistence migration.
--- Run only against the local Supabase Postgres container after migration replay.
+-- Ephemeral CI integration tests for Agenda Event persistence and create idempotency.
+-- Run only against local Supabase Postgres after the historical and Agenda migrations.
 -- Every test row and temporary trigger is rolled back at the end.
 
 BEGIN;
