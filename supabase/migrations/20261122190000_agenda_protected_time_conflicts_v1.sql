@@ -410,7 +410,7 @@ BEGIN
            'protected_time_snapshot'
          ]::text[])
        ) THEN
-      RAISE EXCEPTION 'Event edit patch must contain exactly the 16 editable fields'
+      RAISE EXCEPTION 'Event edit patch must contain exactly 18 fields including Protected Time evidence'
         USING ERRCODE = '22023';
     END IF;
   ELSIF p_event_patch IS DISTINCT FROM '{}'::jsonb THEN
