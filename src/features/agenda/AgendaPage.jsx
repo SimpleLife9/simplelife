@@ -148,6 +148,8 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [confirmAction, setConfirmAction] = useState(null);
   const [pendingKey, setPendingKey] = useState(null);
+  const [protectedConflictPrompt, setProtectedConflictPrompt] = useState(null);
+  const [protectedConflictChoices, setProtectedConflictChoices] = useState({});
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [locationLabel, setLocationLabel] = useState('');
@@ -279,7 +281,7 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
     setPendingKey(null);
   };
 
-  const submitEvent = async (event) => {
+  const submitEvent = async (event, acceptedProtectedTimeDecisions = undefined) => {
     event.preventDefault();
     const key = pendingKey || uuidv7();
     setPendingKey(key);
@@ -329,6 +331,9 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
         };
       }
       const draft = createEventDraft(draftInput);
+      const protectedTimeBody = acceptedProtectedTimeDecisions === undefined
+        ? {}
+        : { protectedTimeDecisions: acceptedProtectedTimeDecisions };
       const { data, error } = editingEvent
         ? await supabase.functions.invoke('agenda-event-mutate', {
           body: {
@@ -336,19 +341,35 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
             expectedUpdatedAt: editingEvent.updated_at,
             action: 'edit',
             event: buildEventRequest(draft),
+            ...protectedTimeBody,
           },
           headers: { 'Idempotency-Key': key },
         })
         : await supabase.functions.invoke('agenda-event-create', {
-          body: { event: buildEventRequest(draft) },
+          body: {
+            event: buildEventRequest(draft),
+            ...protectedTimeBody,
+          },
           headers: { 'Idempotency-Key': key },
         });
       if (error) {
         let message = error.message || 'No se pudo guardar el evento.';
+        let response = null;
         try {
-          const response = error.context instanceof Response ? await error.context.clone().json() : null;
+          response = error.context instanceof Response ? await error.context.clone().json() : null;
           if (response?.error) message = response.error;
         } catch { /* keep SDK error message */ }
+        if (response?.error === 'PROTECTED_TIME_CONFLICTS'
+          || response?.error === 'PROTECTED_TIME_CONFLICTS_CHANGED') {
+          setProtectedConflictPrompt({
+            error: response.error,
+            conflicts: Array.isArray(response.conflicts) ? response.conflicts : [],
+          });
+          setProtectedConflictChoices({});
+          message = response.error === 'PROTECTED_TIME_CONFLICTS_CHANGED'
+            ? 'Los bloques protegidos cambiaron mientras guardabas. Revisa el horario y vuelve a guardar.'
+            : 'La Agenda detectó cruces con tu tiempo protegido. Debes decidir cómo continuar.';
+        }
         throw new Error(message);
       }
       if (!data?.eventId) throw new Error('El servidor no devolvió el identificador del evento.');
@@ -359,7 +380,34 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
       setEditingEvent(null);
       setSelectedEvent(null);
       setPendingKey(null);
+      setProtectedConflictPrompt(null);
+      setProtectedConflictChoices({});
     }
+  };
+
+  const protectedConflictItems = protectedConflictPrompt?.conflicts ?? [];
+  const protectedConflictDecisionsReady = protectedConflictItems.length > 0
+    && protectedConflictItems.every((conflict) =>
+      protectedConflictChoices[conflict.conflictKey] === conflict.requiredDecision);
+  const hasRescheduleChoice = protectedConflictItems.some((conflict) =>
+    protectedConflictChoices[conflict.conflictKey] === 'reschedule');
+
+  const closeProtectedConflictPrompt = () => {
+    if (busy) return;
+    setProtectedConflictPrompt(null);
+    setProtectedConflictChoices({});
+  };
+
+  const saveWithProtectedTimeDecisions = () => {
+    if (!protectedConflictDecisionsReady || hasRescheduleChoice || busy) return;
+    const decisions = protectedConflictItems.map((conflict) => ({
+      blockId: conflict.blockId,
+      blockUpdatedAt: conflict.blockUpdatedAt,
+      occurrenceStartsAt: conflict.occurrenceStartsAt,
+      decision: protectedConflictChoices[conflict.conflictKey],
+    }));
+    setProtectedConflictPrompt(null);
+    void submitEvent({ preventDefault() {} }, decisions);
   };
 
   const mutateSelectedEvent = async (action) => {
@@ -714,6 +762,99 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
               )}
             </div>
             <footer className="agenda-dialog-actions"><button type="button" className="agenda-secondary-button" onClick={() => { setSelectedEvent(null); setConfirmAction(null); setPendingKey(null); }}>Cerrar</button></footer>
+          </section>
+        </div>
+      )}
+      {protectedConflictPrompt && (
+        <div className="agenda-dialog-backdrop agenda-conflict-backdrop" role="presentation">
+          <section className="agenda-dialog agenda-conflict-dialog" role="alertdialog" aria-modal="true" aria-labelledby="agenda-protected-conflict-title">
+            <header className="agenda-dialog-header">
+              <div>
+                <span className="agenda-section-kicker">PROTECCIÓN DEL TIEMPO</span>
+                <h2 id="agenda-protected-conflict-title">Hay compromisos que se cruzan</h2>
+              </div>
+              <button type="button" className="agenda-close-button" aria-label="Cerrar" onClick={closeProtectedConflictPrompt} disabled={busy}>×</button>
+            </header>
+            {protectedConflictPrompt.error === 'PROTECTED_TIME_CONFLICTS_CHANGED' && protectedConflictItems.length === 0 ? (
+              <p className="agenda-confirm-copy">
+                Los bloques protegidos cambiaron durante el guardado. Ningún cambio se aplicó.
+                Vuelve al evento, revisa sus horas y guarda de nuevo para calcular los cruces actuales.
+              </p>
+            ) : (
+              <>
+                <p className="agenda-confirm-copy">
+                  El evento no se guardó. Decide explícitamente para cada cruce. Ningún otro evento ni tarea se moverá automáticamente.
+                </p>
+                <div className="agenda-conflict-list">
+                  {protectedConflictItems.map((conflict) => (
+                    <article className="agenda-conflict-card" key={conflict.conflictKey}>
+                      <div className="agenda-conflict-card-heading">
+                        <div>
+                          <strong>{conflict.label}</strong>
+                          <small>{conflict.category || 'Personal'} · {conflict.patternKind === 'weekly' ? 'Regla semanal' : 'Bloque puntual'}</small>
+                        </div>
+                        <span className={'protected-time-mode ' + (conflict.protectionMode === 'hard' ? 'is-hard' : 'is-flexible')}>
+                          {conflict.protectionMode === 'hard' ? 'Rígida' : 'Flexible'}
+                        </span>
+                      </div>
+                      <p>
+                        Cruce: {formatInstantInTimeZone(conflict.overlapStartsAt, conflict.timeZone)}
+                        {' — '}
+                        {formatInstantInTimeZone(conflict.overlapEndsAt, conflict.timeZone)}
+                        {' · '}{conflict.timeZone}
+                      </p>
+                      <label className="agenda-field">
+                        <span>Tu decisión para este cruce</span>
+                        <select
+                          value={protectedConflictChoices[conflict.conflictKey] || ''}
+                          onChange={(event) => setProtectedConflictChoices((current) => ({
+                            ...current,
+                            [conflict.conflictKey]: event.target.value,
+                          }))}
+                          disabled={busy}
+                        >
+                          <option value="">Selecciona una decisión</option>
+                          <option value={conflict.requiredDecision}>
+                            {conflict.protectionMode === 'hard'
+                              ? 'Autorizar explícitamente este cruce'
+                              : 'Mantener ambos compromisos'}
+                          </option>
+                          <option value="reschedule">Cambiar el horario del evento</option>
+                        </select>
+                      </label>
+                    </article>
+                  ))}
+                </div>
+                <p className="agenda-conflict-note">
+                  {protectedConflictItems.some((item) => item.protectionMode === 'hard')
+                    ? 'La protección rígida sólo se puede cruzar con tu autorización explícita.'
+                    : 'Los bloques flexibles tampoco se ignoran: debes elegir conservar el cruce o cambiar el horario.'}
+                </p>
+              </>
+            )}
+            <footer className="agenda-dialog-actions">
+              <button type="button" className="agenda-secondary-button" onClick={closeProtectedConflictPrompt} disabled={busy}>
+                Volver al evento
+              </button>
+              {protectedConflictItems.length > 0 && (
+                <button
+                  type="button"
+                  className="agenda-secondary-button"
+                  onClick={closeProtectedConflictPrompt}
+                  disabled={busy || !hasRescheduleChoice}
+                >
+                  Cambiar horario
+                </button>
+              )}
+              <button
+                type="button"
+                className="button button-primary"
+                onClick={saveWithProtectedTimeDecisions}
+                disabled={busy || !protectedConflictDecisionsReady || hasRescheduleChoice}
+              >
+                {busy ? 'Guardando…' : 'Guardar con estas decisiones'}
+              </button>
+            </footer>
           </section>
         </div>
       )}
