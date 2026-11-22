@@ -115,6 +115,12 @@ jobs:
       - name: Test Event persistence and append-only audit invariants in ephemeral local Postgres
         run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/agenda-event-persistence.test.sql
 
+      - name: Test Event create idempotency ledger and atomic routine in ephemeral local Postgres
+        run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/agenda-event-idempotency.test.sql
+
+      - name: Test concurrent Event create idempotency claims in ephemeral local Postgres
+        run: node scripts/agenda-event-idempotency-concurrency-smoke.mjs
+
       - name: Verify Agenda auth in the actual local Edge Runtime
         run: node scripts/agenda-edge-runtime-smoke.mjs
 
