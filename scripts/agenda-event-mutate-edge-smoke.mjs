@@ -158,10 +158,16 @@ try {
   }
   if (!ready) fail("Event Mutation Edge Runtime did not become ready.\n" + logs);
 
-  const preflight = await invoke(owner.token, undefined, "OPTIONS", {
-    origin: "https://simplelife.example",
-    "access-control-request-method": "PATCH",
-    "access-control-request-headers": "authorization,content-type",
+  // A real browser preflight does not carry the user's Authorization header.
+  const preflight = await fetch(url, {
+    method: "OPTIONS",
+    headers: {
+      apikey: publishable,
+      origin: "https://simplelife.example",
+      "access-control-request-method": "PATCH",
+      "access-control-request-headers": "authorization,content-type",
+    },
+    signal: AbortSignal.timeout(10000),
   });
   equal(preflight.status, 204, "browser CORS preflight");
   if (!preflight.headers.get("access-control-allow-methods")?.includes("PATCH")) {
