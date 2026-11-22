@@ -136,7 +136,7 @@ export async function handleRequest(
     if (existing.data) {
       const hashHex = intent.payloadHash;
       const storedHash = existing.data.payload_hash instanceof Uint8Array
-        ? Array.from(existing.data.payload_hash).map((byte: number) => byte.toString(16).padStart(2, "0")).join("")
+        ? Array.from(existing.data.payload_hash as Uint8Array).map((byte) => byte.toString(16).padStart(2, "0")).join("")
         : typeof existing.data.payload_hash === "string"
         ? existing.data.payload_hash.replace(/^\\x/, "")
         : "";
