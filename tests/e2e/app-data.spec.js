@@ -3167,7 +3167,8 @@ test('Agenda requires one explicit Protected Time decision per hard/flexible ove
   await expect(decisionDialog).toBeVisible();
   await expect(decisionDialog.getByText('Sueño protegido')).toBeVisible();
   await expect(decisionDialog.getByText('Lectura')).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Reunión que cruza tiempo protegido' })).toBeVisible();
+  await expect(composer).toBeVisible();
+  await expect(composer.getByLabel('Nombre del evento')).toHaveValue('Reunión que cruza tiempo protegido');
   expect(idempotencyRequests).toHaveLength(1);
   expect(idempotencyRequests[0].protectedTimeDecisions).toEqual([]);
   expect(insertedAgendaEvents).toHaveLength(0);
