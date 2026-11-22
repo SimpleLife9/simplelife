@@ -116,6 +116,21 @@ function storedDecisionInputs(value: unknown): unknown[] {
   });
 }
 
+function storedDecisionMap(value: unknown): Map<string, Record<string, unknown>> {
+  if (!Array.isArray(value)) return new Map();
+  const entries: Array<[string, Record<string, unknown>]> = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const decision = item as Record<string, unknown>;
+    if (typeof decision.blockId !== "string"
+      || typeof decision.occurrenceStartsAt !== "string"
+      || !Number.isFinite(Date.parse(decision.occurrenceStartsAt))) continue;
+    const key = decision.blockId + ":" + new Date(decision.occurrenceStartsAt).toISOString();
+    entries.push([key, decision]);
+  }
+  return new Map(entries);
+}
+
 /**
  * Authenticated Event edit/status/lifecycle writer.
  *
@@ -233,29 +248,65 @@ export async function handleRequest(
         now,
       });
       const sameWindow = sameEventWindow(currentResult.data, candidateRecord);
-      const priorDecisions = storedDecisionInputs(currentResult.data.protected_time_decisions);
-      const decisionInputs = input.protectedTimeDecisions !== undefined
+      const retainExistingConsent = input.protectedTimeDecisions === undefined && sameWindow;
+      const previousDecisionRecords = Array.isArray(currentResult.data.protected_time_decisions)
+        ? currentResult.data.protected_time_decisions as Record<string, unknown>[]
+        : [];
+      const previousDecisionMap = storedDecisionMap(previousDecisionRecords);
+      const priorDecisions = storedDecisionInputs(previousDecisionRecords);
+      let decisionInputs = input.protectedTimeDecisions !== undefined
         ? input.protectedTimeDecisions
-        : sameWindow ? priorDecisions : [];
-      const conflictAssessment = await assessOwnerProtectedTimeConflicts({
+        : retainExistingConsent ? priorDecisions : [];
+      let conflictAssessment = await assessOwnerProtectedTimeConflicts({
         supabaseAdmin: ctx.supabaseAdmin,
         ownerProfileId: profile.profileId,
         event: candidateRecord,
         suppliedDecisions: decisionInputs,
         now,
       });
+
+      // When only Event details change, preserve the original consent timestamp
+      // for occurrences that are still identical and backed by the same block
+      // version. Drop approvals for removed occurrences. A new/changed overlap
+      // remains incomplete and is returned to the user for a fresh decision.
+      if (!conflictAssessment.ok && retainExistingConsent) {
+        const reusable = conflictAssessment.conflicts.flatMap((conflict) => {
+          const previous = previousDecisionMap.get(conflict.conflictKey);
+          if (!previous || previous.blockUpdatedAt !== conflict.blockUpdatedAt
+            || previous.decision !== conflict.requiredDecision) return [];
+          return [{
+            blockId: conflict.blockId,
+            blockUpdatedAt: conflict.blockUpdatedAt,
+            occurrenceStartsAt: conflict.occurrenceStartsAt,
+            decision: conflict.requiredDecision,
+          }];
+        });
+        decisionInputs = reusable;
+        conflictAssessment = await assessOwnerProtectedTimeConflicts({
+          supabaseAdmin: ctx.supabaseAdmin,
+          ownerProfileId: profile.profileId,
+          event: candidateRecord,
+          suppliedDecisions: decisionInputs,
+          now,
+        });
+      }
+
       if (!conflictAssessment.ok) {
         return json({
           error: conflictAssessment.code,
           conflicts: conflictAssessment.conflicts,
         }, 409);
       }
+      const decisionsToPersist = retainExistingConsent
+        ? conflictAssessment.assessment.conflicts.map((conflict) =>
+          previousDecisionMap.get(conflict.conflictKey))
+        : conflictAssessment.assessment.decisions;
       const record = buildEventInsertRecord({
         eventDraft: readyDraft,
         eventId: mutation.eventId,
         ownerProfileId: profile.profileId,
         now,
-        protectedTimeDecisions: conflictAssessment.assessment.decisions,
+        protectedTimeDecisions: decisionsToPersist,
         protectedTimeSnapshot: conflictAssessment.assessment.snapshot,
       });
       eventPatch = toEventPatch(record as unknown as Record<string, unknown>);
