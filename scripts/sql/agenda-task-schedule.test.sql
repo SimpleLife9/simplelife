@@ -148,7 +148,9 @@ BEGIN
   SELECT * INTO v_result
   FROM public.mutate_task_schedule_once(
     '019a0000-0000-7000-8000-000000000001',
-    '019a0000-0000-7000-8000-000000000101',
+    -- A racing caller may generate a different provisional UUIDv7; the
+    -- owner/key + canonical intent must still replay the winning identity.
+    '019a0000-0000-7000-8000-000000000099',
     '019a0000-0000-7000-8000-000000000201',
     'task-schedule-mutation-v1',
     repeat('a', 64),
@@ -157,8 +159,9 @@ BEGIN
     v_patch,
     clock_timestamp()
   );
-  IF v_result.http_status <> 201 OR NOT v_result.replayed THEN
-    RAISE EXCEPTION 'Exact create retry must replay the original receipt';
+  IF v_result.http_status <> 201 OR NOT v_result.replayed
+     OR v_result.response_body->>'taskScheduleId' <> '019a0000-0000-7000-8000-000000000101' THEN
+    RAISE EXCEPTION 'Concurrent create retry must replay the winning schedule identity';
   END IF;
 
   SELECT updated_at INTO v_updated_at
