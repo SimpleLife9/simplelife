@@ -34,6 +34,7 @@ function resolverResponse(batch) {
       resolvedLocalDateTime: range.start.localDateTime,
       timeZone: range.timeZone,
       instant: '2026-10-30T13:00:00.000Z',
+      rulesSource: 'iana-tzdb',
       rulesVersion: '2026f',
       resolverVersion: 'agenda-iana-resolver-v1',
       resolution: 'exact',
@@ -43,6 +44,7 @@ function resolverResponse(batch) {
       resolvedLocalDateTime: range.end.localDateTime,
       timeZone: range.timeZone,
       instant: '2026-10-30T14:00:00.000Z',
+      rulesSource: 'iana-tzdb',
       rulesVersion: '2026f',
       resolverVersion: 'agenda-iana-resolver-v1',
       resolution: 'exact',
@@ -151,6 +153,14 @@ test('end local date-time is required explicitly; duration is not silently conve
   }), /Invalid calendar date/);
 });
 
+test('terminal occurrences are not sent through the new time resolver', () => {
+  const completed = timedOccurrence(0, { status: 'completed' });
+  assert.throws(() => planOccurrenceResolutionBatches({
+    occurrences: [completed],
+    endByOccurrenceKey: { [completed.occurrenceKey]: '2026-10-01T10:00' },
+  }), /Only scheduled future occurrences/);
+});
+
 test('planner rejects duplicate keys, unused end endpoints and batch limits above 25', () => {
   const occurrence = timedOccurrence(0);
   const end = { [occurrence.occurrenceKey]: `${occurrence.actualLocalDate}T10:00` };
@@ -198,6 +208,20 @@ test('join rejects reordered, stale, incomplete and non-authoritative results', 
     ...response,
     rulesVersion: '2026g',
   }), /TZDB version/);
+  const staleEndpoint = {
+    ...response,
+    results: response.results.map((item, index) => index === 0
+      ? { ...item, end: { ...item.end, rulesVersion: '2026g' } }
+      : item),
+  };
+  assert.throws(() => joinOccurrenceResolutionBatch(plan.batches[0], staleEndpoint), /endpoint TZDB versions/);
+  const missingEndpoints = {
+    ...response,
+    results: response.results.map((item, index) => index === 0
+      ? { ...item, start: null }
+      : item),
+  };
+  assert.throws(() => joinOccurrenceResolutionBatch(plan.batches[0], missingEndpoints), /include endpoint resolution/);
   assert.throws(() => joinOccurrenceResolutionBatch(plan.batches[0], {
     ...response,
     count: 1,
