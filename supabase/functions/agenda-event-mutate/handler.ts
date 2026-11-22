@@ -317,8 +317,8 @@ export async function handleRequest(
         eventId: mutation.eventId,
         ownerProfileId: profile.profileId,
         now,
-        protectedTimeDecisions: decisionsToPersist,
-        protectedTimeSnapshot: conflictAssessment.assessment.snapshot,
+        protectedTimeDecisions: [...decisionsToPersist],
+        protectedTimeSnapshot: [...conflictAssessment.assessment.snapshot],
       });
       eventPatch = toEventPatch(record as unknown as Record<string, unknown>);
     }
