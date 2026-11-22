@@ -1,4 +1,5 @@
 import { buildEventCreateIntent } from './event-idempotency.js';
+import { normalizeProtectedTimeConflictDecisions } from './protected-time.js';
 
 export const EVENT_MUTATION_INTENT_VERSION = 'event-mutation-v1';
 export const EVENT_MUTATION_ACTIONS = Object.freeze([
@@ -64,28 +65,32 @@ export function normalizeEventMutation({ eventId, expectedUpdatedAt, action, eve
   });
 }
 
-export function buildEventMutationIntent(mutation) {
+export function buildEventMutationIntent(mutation, conflictDecisions = []) {
   const normalized = normalizeEventMutation(mutation);
   const draftIntent = normalized.action === 'edit'
     ? buildEventCreateIntent(normalized.eventDraft).canonicalPayload
     : null;
+  const decisions = normalizeProtectedTimeConflictDecisions(conflictDecisions);
   // Fixed positional tuple avoids object-property-order ambiguity.
-  const canonicalPayload = JSON.stringify([
+  const baseTuple = [
     EVENT_MUTATION_INTENT_VERSION,
     normalized.eventId,
     normalized.expectedUpdatedAt,
     normalized.action,
     draftIntent,
-  ]);
+  ];
+  const canonicalPayload = decisions.length
+    ? JSON.stringify([...baseTuple, 'protected-time-consent-v1', decisions])
+    : JSON.stringify(baseTuple);
   return Object.freeze({
     version: EVENT_MUTATION_INTENT_VERSION,
     canonicalPayload,
   });
 }
 
-export async function hashEventMutationIntent(mutation, cryptoProvider = globalThis.crypto) {
+export async function hashEventMutationIntent(mutation, cryptoProvider = globalThis.crypto, conflictDecisions = []) {
   assert(cryptoProvider?.subtle?.digest, 'Web Crypto SHA-256 is unavailable.');
-  const intent = buildEventMutationIntent(mutation);
+  const intent = buildEventMutationIntent(mutation, conflictDecisions);
   const digest = await cryptoProvider.subtle.digest(
     'SHA-256',
     new TextEncoder().encode(intent.canonicalPayload),
