@@ -127,3 +127,18 @@
   .agenda-dialog-actions .button{min-width:0;width:100%}
   .agenda-week-grid{min-width:770px}
 }
+
+.agenda-task-schedule-chip{display:flex;align-items:center;gap:6px;min-width:0;max-width:100%;padding:7px 9px;border:1px dashed #8da9b5;border-radius:7px;background:#f0f5f7;color:#31586a;font-size:.7rem;line-height:1.35}
+.agenda-task-schedule-chip-time{flex:0 0 auto;font-size:.62rem;font-variant-numeric:tabular-nums;font-weight:800}
+.agenda-task-schedule-chip-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}
+.agenda-task-schedule-chip.is-compact{width:100%;padding:5px 6px;font-size:.62rem}
+.agenda-task-schedule-chip.is-compact .agenda-task-schedule-chip-time{display:none}
+.agenda-timeline-marker.is-task-schedule{background:#7d9eac}
+.agenda-timeline-card.is-task-schedule{display:grid;gap:5px;padding:13px 15px;border:1px dashed #8da9b5;border-radius:11px;background:#f0f5f7;color:#31586a}
+.agenda-timeline-card.is-task-schedule strong{font-size:.85rem;color:#31586a}
+.agenda-timeline-card.is-task-schedule span{font-size:.72rem;color:#557486}
+.agenda-timeline-card.is-task-schedule small{font-size:.64rem;color:#718e9b}
+@media(max-width:600px){
+  .agenda-month-day .agenda-task-schedule-chip{padding:3px 4px;font-size:.52rem}
+  .agenda-task-schedule-chip.is-compact .agenda-task-schedule-chip-title{font-size:.52rem}
+}
