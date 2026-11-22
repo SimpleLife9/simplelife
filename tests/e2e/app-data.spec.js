@@ -50,6 +50,7 @@ async function mockSupabaseSession(page, initialData = {}) {
   const calendarEvents = [...(initialData.calendarEvents || [])];
   const insertedAgendaEvents = [];
   const idempotencyRequests = [];
+  const mutationRequests = [];
   const taskRows = [...(initialData.tasks || [])];
   const projects = [...(initialData.projects || [])];
   const insertedProjects = [];
@@ -191,7 +192,18 @@ async function mockSupabaseSession(page, initialData = {}) {
     }
 
     if (url.pathname === '/rest/v1/calendar_event' && method === 'GET') {
-      await json(200, calendarEvents.filter((row) => !row.archived_at && !row.deleted_at));
+      const archivedFilter = url.searchParams.get('archived_at') || '';
+      const deletedFilter = url.searchParams.get('deleted_at') || '';
+      const rows = calendarEvents.filter((row) => {
+        const archivedMatch = archivedFilter === 'not.is.null'
+          ? row.archived_at != null
+          : archivedFilter === 'is.null' ? row.archived_at == null : true;
+        const deletedMatch = deletedFilter === 'not.is.null'
+          ? row.deleted_at != null
+          : deletedFilter === 'is.null' ? row.deleted_at == null : true;
+        return archivedMatch && deletedMatch;
+      });
+      await json(200, rows);
       return;
     }
 
@@ -578,6 +590,69 @@ async function mockSupabaseSession(page, initialData = {}) {
       return;
     }
 
+    if (url.pathname === '/functions/v1/agenda-event-mutate' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const key = request.headers()['idempotency-key'] || '';
+      mutationRequests.push({ key, payload });
+      const row = calendarEvents.find((item) => item.id === payload.eventId && item.owner_user_id === profile.id);
+      if (!row) {
+        await json(404, { error: 'EVENT_NOT_FOUND' });
+        return;
+      }
+      if (row.updated_at !== payload.expectedUpdatedAt) {
+        await json(409, { error: 'EVENT_VERSION_CONFLICT' });
+        return;
+      }
+      const updatedAt = new Date(Date.now() + mutationRequests.length * 2).toISOString();
+      if (payload.action === 'edit') {
+        const event = payload.event;
+        Object.assign(row, {
+          title: event.title,
+          description: event.description ?? null,
+          location_label: event.locationLabel ?? null,
+          location_kind: event.locationKind ?? null,
+          event_status: event.eventStatus || row.event_status,
+          temporal_kind: event.temporalKind,
+          start_date: event.startDate ?? null,
+          end_date_exclusive: event.endDateExclusive ?? null,
+          start_local: event.startLocalDateTime ?? null,
+          end_local: event.endLocalDateTime ?? null,
+          time_zone: event.timeZone ?? event.sourceTimeZone ?? null,
+          starts_at: event.startsAt ?? null,
+          ends_at: event.endsAt ?? null,
+        });
+      } else if (payload.action === 'cancel') {
+        row.event_status = 'cancelled';
+      } else if (payload.action === 'reopen') {
+        row.event_status = 'confirmed';
+      } else if (payload.action === 'finish') {
+        row.event_status = 'finished';
+      } else if (payload.action === 'archive') {
+        row.archived_at = updatedAt;
+      } else if (payload.action === 'trash') {
+        row.archived_at = null;
+        row.deleted_at = updatedAt;
+        row.purge_after = new Date(Date.parse(updatedAt) + 30 * 86400000).toISOString();
+      } else if (payload.action === 'restore') {
+        row.archived_at = null;
+        row.deleted_at = null;
+        row.purge_after = null;
+      }
+      row.updated_at = updatedAt;
+      row.updated_by_user_id = profile.id;
+      await json(200, {
+        eventId: row.id,
+        updatedAt: row.updated_at,
+        eventStatus: row.event_status,
+        lifecycle: row.deleted_at ? 'trash' : row.archived_at ? 'archived' : 'active',
+        archivedAt: row.archived_at,
+        deletedAt: row.deleted_at,
+        purgeAfter: row.purge_after ?? null,
+        replayed: false,
+      });
+      return;
+    }
+
     if (url.pathname === '/functions/v1/agenda-event-create' && method === 'POST') {
       const requestBody = request.postDataJSON();
       const event = requestBody.event;
@@ -621,7 +696,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     await json(404, { message: `Unexpected mocked Supabase request: ${method} ${url.pathname}` });
   });
 
-  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, insertedAgendaEvents, idempotencyRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
+  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
 }
 
 test('mock-authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
