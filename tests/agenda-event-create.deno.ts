@@ -65,25 +65,48 @@ function mockContext({
   };
   const supabaseAdmin = {
     from(table: string) {
-      if (table !== "event_create_request") throw new Error("unexpected admin table " + table);
-      return {
-        select() {
-          return {
-            eq(_column: string, _value: string) {
-              return {
-                eq(_key: string, _value: string) {
-                  return {
-                    async maybeSingle() {
-                      calls.ledgerLookup = Number(calls.ledgerLookup) + 1;
-                      return { data: existing, error: lookupError };
-                    },
-                  };
-                },
-              };
-            },
-          };
-        },
-      };
+      if (table === "event_create_request") {
+        return {
+          select() {
+            return {
+              eq(_column: string, _value: string) {
+                return {
+                  eq(_key: string, _value: string) {
+                    return {
+                      async maybeSingle() {
+                        calls.ledgerLookup = Number(calls.ledgerLookup) + 1;
+                        return { data: existing, error: lookupError };
+                      },
+                    };
+                  },
+                };
+              },
+            };
+          },
+        };
+      }
+      if (table === "user_preference") {
+        return {
+          select() {
+            return {
+              eq() {
+                return { async maybeSingle() { return { data: { time_zone: "America/Havana" }, error: null }; } };
+              },
+            };
+          },
+        };
+      }
+      if (table === "protected_time_block") {
+        const query = {
+          select() { return query; },
+          eq() { return query; },
+          is() { return query; },
+          order() { return query; },
+          async limit() { return { data: [], error: null }; },
+        };
+        return query;
+      }
+      throw new Error("unexpected admin table " + table);
     },
     async rpc(name: string, args: Record<string, unknown>) {
       calls.rpc = Number(calls.rpc) + 1;
