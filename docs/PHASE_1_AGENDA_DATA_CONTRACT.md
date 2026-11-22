@@ -39,7 +39,7 @@ The conceptual entities follow Anexo 61. This is not a proposal to duplicate the
 | Domain entity | Phase 1 persistence concept | Key invariant |
 |---|---|---|
 | Event | `calendar_event` | Own identity; a commitment is not a Task. |
-| EventOccurrence | Computed occurrence plus persisted exception/override | Stable key from series ID + original local occurrence key; edits do not rewrite unrelated occurrences. |
+| EventOccurrence | Materialized occurrence row inside the rolling 90-day horizon; bounded previews outside it | Stable key from series ID + original local slot; overrides preserve that identity. All-day rows remain date-only. |
 | ProtectedTimeBlock / AvailabilityBlock | `protected_time_block` | User-owned, private by default; ARIA cannot consume it automatically. |
 | TaskSchedule | `task_schedule` | References the existing Task; one Task may own multiple time blocks. |
 | Reminder | Deferred persisted delivery model | Any Phase 1 countdown is derived from the source Event and makes no push-delivery guarantee. |
@@ -82,10 +82,10 @@ Do not model every temporal value as a UTC timestamp. The database and domain la
 ### D. Recurrence
 
 - Recurring calendar events preserve local wall-clock time and IANA zone; they are not repeated as rigid 24-hour intervals.
-- Approved DST rules: nonexistent recurring local time -> next valid local time with an adjustment record; repeated local time -> first occurrence by default unless the user explicitly chose the second. A one-off Event preserves its chosen resolution at confirmation.
-- Recurrence edits support one occurrence, this-and-following, and whole series. Past/completed history is not silently rewritten.
-
-**Implementation default to validate:** use a versioned, constrained JSON recurrence schema rather than accepting arbitrary unvalidated recurrence input. Version 1 should cover daily/weekly/monthly/yearly frequency, interval, applicable weekdays/month days, start boundary, optional end date/count, IANA zone, and exceptions. Avoid claiming full RFC 5545 compatibility until it is deliberately implemented and tested.
+- Approved v1 grammar is versioned and constrained: DAILY, WEEKLY (Monday-based intervals and explicit ISO weekdays), MONTHLY (numeric day or ordinal weekday), YEARLY (selected month plus numeric day or ordinal weekday). Numeric days missing from a month are skipped; LAST is explicit. COUNT and inclusive local-date UNTIL are mutually exclusive.
+- Timed recurrence defaults to gap-next-valid and fold-earlier; later fold is explicit. All-day recurrence remains date-only.
+- Recurrence edits support this occurrence, this and following, and entire series. Past/completed history is not silently rewritten.
+- The complete approved recurrence policy, including horizon, batch, trigger, overrides and TZDB review, is specified in `AGENDA_RECURRING_SERIES_CONTRACT.md`.
 
 ### E. Interval and conflict semantics
 
@@ -114,11 +114,20 @@ Checks enforce title length, allowed status/mode, a complete all-day date range 
 
 ### `calendar_event_exception`
 
-- `id uuid primary key`, `owner_user_id`, `calendar_event_id`, stable `occurrence_key` derived from the original series-local occurrence date/time and disambiguation.
+- `id uuid primary key`, `owner_user_id`, `calendar_event_id`, stable `occurrence_key` derived from the original series-local occurrence date/time. The key excludes UTC, TZDB version, offset and fold choice.
 - Override kind (cancelled / moved / modified), optional override fields and timestamps.
 - Unique `(calendar_event_id, occurrence_key)` makes retries idempotent.
 - A moved occurrence retains its original occurrence key and EventOccurrence identity; its new actual start does not replace the original key.
 - "This and following" creates a new series segment and truncates the old segment before the selected key; prior exceptions remain attached to the segment that owns their original key.
+
+### `calendar_event_occurrence`
+
+- Canonical row for one materialized occurrence inside the rolling horizon; unique `(calendar_event_id, occurrence_key)`.
+- Stores owner, series/Event ID, stable key version, original local date/time and effective local date/time, occurrence status, override kind, and optimistic row version.
+- Timed rows also store IANA zone, resolved UTC start/end, resolver/TZDB versions and resolution metadata. All-day rows store date-only values and no UTC instants.
+- Series-level duration is inherited; an occurrence may override duration/end semantics. Moved and modified instances retain the original occurrence key.
+- The materialized row is authoritative for that slot. Recalculation must not overwrite it; a TZDB difference moves it to `needs_review` until explicit version-bound acceptance.
+- Rows are owner-scoped and written only through the trusted authenticated server path. This is a schema proposal only, not DDL authorization.
 
 ### `protected_time_block`
 
@@ -135,7 +144,9 @@ Checks enforce title length, allowed status/mode, a complete all-day date range 
 
 ### Occurrence identity and materialization
 
-**Implementation default to validate:** compute ordinary recurrence occurrences for the requested calendar window; persist only exceptions/overrides in `calendar_event_exception`. Give every virtual occurrence a deterministic UUIDv5/occurrence key from (series ID + original local scheduled key + fold/disambiguation), so two clients produce the same identity. This avoids pre-generating an unlimited future horizon. If later product behavior requires persisted occurrences/jobs, add them as a separate bounded, idempotent materialization service without changing the stable occurrence key.
+**Approved hybrid model (21 November 2026):** materialize eligible occurrences in a rolling 90-calendar-day horizon, using batches of at most 500. Timed rows persist their confirmed UTC range and exact resolver/TZDB versions; all-day rows persist date-only values without UTC instants. Persist occurrence state, exceptions, overrides and review status. Calculate occurrences beyond the horizon as bounded previews only; never treat a preview as a persisted confirmed commitment or overwrite a materialized row. Stable identity is derived from (series ID + original local date + original local time, or `ALL_DAY` + key format version); it excludes UTC, offset, TZDB version and fold choice. Repeated/concurrent materialization is idempotent and must not reset overrides, reviews or terminal states.
+
+**Triggers (approved):** materialize on series create/edit and perform bounded idempotent top-up on authenticated Agenda range reads. No cron/scheduled job in v1. A background worker requires a separate proposal, named operator and Human Gate.
 
 ### Optional event categories and cross-domain links
 
@@ -143,7 +154,7 @@ Do not freeze an extensive category taxonomy or relationship matrix in the first
 
 ## 5. Security and ownership contract
 
-All four proposed tables are personal owner-scoped data in Phase 1:
+All Phase 1 proposed persistence tables, including series, occurrence and exception rows, are personal owner-scoped data:
 
 - `owner_user_id` references `public.user_profile(id)`; `created_by_user_id` references the same profile.
 - RLS is enabled before any client access.
