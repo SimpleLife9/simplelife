@@ -317,5 +317,6 @@ Deno.test("allows an explicit one-hour interval across the repeated DST wall-clo
   }));
   const resolved = resolveLocalDateTimeRange(buildProtectedTimeResolutionRequest(draft));
   assert(Date.parse(resolved.endsAt) > Date.parse(resolved.startsAt), "resolved fold interval must have positive duration");
-  assertEquals(resolved.start.offset === resolved.end.offset, false, "DST fold endpoints use the two distinct offsets");
+  assertEquals(resolved.start.resolution, "ambiguous-first", "start chooses the first DST fold instant");
+  assertEquals(resolved.end.resolution, "ambiguous-later", "end chooses the second DST fold instant");
 });
