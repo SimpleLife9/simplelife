@@ -123,9 +123,9 @@ SET LOCAL ROLE service_role;
 DO $test$
 DECLARE
   v_owner uuid := '019a0000-0000-7000-8000-000000000061';
-  v_block uuid := '019a0000-0000-7000-8000-0000000000611';
-  v_event uuid := '019a0000-0000-7000-8000-0000000000612';
-  v_key uuid := '019a0000-0000-7000-8000-0000000000613';
+  v_block uuid := '019a0000-0000-7000-8000-000000000611';
+  v_event uuid := '019a0000-0000-7000-8000-000000000612';
+  v_key uuid := '019a0000-0000-7000-8000-000000000613';
   v_hash text := repeat('a', 64);
   v_snapshot jsonb;
   v_decisions jsonb;
@@ -226,11 +226,11 @@ BEGIN
     INTO v_status, v_response, v_replayed
   FROM public.create_calendar_event_with_protected_time_once(
     v_owner,
-    '019a0000-0000-7000-8000-0000000000614',
+    '019a0000-0000-7000-8000-000000000614',
     'event-create-v1',
     repeat('b', 64),
     public.agenda_protected_time_consent_event_record(
-      '019a0000-0000-7000-8000-0000000000615', v_owner, 'Debe rechazarse por snapshot obsoleto'
+      '019a0000-0000-7000-8000-000000000615', v_owner, 'Debe rechazarse por snapshot obsoleto'
     ),
     v_snapshot,
     '[]'::jsonb
