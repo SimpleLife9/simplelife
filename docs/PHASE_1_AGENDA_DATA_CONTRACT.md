@@ -273,3 +273,20 @@ The operational update/rollback policy and approved recurring-occurrence behavio
 The implementation proposal is documented in [AGENDA_AUDIT_APPEND_DESIGN.md](./AGENDA_AUDIT_APPEND_DESIGN.md). The key security boundary is a user-authenticated Edge Function that derives the profile from the verified user JWT and performs writes through `ctx.supabaseAdmin` only after strict owner checks. The browser receives SELECT-only access to Event rows (owner-scoped by RLS); it receives no direct INSERT/UPDATE/DELETE grants. A narrowly scoped private `SECURITY DEFINER` row trigger appends UUIDv7 audit evidence in the same transaction. The audit actor/owner fields are set only by trusted server code, not browser input.
 
 This is a design proposal, not a DDL authorization. It requires a separate explicit Human Gate before a migration or hosted database change.
+
+
+## One-off Event domain model — PR #75 preparation
+
+The pure domain module `src/features/agenda/domain/event.js` defines the three approved one-off Event temporal kinds without creating persistence or server-owned values:
+
+- `all_day`: inclusive start date plus exclusive end date. It uses the date-only helper and never generates UTC midnight or a timezone.
+- `zoned_civil`: original local start/end wall times, IANA zone and independent fold/gap choices. The draft has no UTC instants and is explicitly marked `needs_authoritative_resolution` until the atomic authenticated IANA range resolver returns matching start/end metadata.
+- `fixed_instant`: input instants must carry an explicit UTC offset or `Z`; the domain normalizes them to UTC and optionally preserves the source IANA timezone. It does not re-resolve a fixed instant because the viewer's timezone changes.
+
+The resolver promotion check verifies requested zone and wall values, canonical timezone, authoritative IANA source, shared TZDB and resolver versions, per-endpoint version/source metadata, requested earlier/later fold behavior, endpoint instant equality and a positive UTC interval. Runtime `Intl` preview data cannot be promoted to a canonical persisted interval.
+
+Direct user-created Events default to `confirmed`; `preparing` and `proposed` remain valid draft states. `cancelled` and `finished` are valid functional statuses for later Event transitions, not initial creation states. Lifecycle remains a separate dimension, initialized as active. The input rejects owner/creator, ID, audit, timestamp and other server-owned/unknown fields.
+
+Technical input bounds in this domain slice: title 200 characters, description 5,000, location label 500. They are validation safeguards for this implementation, not database constraints or a change to product behavior.
+
+This module is pure domain code. It makes no network calls, generates no IDs/owner/actor fields, creates no audit records, writes no rows and does not alter task data. No schema, migration, RLS/grants/Auth, secrets, cron, Edge Function deployment or public release is part of this slice.
