@@ -250,10 +250,14 @@ export function normalizeProtectedTimeDecisions(conflicts, supplied, now = new D
     }
     normalized.push(Object.freeze({
       policyVersion: PROTECTED_TIME_DECISION_VERSION,
+      resourceType: conflict.sourceType ?? 'protected_time_block',
       blockId: conflict.blockId,
       blockUpdatedAt: conflict.blockUpdatedAt,
-      protectionMode: conflict.protectionMode,
-      occurrenceDate: conflict.occurrenceDate,
+      protectionMode: conflict.protectionMode ?? null,
+      patternKind: conflict.patternKind ?? null,
+      label: conflict.label ?? null,
+      category: conflict.category ?? null,
+      occurrenceDate: conflict.occurrenceDate ?? null,
       occurrenceStartsAt: conflict.occurrenceStartsAt,
       occurrenceEndsAt: conflict.occurrenceEndsAt,
       overlapStartsAt: conflict.overlapStartsAt,
