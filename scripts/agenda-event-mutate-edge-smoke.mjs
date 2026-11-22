@@ -77,10 +77,11 @@ const other = await createDisposableUser("other");
 const eventId = sqlScalar("SELECT private.uuidv7()");
 assertUuid(eventId, UUID_V7_PATTERN, "fixture Event id");
 const seedSql = "INSERT INTO public.calendar_event (" +
-  "id, owner_user_id, created_by_user_id, updated_by_user_id, title, event_status, temporal_kind, start_date, end_date_exclusive" +
+  "id, owner_user_id, created_by_user_id, updated_by_user_id, title, event_status, temporal_kind, start_date, end_date_exclusive, created_at, updated_at" +
   ") VALUES (" +
   "'" + eventId + "'::uuid, '" + owner.profileId + "'::uuid, '" + owner.profileId + "'::uuid, '" + owner.profileId + "'::uuid, " +
-  "'Mutation smoke original', 'confirmed', 'all_day', DATE '2026-12-24', DATE '2026-12-25'" +
+  "'Mutation smoke original', 'confirmed', 'all_day', DATE '2026-12-24', DATE '2026-12-25', " +
+  "TIMESTAMPTZ '2026-11-20T10:00:00.000Z', TIMESTAMPTZ '2026-11-20T10:00:00.000Z'" +
   ")";
 run("docker", [
   "exec", "-i", "supabase_db_simplelife",
