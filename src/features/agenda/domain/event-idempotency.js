@@ -4,6 +4,8 @@
 export const EVENT_CREATE_INTENT_VERSION = 'event-create-v1';
 
 const UUID_V7_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const OFFSET_INSTANT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/i;
+const PROTECTED_TIME_DECISION_VERSION = 'protected-time-decision-v1';
 
 function assert(condition, message) {
   if (!condition) throw new RangeError(message);
@@ -116,15 +118,58 @@ function createIntentTuple(eventDraft) {
 }
 
 /**
+/**
+ * Normalize decisions into a stable positional representation. Empty decisions
+ * intentionally preserve the legacy Event-create hash so old pending requests
+ * without Protected Time conflicts can still replay across this upgrade.
+ */
+function protectedTimeDecisionTuple(value) {
+  assert(Array.isArray(value) && value.length <= 500,
+    'protectedTimeDecisions must be an array with at most 500 entries.');
+  const normalized = value.map((item) => {
+    assert(item && typeof item === 'object' && !Array.isArray(item),
+      'Each Protected Time decision must be an object.');
+    const allowed = ['blockId', 'blockUpdatedAt', 'occurrenceStartsAt', 'decision'];
+    assert(Object.keys(item).length === 4 && Object.keys(item).every((key) => allowed.includes(key)),
+      'Protected Time decision contains unsupported or missing fields.');
+    assert(typeof item.blockId === 'string' && UUID_V7_PATTERN.test(item.blockId),
+      'Protected Time decision blockId must be a UUIDv7.');
+    assert(typeof item.blockUpdatedAt === 'string' && OFFSET_INSTANT_PATTERN.test(item.blockUpdatedAt)
+      && Number.isFinite(Date.parse(item.blockUpdatedAt)),
+    'Protected Time decision blockUpdatedAt must be an ISO timestamp with an explicit offset.');
+    assert(typeof item.occurrenceStartsAt === 'string' && OFFSET_INSTANT_PATTERN.test(item.occurrenceStartsAt)
+      && Number.isFinite(Date.parse(item.occurrenceStartsAt)),
+    'Protected Time decision occurrenceStartsAt must be an ISO timestamp with an explicit offset.');
+    assert(item.decision === 'override_hard' || item.decision === 'keep_flexible',
+      'Protected Time decision must be override_hard or keep_flexible.');
+    return [
+      item.blockId.toLowerCase(),
+      item.blockUpdatedAt,
+      new Date(Date.parse(item.occurrenceStartsAt)).toISOString(),
+      item.decision,
+    ];
+  });
+  normalized.sort((a, b) => String(a[0]).localeCompare(String(b[0]))
+    || String(a[2]).localeCompare(String(b[2])));
+  return normalized;
+}
+
+/**
  * Build a deterministic, versioned representation of the normalized user intent.
  *
  * A fixed positional JSON array avoids object-property ordering ambiguity.
  * The caller must first pass untrusted JSON through createEventDraft().
  * This function intentionally excludes owner/actor IDs, Event IDs, timestamps,
- * lifecycle columns, and authoritative resolver outputs.
+ * lifecycle columns, and authoritative resolver outputs. A non-empty Protected
+ * Time consent set is bound to the same idempotency identity; an empty set keeps
+ * the historical payload bytes unchanged for existing pending create retries.
  */
-export function buildEventCreateIntent(eventDraft) {
-  const canonicalPayload = JSON.stringify(createIntentTuple(eventDraft));
+export function buildEventCreateIntent(eventDraft, protectedTimeDecisions = []) {
+  const eventTuple = createIntentTuple(eventDraft);
+  const decisions = protectedTimeDecisionTuple(protectedTimeDecisions);
+  const canonicalPayload = JSON.stringify(decisions.length
+    ? [...eventTuple, PROTECTED_TIME_DECISION_VERSION, decisions]
+    : eventTuple);
   return Object.freeze({
     version: EVENT_CREATE_INTENT_VERSION,
     canonicalPayload,
@@ -135,9 +180,13 @@ export function buildEventCreateIntent(eventDraft) {
  * Compute the server-recomputable SHA-256 hash for an Event create intent.
  * Uses the Web Crypto API available in browsers, Deno Edge Runtime and Node.
  */
-export async function hashEventCreateIntent(eventDraft, cryptoProvider = globalThis.crypto) {
+export async function hashEventCreateIntent(
+  eventDraft,
+  cryptoProvider = globalThis.crypto,
+  protectedTimeDecisions = [],
+) {
   assert(cryptoProvider?.subtle?.digest, 'Web Crypto SHA-256 is unavailable.');
-  const intent = buildEventCreateIntent(eventDraft);
+  const intent = buildEventCreateIntent(eventDraft, protectedTimeDecisions);
   const digest = await cryptoProvider.subtle.digest(
     'SHA-256',
     new TextEncoder().encode(intent.canonicalPayload),
