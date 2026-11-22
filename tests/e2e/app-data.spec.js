@@ -2776,8 +2776,11 @@ test('Agenda editing preserves the original zoned-civil seconds and milliseconds
   await page.locator('.agenda-event-chip').filter({ hasText: 'Cita con precisión' }).click();
   await page.getByRole('dialog', { name: 'Cita con precisión' }).getByRole('button', { name: 'Editar' }).click();
   const dialog = page.getByRole('dialog', { name: 'Editar evento' });
-  await expect(dialog.getByLabel('Comienza')).toHaveValue(startLocal);
-  await expect(dialog.getByLabel('Termina')).toHaveValue(endLocal);
+  // Chromium canonicalizes datetime-local values by trimming trailing fractional zeros.
+  // The state and mutation payload must still preserve the original precision below.
+  const browserValue = (value) => value.replace(/(\.\d*?[1-9])0+$/, '$1');
+  await expect(dialog.getByLabel('Comienza')).toHaveValue(browserValue(startLocal));
+  await expect(dialog.getByLabel('Termina')).toHaveValue(browserValue(endLocal));
   await dialog.getByLabel('Descripción (opcional)').fill('Descripción revisada');
   await dialog.getByRole('button', { name: 'Guardar cambios' }).click();
 
