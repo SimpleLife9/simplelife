@@ -183,6 +183,13 @@ test('zoned civil Event refuses client preview, wrong timezone, stale endpoints 
       instant: '2026-11-01T06:40:00.000Z',
     },
   }), /instants do not match/);
+  assert.throws(() => applyAuthoritativeEventResolution(event, {
+    ...authoritativeRange(),
+    start: {
+      ...authoritativeRange().start,
+      resolution: 'ambiguous-later',
+    },
+  }), /ignored the requested earlier fold choice/);
 });
 
 test('fixed-instant Event normalizes explicit offsets and bypasses the IANA wall-time resolver', () => {
@@ -216,6 +223,12 @@ test('fixed-instant Event requires explicit offsets and a positive UTC interval'
     startsAt: '2026-11-02T10:00:00Z',
     endsAt: '2026-11-02T10:00:00Z',
   }), /end must be after/);
+  assert.throws(() => createEventDraft({
+    title: 'Invalid calendar date',
+    temporalKind: 'fixed_instant',
+    startsAt: '2026-02-30T10:00:00Z',
+    endsAt: '2026-03-01T10:00:00Z',
+  }), /Invalid calendar date/);
   assert.throws(() => createEventDraft({
     title: 'Invalid source zone',
     temporalKind: 'fixed_instant',
