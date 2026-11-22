@@ -709,6 +709,19 @@ async function mockSupabaseSession(page, initialData = {}) {
         await json(409, { error: 'EVENT_VERSION_CONFLICT' });
         return;
       }
+      const decisions = Array.isArray(payload.protectedTimeDecisions) ? payload.protectedTimeDecisions : [];
+      if (payload.action === 'edit' && protectedTimeConflicts.length) {
+        const accepted = new Map(decisions.map((item) => [item.blockId + ':' + item.occurrenceStartsAt, item]));
+        const complete = protectedTimeConflicts.every((conflict) => {
+          const choice = accepted.get(conflict.conflictKey);
+          return choice && choice.blockUpdatedAt === conflict.blockUpdatedAt
+            && choice.decision === conflict.requiredDecision;
+        });
+        if (!complete) {
+          await json(409, { error: 'PROTECTED_TIME_CONFLICTS', conflicts: protectedTimeConflicts });
+          return;
+        }
+      }
       const updatedAt = new Date(Date.now() + mutationRequests.length * 2).toISOString();
       if (payload.action === 'edit') {
         const event = payload.event;
@@ -735,6 +748,7 @@ async function mockSupabaseSession(page, initialData = {}) {
           time_zone: event.timeZone ?? event.sourceTimeZone ?? null,
           starts_at: event.startsAt ?? (unchangedZonedCivilRange ? row.starts_at : null),
           ends_at: event.endsAt ?? (unchangedZonedCivilRange ? row.ends_at : null),
+          protected_time_decisions: decisions,
         });
       } else if (payload.action === 'cancel') {
         row.event_status = 'cancelled';
@@ -3185,4 +3199,94 @@ test('Agenda requires one explicit Protected Time decision per hard/flexible ove
   ]);
   expect(insertedAgendaEvents).toHaveLength(1);
   expect(insertedAgendaEvents[0].protected_time_decisions).toHaveLength(2);
+});
+
+
+test('Agenda Event edits recheck Protected Time and persist the selected hard override', async ({ page }) => {
+  const today = await todayInBrowserHavana(page);
+  const tomorrow = await page.evaluate((value) => {
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
+  }, today);
+  const blockId = '019a0000-0000-7000-8000-000000000221';
+  const blockUpdatedAt = '2026-11-20T10:00:00.000000+00:00';
+  const occurrenceStartsAt = today + 'T14:00:00.000Z';
+  const conflict = {
+    conflictKey: blockId + ':' + occurrenceStartsAt,
+    blockId,
+    blockUpdatedAt,
+    label: 'Sueño protegido',
+    category: 'Salud',
+    protectionMode: 'hard',
+    patternKind: 'one_off',
+    occurrenceDate: today,
+    occurrenceStartsAt,
+    occurrenceEndsAt: today + 'T15:00:00.000Z',
+    overlapStartsAt: today + 'T14:15:00.000Z',
+    overlapEndsAt: today + 'T14:45:00.000Z',
+    timeZone: 'America/Havana',
+    requiredDecision: 'override_hard',
+  };
+  const seedEvent = {
+    id: '0190f47a-7b2c-7abc-8def-0123456789c5',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    updated_by_user_id: profile.id,
+    title: 'Evento anterior al bloque',
+    description: 'Antes no existía este bloque protegido',
+    location_label: null,
+    location_kind: null,
+    event_status: 'confirmed',
+    temporal_kind: 'all_day',
+    start_date: today,
+    end_date_exclusive: tomorrow,
+    start_local: null,
+    end_local: null,
+    time_zone: null,
+    starts_at: null,
+    ends_at: null,
+    protected_time_decisions: [],
+    archived_at: null,
+    deleted_at: null,
+    purge_after: null,
+    created_at: '2026-11-22T17:00:00.000Z',
+    updated_at: '2026-11-22T17:00:00.000000Z',
+  };
+  const { calendarEvents, mutationRequests } = await mockSupabaseSession(page, {
+    calendarEvents: [seedEvent],
+    protectedTimeConflicts: [conflict],
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.getByRole('navigation', { name: 'Navegación principal' })
+    .getByRole('button', { name: /Agenda/ }).click();
+
+  await page.locator('.agenda-event-chip').filter({ hasText: seedEvent.title }).first().click();
+  await page.getByRole('dialog', { name: seedEvent.title }).getByRole('button', { name: 'Editar' }).click();
+  const composer = page.getByRole('dialog', { name: 'Editar evento' });
+  await composer.getByLabel('Descripción (opcional)').fill('Detalles actualizados; el horario sigue protegido.');
+  await composer.getByRole('button', { name: 'Guardar cambios' }).click();
+
+  const decisionDialog = page.getByRole('alertdialog', { name: 'Hay compromisos que se cruzan' });
+  await expect(decisionDialog).toBeVisible();
+  expect(mutationRequests).toHaveLength(1);
+  expect(mutationRequests[0].payload.action).toBe('edit');
+  expect(calendarEvents[0].description).toBe(seedEvent.description);
+
+  await decisionDialog.getByLabel('Tu decisión para este cruce').selectOption('override_hard');
+  await decisionDialog.getByRole('button', { name: 'Guardar con estas decisiones' }).click();
+  await expect(page.getByText('Cambios guardados.')).toBeVisible();
+  await expect(decisionDialog).toHaveCount(0);
+  expect(mutationRequests).toHaveLength(2);
+  expect(mutationRequests[1].key).toBe(mutationRequests[0].key);
+  expect(mutationRequests[1].payload.protectedTimeDecisions).toMatchObject([{
+    blockId,
+    blockUpdatedAt,
+    occurrenceStartsAt,
+    decision: 'override_hard',
+  }]);
+  expect(calendarEvents[0].description).toBe('Detalles actualizados; el horario sigue protegido.');
+  expect(calendarEvents[0].protected_time_decisions).toHaveLength(1);
 });
