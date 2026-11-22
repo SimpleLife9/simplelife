@@ -351,7 +351,10 @@ export async function handleRequest(
       if (patch instanceof Response) return patch;
     }
 
-    if (toInstant(current.updated_at) !== toInstant(input.expectedUpdatedAt)) {
+    // Postgres timestamps may carry microseconds; Date.parse truncates to
+    // milliseconds. Compare the exact server-returned value to avoid accepting
+    // a stale version that differs only below millisecond precision.
+    if (current.updated_at !== input.expectedUpdatedAt) {
       return json({ error: "EVENT_CHANGED_RELOAD_AND_RETRY" }, 409);
     }
 
