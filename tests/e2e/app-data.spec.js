@@ -2822,10 +2822,12 @@ test('Agenda schedules an existing Task without changing its deadline or executi
   await page.getByRole('button', { name: 'Tareas programadas', exact: true }).click();
   const section = page.getByRole('region', { name: 'Reservas de tareas' });
   await expect(section.getByRole('heading', { name: 'Tiempo reservado para tus tareas' })).toBeVisible();
-  await expect(section.getByText('Preparar propuesta comercial')).toBeVisible();
   await section.getByRole('button', { name: 'Programar tarea' }).click();
 
-  await section.getByLabel('Tarea').selectOption(task.id);
+  const taskSelect = section.getByLabel('Tarea');
+  await expect(taskSelect).toHaveValue(task.id);
+  await expect(taskSelect.locator('option:checked')).toHaveText('Preparar propuesta comercial');
+  await taskSelect.selectOption(task.id);
   await section.getByLabel('Comienza').fill(tomorrow + 'T09:00');
   await section.getByLabel('Termina').fill(tomorrow + 'T10:00');
   await section.getByRole('button', { name: 'Crear reserva' }).click();
