@@ -156,10 +156,14 @@ export function joinOccurrenceResolutionBatch(batch, response) {
     assert(result.rulesVersion === response.rulesVersion, 'Resolver result TZDB version differs from batch metadata.');
     assert(result.resolverVersion === response.resolverVersion, 'Resolver result resolver version differs from batch metadata.');
     assert(result.requestedTimeZone === range.timeZone, 'Resolver result timezone does not match its planned occurrence.');
+    assert(result.start && result.end, 'Resolver result must include endpoint resolution metadata.');
     assert(result.start?.requestedLocalDateTime === range.start.localDateTime,
       'Resolver result start does not match the planned occurrence order.');
     assert(result.end?.requestedLocalDateTime === range.end.localDateTime,
       'Resolver result end does not match the planned occurrence order.');
+    assert(result.start.rulesSource === response.rulesSource
+      && result.end.rulesSource === response.rulesSource,
+    'Resolver endpoint rules sources differ from batch metadata.');
     assert(result.start.rulesVersion === response.rulesVersion
       && result.end.rulesVersion === response.rulesVersion,
     'Resolver endpoint TZDB versions differ from batch metadata.');
@@ -172,7 +176,6 @@ export function joinOccurrenceResolutionBatch(batch, response) {
     const endsAt = Date.parse(result.endsAt);
     assert(Number.isFinite(startsAt) && Number.isFinite(endsAt) && endsAt > startsAt,
       'Resolver result must contain a positive, valid UTC interval.');
-    assert(result.start && result.end, 'Resolver result must include endpoint resolution metadata.');
     assert(result.start.instant === result.startsAt && result.end.instant === result.endsAt,
       'Resolver endpoint instants differ from the returned UTC interval.');
 
