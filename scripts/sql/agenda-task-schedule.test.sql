@@ -107,7 +107,6 @@ DECLARE
   v_patch jsonb;
   v_result record;
   v_updated_at timestamptz;
-  v_audit_count bigint;
   v_schedule_count bigint;
   v_task_status text;
 BEGIN
@@ -355,17 +354,6 @@ BEGIN
     RAISE EXCEPTION 'TaskSchedule transitions must not change Task execution status';
   END IF;
 
-  SELECT count(*) INTO v_audit_count
-  FROM public.audit_event
-  WHERE entity_type = 'task_schedule'
-    AND entity_id IN (
-      '019a0000-0000-7000-8000-000000000101',
-      '019a0000-0000-7000-8000-000000000102',
-      '019a0000-0000-7000-8000-000000000103'
-    );
-  IF v_audit_count <> 8 THEN
-    RAISE EXCEPTION 'Each TaskSchedule create/edit/status transition must append audit; got %', v_audit_count;
-  END IF;
 END;
 $test$;
 
@@ -402,6 +390,25 @@ BEGIN
 END;
 $test$;
 RESET ROLE;
+
+-- Verify protected audit evidence as postgres, not service_role.
+DO $test$
+DECLARE
+  v_audit_count bigint;
+BEGIN
+  SELECT count(*) INTO v_audit_count
+  FROM public.audit_event
+  WHERE entity_type = 'task_schedule'
+    AND entity_id IN (
+      '019a0000-0000-7000-8000-000000000101',
+      '019a0000-0000-7000-8000-000000000102',
+      '019a0000-0000-7000-8000-000000000103'
+    );
+  IF v_audit_count <> 8 THEN
+    RAISE EXCEPTION 'Each TaskSchedule create/edit/status transition must append audit; got %', v_audit_count;
+  END IF;
+END;
+$test$;
 
 -- Authenticated reads are owner-scoped; direct browser writes are not granted.
 SET LOCAL ROLE authenticated;
