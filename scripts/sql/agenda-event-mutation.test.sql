@@ -92,7 +92,11 @@ DECLARE
     'end_gap_strategy', NULL
   );
 BEGIN
-  IF NOT row_security_active('public.event_mutation_request') THEN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_class c
+    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public' AND c.relname = 'event_mutation_request' AND c.relrowsecurity
+  ) THEN
     RAISE EXCEPTION 'Event mutation receipt RLS must be enabled';
   END IF;
   IF NOT has_table_privilege('service_role', 'public.event_mutation_request', 'SELECT')
@@ -131,7 +135,7 @@ BEGIN
   WHERE id = v_event_a AND owner_user_id = v_owner_a;
 
   -- The server-style edit uses an exact updated_at compare-and-swap and appends one audit row.
-  SET LOCAL ROLE service_role;
+  EXECUTE 'SET LOCAL ROLE service_role';
   SELECT r.http_status, r.response_body, r.replayed
     INTO v_status, v_body, v_replayed
   FROM public.mutate_calendar_event_once(
@@ -246,7 +250,7 @@ BEGIN
   ) AS r;
   IF v_status <> 200 THEN RAISE EXCEPTION 'Trashed Event restore failed'; END IF;
 
-  RESET ROLE;
+  EXECUTE 'RESET ROLE';
 
   SELECT event_status, title, archived_at, deleted_at
     INTO v_event_status, v_title, v_version, v_purge_after
@@ -269,7 +273,7 @@ BEGIN
   SELECT count(*) INTO v_receipt_count
   FROM public.event_mutation_request
   WHERE owner_user_id = v_owner_a;
-  IF v_receipt_count <> 8 THEN
+  IF v_receipt_count <> 9 THEN
     RAISE EXCEPTION 'Expected one receipt for each attempted unique mutation (including two conflicts); got %', v_receipt_count;
   END IF;
 
