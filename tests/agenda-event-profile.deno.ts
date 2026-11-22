@@ -1,4 +1,3 @@
-import { assertEquals } from "jsr:@std/assert@1.0.14";
 import {
   resolveActiveEventProfile,
   type EventAuthenticatedContext,
@@ -14,6 +13,12 @@ interface QueryCapture {
   filterColumn: string | null;
   filterValue: string | null;
   maybeSingleCalls: number;
+}
+
+function assertEquals(actual: unknown, expected: unknown, label = "values differ"): void {
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    throw new Error(label + ": expected " + JSON.stringify(expected) + ", received " + JSON.stringify(actual));
+  }
 }
 
 function makeContext({
