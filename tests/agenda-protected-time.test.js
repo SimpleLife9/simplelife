@@ -151,3 +151,15 @@ test('assessment is immutable and does not mutate source ranges', () => {
   assert.deepEqual(candidate, timedCandidate);
   assert.equal(protectedBlock.startsAt, '2026-11-22T10:00:00Z');
 });
+
+test('timed conflict inputs require explicit instants and reject impossible dates', () => {
+  assert.throws(() => assessProtectedTimeConflict({
+    candidate: { temporalKind: 'timed', startsAt: '2026-11-22T10:00', endsAt: '2026-11-22T11:00Z' },
+    protectedBlock: timedBlock('hard'),
+  }), /explicit UTC offset or Z/);
+
+  assert.throws(() => assessProtectedTimeConflict({
+    candidate: { temporalKind: 'timed', startsAt: '2026-02-30T10:00:00Z', endsAt: '2026-03-01T11:00:00Z' },
+    protectedBlock: timedBlock('hard'),
+  }), /Invalid calendar date/);
+});
