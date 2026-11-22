@@ -9,23 +9,23 @@ INSERT INTO auth.users (
   email_confirmed_at, raw_app_meta_data, raw_user_meta_data
 ) VALUES
   (
-    'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+    'aaaaaaaa-1111-4111-8111-111111111111',
     '00000000-0000-0000-0000-000000000000',
-    'authenticated', 'authenticated', 'protected-time-owner-a@example.invalid',
+    'authenticated', 'authenticated', 'protected-time-owner-a-r2@example.invalid',
     '', now(), '{"provider":"email","providers":["email"]}'::jsonb, '{}'::jsonb
   ),
   (
-    'ffffffff-ffff-4fff-8fff-ffffffffffff',
+    'bbbbbbbb-2222-4222-8222-222222222222',
     '00000000-0000-0000-0000-000000000000',
-    'authenticated', 'authenticated', 'protected-time-owner-b@example.invalid',
+    'authenticated', 'authenticated', 'protected-time-owner-b-r2@example.invalid',
     '', now(), '{"provider":"email","providers":["email"]}'::jsonb, '{}'::jsonb
   )
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO public.user_profile (id, auth_user_id, display_name)
 VALUES
-  ('019a0000-0000-7000-8000-000000000011', 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', 'Protected Time Owner A'),
-  ('019a0000-0000-7000-8000-000000000012', 'ffffffff-ffff-4fff-8fff-ffffffffffff', 'Protected Time Owner B')
+  ('019a0000-0000-7000-8000-000000000051', 'aaaaaaaa-1111-4111-8111-111111111111', 'Protected Time Owner A'),
+  ('019a0000-0000-7000-8000-000000000052', 'bbbbbbbb-2222-4222-8222-222222222222', 'Protected Time Owner B')
 ON CONFLICT (id) DO NOTHING;
 
 DO $assert_privileges$
@@ -48,9 +48,9 @@ SET LOCAL ROLE service_role;
 
 DO $test$
 DECLARE
-  v_owner_a uuid := '019a0000-0000-7000-8000-000000000011';
-  v_owner_b uuid := '019a0000-0000-7000-8000-000000000012';
-  v_auth_b uuid := 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+  v_owner_a uuid := '019a0000-0000-7000-8000-000000000051';
+  v_owner_b uuid := '019a0000-0000-7000-8000-000000000052';
+  v_auth_b uuid := 'bbbbbbbb-2222-4222-8222-222222222222';
   v_block_a uuid := '019a0000-0000-7000-8000-000000000111';
   v_block_b uuid := '019a0000-0000-7000-8000-000000000112';
   v_key_create uuid := '019a0000-0000-7000-8000-000000000201';
@@ -281,21 +281,21 @@ BEGIN
   FROM public.audit_event
   WHERE entity_type = 'protected_time_block'
     AND entity_id = '019a0000-0000-7000-8000-000000000111'::uuid
-    AND account_user_id = '019a0000-0000-7000-8000-000000000011'::uuid;
+    AND account_user_id = '019a0000-0000-7000-8000-000000000051'::uuid;
   IF v_count <> 5 THEN RAISE EXCEPTION 'Owner A needs exactly five audit rows, got %', v_count; END IF;
 
   SELECT count(*) INTO v_count
   FROM public.audit_event
   WHERE entity_type = 'protected_time_block'
     AND entity_id = '019a0000-0000-7000-8000-000000000112'::uuid
-    AND account_user_id = '019a0000-0000-7000-8000-000000000012'::uuid;
+    AND account_user_id = '019a0000-0000-7000-8000-000000000052'::uuid;
   IF v_count <> 1 THEN RAISE EXCEPTION 'Owner B needs one audit row, got %', v_count; END IF;
 END;
 $audit_assertions$;
 
 -- Exercise the actual authenticated RLS policy, not merely the table ACL.
 SET LOCAL ROLE authenticated;
-SET LOCAL request.jwt.claim.sub = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+SET LOCAL request.jwt.claim.sub = 'aaaaaaaa-1111-4111-8111-111111111111';
 DO $rls_owner_a$
 DECLARE v_count bigint;
 BEGIN
@@ -312,7 +312,7 @@ $rls_owner_a$;
 
 RESET ROLE;
 SET LOCAL ROLE authenticated;
-SET LOCAL request.jwt.claim.sub = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+SET LOCAL request.jwt.claim.sub = 'bbbbbbbb-2222-4222-8222-222222222222';
 DO $rls_owner_b$
 DECLARE v_count bigint;
 BEGIN
