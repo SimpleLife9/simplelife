@@ -47,6 +47,9 @@ const preference = {
 async function mockSupabaseSession(page, initialData = {}) {
   const insertedTasks = [];
   const updatedTasks = [];
+  const calendarEvents = [...(initialData.calendarEvents || [])];
+  const insertedAgendaEvents = [];
+  const idempotencyRequests = [];
   const taskRows = [...(initialData.tasks || [])];
   const projects = [...(initialData.projects || [])];
   const insertedProjects = [];
@@ -139,7 +142,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     const corsHeaders = {
       'access-control-allow-origin': 'http://127.0.0.1:5173',
       'access-control-allow-methods': 'GET, POST, PATCH, DELETE, OPTIONS, HEAD',
-      'access-control-allow-headers': 'apikey, authorization, content-type, x-client-info, prefer',
+      'access-control-allow-headers': 'apikey, authorization, content-type, x-client-info, prefer, idempotency-key',
       'access-control-max-age': '86400',
     };
 
@@ -184,6 +187,11 @@ async function mockSupabaseSession(page, initialData = {}) {
 
     if (url.pathname === '/rest/v1/user_preference' && method === 'GET') {
       await json(200, preference);
+      return;
+    }
+
+    if (url.pathname === '/rest/v1/calendar_event' && method === 'GET') {
+      await json(200, calendarEvents.filter((row) => !row.archived_at && !row.deleted_at));
       return;
     }
 
@@ -570,6 +578,41 @@ async function mockSupabaseSession(page, initialData = {}) {
       return;
     }
 
+    if (url.pathname === '/functions/v1/agenda-event-create' && method === 'POST') {
+      const requestBody = request.postDataJSON();
+      const event = requestBody.event;
+      const key = request.headers()['idempotency-key'] || '';
+      idempotencyRequests.push({ key, event });
+      const createdAt = '2026-11-22T18:00:00.000Z';
+      const row = {
+        id: '0190f47a-7b2c-7abc-8def-0123456789be',
+        owner_user_id: profile.id,
+        created_by_user_id: profile.id,
+        updated_by_user_id: profile.id,
+        title: event.title,
+        description: event.description ?? null,
+        location_label: event.locationLabel ?? null,
+        location_kind: event.locationKind ?? null,
+        event_status: event.eventStatus || 'confirmed',
+        temporal_kind: event.temporalKind,
+        start_date: event.startDate ?? null,
+        end_date_exclusive: event.endDateExclusive ?? null,
+        start_local: event.startLocalDateTime ?? null,
+        end_local: event.endLocalDateTime ?? null,
+        time_zone: event.timeZone ?? event.sourceTimeZone ?? null,
+        starts_at: event.startsAt ?? null,
+        ends_at: event.endsAt ?? null,
+        archived_at: null,
+        deleted_at: null,
+        created_at: createdAt,
+        updated_at: createdAt,
+      };
+      calendarEvents.unshift(row);
+      insertedAgendaEvents.push(row);
+      await json(201, { eventId: row.id, createdAt, eventStatus: row.event_status, replayed: false });
+      return;
+    }
+
     if (url.pathname.startsWith('/rest/v1/')) {
       await json(200, []);
       return;
@@ -578,7 +621,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     await json(404, { message: `Unexpected mocked Supabase request: ${method} ${url.pathname}` });
   });
 
-  return { signedOutRequests, insertedTasks, updatedTasks, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
+  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, insertedAgendaEvents, idempotencyRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
 }
 
 test('mock-authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
