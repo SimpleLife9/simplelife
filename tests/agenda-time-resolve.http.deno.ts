@@ -205,3 +205,24 @@ Deno.test("HTTP rejects empty, oversized and partially invalid range batches", a
     equal(typeof body.error, "string", label + " batch error");
   }
 });
+
+
+Deno.test("HTTP accepts the maximum 25-range batch within the larger bounded body limit", async () => {
+  const range = {
+    timeZone: "America/Havana",
+    start: { localDateTime: "2026-10-30T09:00", disambiguation: "earlier", gapStrategy: "next-valid" },
+    end: { localDateTime: "2026-10-30T10:00", disambiguation: "earlier", gapStrategy: "next-valid" },
+  };
+  const body = JSON.stringify({ ranges: Array.from({ length: 25 }, () => range) });
+  const byteLength = new TextEncoder().encode(body).byteLength;
+  if (byteLength <= 4096) throw new Error("test batch should exceed the previous 4 KiB request limit.");
+  if (byteLength > MAX_REQUEST_BYTES) throw new Error("test batch must stay under MAX_REQUEST_BYTES.");
+  const response = await handleRequest(new Request(URL, {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body,
+  }));
+  equal(response.status, 200, "maximum batch status");
+  const result = await json(response);
+  equal(result.count, 25, "maximum batch count");
+});
