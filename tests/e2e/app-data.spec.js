@@ -2729,3 +2729,72 @@ test('Agenda edits, cancels, reopens, finishes, archives, trashes and restores E
   ]);
   expect(new Set(mutationRequests.map((request) => request.key)).size).toBe(mutationRequests.length);
 });
+
+
+test('Agenda editing preserves the original zoned-civil seconds and milliseconds when only the description changes', async ({ page }) => {
+  const today = await todayInBrowserHavana(page);
+  const startLocal = today + 'T09:30:45.250';
+  const endLocal = today + 'T10:15:30.125';
+  const timedEvent = {
+    id: '0190f47a-7b2c-7abc-8def-0123456789c2',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    updated_by_user_id: profile.id,
+    title: 'Cita con precisión',
+    description: 'Descripción original',
+    location_label: null,
+    location_kind: null,
+    event_status: 'confirmed',
+    temporal_kind: 'zoned_civil',
+    start_date: null,
+    end_date_exclusive: null,
+    start_local: startLocal,
+    end_local: endLocal,
+    time_zone: 'America/Havana',
+    starts_at: today + 'T14:30:45.250Z',
+    ends_at: today + 'T15:15:30.125Z',
+    start_disambiguation: 'earlier',
+    end_disambiguation: 'earlier',
+    start_gap_strategy: 'next-valid',
+    end_gap_strategy: 'next-valid',
+    archived_at: null,
+    deleted_at: null,
+    purge_after: null,
+    created_at: '2026-11-22T17:00:00.000Z',
+    updated_at: '2026-11-22T17:00:00.000000Z',
+  };
+  const { calendarEvents, mutationRequests } = await mockSupabaseSession(page, {
+    calendarEvents: [timedEvent],
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.getByRole('navigation', { name: 'Navegación principal' })
+    .getByRole('button', { name: /Agenda/ }).click();
+
+  await page.locator('.agenda-event-chip').filter({ hasText: 'Cita con precisión' }).click();
+  await page.getByRole('dialog', { name: 'Cita con precisión' }).getByRole('button', { name: 'Editar' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Editar evento' });
+  await expect(dialog.getByLabel('Comienza')).toHaveValue(startLocal);
+  await expect(dialog.getByLabel('Termina')).toHaveValue(endLocal);
+  await dialog.getByLabel('Descripción (opcional)').fill('Descripción revisada');
+  await dialog.getByRole('button', { name: 'Guardar cambios' }).click();
+
+  await expect(page.getByText('Cambios guardados.')).toBeVisible();
+  expect(mutationRequests).toHaveLength(1);
+  expect(mutationRequests[0].payload.event).toMatchObject({
+    temporalKind: 'zoned_civil',
+    startLocalDateTime: startLocal,
+    endLocalDateTime: endLocal,
+    timeZone: 'America/Havana',
+  });
+  expect(calendarEvents[0]).toMatchObject({
+    description: 'Descripción revisada',
+    start_local: startLocal,
+    end_local: endLocal,
+    time_zone: 'America/Havana',
+    starts_at: timedEvent.starts_at,
+    ends_at: timedEvent.ends_at,
+  });
+});
