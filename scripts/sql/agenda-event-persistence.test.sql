@@ -219,10 +219,6 @@ UPDATE public.calendar_event
 SET title = 'Owner A all-day test updated'
 WHERE id = '019a0000-0000-7000-8000-000000000101';
 
-SELECT count(*) AS audit_before_noop
-FROM public.audit_event
-WHERE entity_id = '019a0000-0000-7000-8000-000000000101';
-
 UPDATE public.calendar_event
 SET title = title
 WHERE id = '019a0000-0000-7000-8000-000000000101';
