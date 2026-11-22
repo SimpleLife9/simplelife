@@ -106,7 +106,7 @@ BEGIN
 
   -- The serializer emits this exact record shape. Reject unknown keys rather
   -- than silently ignoring client/server-owned fields through jsonb_populate_record.
-  IF jsonb_object_length(p_event_record) <> 26
+  IF (SELECT count(*) FROM jsonb_object_keys(p_event_record)) <> 26
      OR EXISTS (
        SELECT 1
        FROM jsonb_object_keys(p_event_record) AS supplied(key)
@@ -156,6 +156,11 @@ BEGIN
      OR v_event.owner_user_id IS DISTINCT FROM p_owner_user_id
      OR v_event.created_by_user_id IS DISTINCT FROM p_owner_user_id
      OR v_event.updated_by_user_id IS DISTINCT FROM p_owner_user_id
+     OR v_event.event_status IS NULL
+     OR v_event.event_status NOT IN ('preparing', 'proposed', 'confirmed')
+     OR v_event.archived_at IS NOT NULL
+     OR v_event.deleted_at IS NOT NULL
+     OR v_event.purge_after IS NOT NULL
      OR v_event.id = p_idempotency_key THEN
     RAISE EXCEPTION 'Serialized Event identity does not match the trusted owner or idempotency key'
       USING ERRCODE = '22023';
