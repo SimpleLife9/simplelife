@@ -2595,3 +2595,137 @@ test('Agenda keeps day, week and month controls usable on a 390px mobile screen 
   expect(dimensions.document).toBeLessThanOrEqual(dimensions.viewport + 1);
   await expect(page.getByRole('button', { name: 'Nuevo evento' })).toBeVisible();
 });
+
+
+test('Agenda edits, cancels, reopens, finishes, archives, trashes and restores Events through the authenticated mutation endpoint', async ({ page }) => {
+  const today = await todayInBrowserHavana(page);
+  const tomorrow = await page.evaluate((value) => {
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
+  }, today);
+  const seedEvent = {
+    id: '0190f47a-7b2c-7abc-8def-0123456789c1',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    updated_by_user_id: profile.id,
+    title: 'Evento de prueba',
+    description: 'Compromiso original',
+    location_label: 'Casa',
+    location_kind: 'physical',
+    event_status: 'confirmed',
+    temporal_kind: 'all_day',
+    start_date: today,
+    end_date_exclusive: tomorrow,
+    start_local: null,
+    end_local: null,
+    time_zone: null,
+    starts_at: null,
+    ends_at: null,
+    archived_at: null,
+    deleted_at: null,
+    purge_after: null,
+    created_at: '2026-11-22T17:00:00.000Z',
+    updated_at: '2026-11-22T17:00:00.000000Z',
+  };
+  const { calendarEvents, mutationRequests } = await mockSupabaseSession(page, {
+    calendarEvents: [seedEvent],
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  const navigation = page.getByRole('navigation', { name: 'Navegación principal' });
+  await navigation.getByRole('button', { name: /Agenda/ }).click();
+
+  const openEvent = async (title) => {
+    await page.locator('.agenda-event-chip').filter({ hasText: title }).first().click();
+  };
+  await openEvent('Evento de prueba');
+  let detail = page.getByRole('dialog', { name: 'Evento de prueba' });
+  await detail.getByRole('button', { name: 'Editar' }).click();
+
+  const editDialog = page.getByRole('dialog', { name: 'Editar evento' });
+  await editDialog.getByLabel('Nombre del evento').fill('Evento editado');
+  await editDialog.getByLabel('Descripción (opcional)').fill('Compromiso actualizado');
+  await editDialog.getByRole('button', { name: 'Guardar cambios' }).click();
+  await expect(page.getByText('Cambios guardados.')).toBeVisible();
+  await expect(page.locator('.agenda-event-chip').filter({ hasText: 'Evento editado' })).toBeVisible();
+  expect(mutationRequests[0].payload).toMatchObject({
+    action: 'edit',
+    eventId: seedEvent.id,
+    event: { title: 'Evento editado', temporalKind: 'all_day', startDate: today, endDateExclusive: tomorrow },
+  });
+  expect(mutationRequests[0].key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  expect(calendarEvents[0]).toMatchObject({
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    updated_by_user_id: profile.id,
+    title: 'Evento editado',
+    description: 'Compromiso actualizado',
+  });
+
+  await openEvent('Evento editado');
+  detail = page.getByRole('dialog', { name: 'Evento editado' });
+  await detail.getByRole('button', { name: 'Cancelar evento' }).click();
+  let confirm = page.getByRole('alertdialog', { name: 'Cancelar evento' });
+  await expect(confirm).toBeVisible();
+  await confirm.getByRole('button', { name: 'Confirmar cancelación' }).click();
+  await expect(page.getByText('Evento cancelado.')).toBeVisible();
+  expect(calendarEvents[0].event_status).toBe('cancelled');
+
+  await openEvent('Evento editado');
+  detail = page.getByRole('dialog', { name: 'Evento editado' });
+  await detail.getByRole('button', { name: 'Reabrir' }).click();
+  await expect(page.getByText('Evento reabierto.')).toBeVisible();
+  expect(calendarEvents[0].event_status).toBe('confirmed');
+
+  await openEvent('Evento editado');
+  detail = page.getByRole('dialog', { name: 'Evento editado' });
+  await detail.getByRole('button', { name: 'Finalizar' }).click();
+  confirm = page.getByRole('alertdialog', { name: 'Finalizar evento' });
+  await confirm.getByRole('button', { name: 'Confirmar finalización' }).click();
+  await expect(page.getByText('Evento finalizado.')).toBeVisible();
+  expect(calendarEvents[0].event_status).toBe('finished');
+
+  await openEvent('Evento editado');
+  detail = page.getByRole('dialog', { name: 'Evento editado' });
+  await expect(detail.getByRole('button', { name: 'Cancelar evento' })).toHaveCount(0);
+  await expect(detail.getByRole('button', { name: 'Editar' })).toHaveCount(0);
+  await detail.getByRole('button', { name: 'Archivar' }).click();
+  confirm = page.getByRole('alertdialog', { name: 'Archivar evento' });
+  await confirm.getByRole('button', { name: 'Archivar' }).click();
+  await expect(page.getByText('Evento archivado.')).toBeVisible();
+  expect(calendarEvents[0].archived_at).not.toBeNull();
+
+  await page.getByRole('navigation', { name: 'Estado de los eventos' }).getByRole('button', { name: 'Archivados' }).click();
+  await openEvent('Evento editado');
+  detail = page.getByRole('dialog', { name: 'Evento editado' });
+  await expect(detail.getByRole('button', { name: 'Restaurar evento' })).toBeVisible();
+  await detail.getByRole('button', { name: 'Restaurar evento' }).click();
+  await expect(page.getByText('Evento restaurado.')).toBeVisible();
+  expect(calendarEvents[0].archived_at).toBeNull();
+
+  await page.getByRole('navigation', { name: 'Estado de los eventos' }).getByRole('button', { name: 'Activos' }).click();
+  await openEvent('Evento editado');
+  detail = page.getByRole('dialog', { name: 'Evento editado' });
+  await detail.getByRole('button', { name: 'Papelera' }).click();
+  confirm = page.getByRole('alertdialog', { name: 'Mover a papelera' });
+  await confirm.getByRole('button', { name: 'Mover a papelera' }).click();
+  await expect(page.getByText('Evento movido a la papelera.')).toBeVisible();
+  expect(calendarEvents[0].deleted_at).not.toBeNull();
+  expect(Date.parse(calendarEvents[0].purge_after) - Date.parse(calendarEvents[0].deleted_at)).toBe(30 * 86400000);
+
+  await page.getByRole('navigation', { name: 'Estado de los eventos' }).getByRole('button', { name: 'Papelera' }).click();
+  await openEvent('Evento editado');
+  detail = page.getByRole('dialog', { name: 'Evento editado' });
+  await expect(detail.getByText('En papelera')).toBeVisible();
+  await detail.getByRole('button', { name: 'Restaurar evento' }).click();
+  await expect(page.getByText('Evento restaurado.')).toBeVisible();
+  expect(calendarEvents[0].deleted_at).toBeNull();
+  expect(calendarEvents[0].purge_after).toBeNull();
+
+  expect(mutationRequests.map((request) => request.payload.action)).toEqual([
+    'edit', 'cancel', 'reopen', 'finish', 'archive', 'restore', 'trash', 'restore',
+  ]);
+  expect(new Set(mutationRequests.map((request) => request.key)).size).toBe(mutationRequests.length);
+});
