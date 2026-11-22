@@ -141,6 +141,41 @@ export function resolveLocalDateTime(value: unknown) {
  * dataset and one canonical timezone object. Each endpoint has independent DST
  * disambiguation, while the range itself is validated using resolved UTC instants.
  */
+
+
+/**
+ * Resolves a bounded collection of independent Event ranges against the same
+ * loaded TZDB release. Results preserve request order and the batch is
+ * all-or-nothing: one invalid range rejects the entire request.
+ */
+export const MAX_RANGE_BATCH_ITEMS = 25;
+
+export function resolveLocalDateTimeRanges(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("A JSON object is required.");
+  }
+  const input = value as { ranges?: unknown };
+  for (const key of Object.keys(value)) {
+    if (key !== "ranges") throw new TypeError("Unsupported batch input field: " + key);
+  }
+  if (!Array.isArray(input.ranges)) throw new TypeError("ranges must be an array.");
+  if (input.ranges.length < 1 || input.ranges.length > MAX_RANGE_BATCH_ITEMS) {
+    throw new RangeError("ranges must contain between 1 and " + MAX_RANGE_BATCH_ITEMS + " items.");
+  }
+
+  const rulesVersion = getTzdbVersion();
+  if (rulesVersion !== EXPECTED_TZDB_VERSION) throw new TzdbVersionError(rulesVersion);
+  const results = input.ranges.map((range) => resolveLocalDateTimeRange(range));
+  return Object.freeze({
+    count: results.length,
+    results: Object.freeze(results),
+    rulesSource: "iana-tzdb",
+    rulesVersion,
+    resolverVersion: RESOLVER_VERSION,
+    authoritative: true as const,
+  });
+}
+
 export function resolveLocalDateTimeRange(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError("A JSON object is required.");
