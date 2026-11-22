@@ -298,8 +298,10 @@ export async function handleRequest(
         }, 409);
       }
       const decisionsToPersist = retainExistingConsent
-        ? conflictAssessment.assessment.conflicts.map((conflict) =>
-          previousDecisionMap.get(conflict.conflictKey))
+        ? conflictAssessment.assessment.conflicts.flatMap((conflict) => {
+          const previous = previousDecisionMap.get(conflict.conflictKey);
+          return previous ? [previous] : [];
+        })
         : conflictAssessment.assessment.decisions;
       const record = buildEventInsertRecord({
         eventDraft: readyDraft,
