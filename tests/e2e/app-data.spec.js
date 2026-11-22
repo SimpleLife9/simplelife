@@ -50,6 +50,7 @@ async function mockSupabaseSession(page, initialData = {}) {
   const calendarEvents = [...(initialData.calendarEvents || [])];
   const protectedTimeBlocks = [...(initialData.protectedTimeBlocks || [])];
   const protectedTimeMutationRequests = [];
+  const protectedTimeConflicts = [...(initialData.protectedTimeConflicts || [])];
   const insertedAgendaEvents = [];
   const idempotencyRequests = [];
   const mutationRequests = [];
@@ -771,7 +772,22 @@ async function mockSupabaseSession(page, initialData = {}) {
       const requestBody = request.postDataJSON();
       const event = requestBody.event;
       const key = request.headers()['idempotency-key'] || '';
-      idempotencyRequests.push({ key, event });
+      const decisions = Array.isArray(requestBody.protectedTimeDecisions) ? requestBody.protectedTimeDecisions : [];
+      idempotencyRequests.push({ key, event, protectedTimeDecisions: decisions });
+      const accepted = new Map(decisions.map((item) => [
+        item.blockId + ':' + item.occurrenceStartsAt,
+        item,
+      ]));
+      const hasExplicitDecisions = protectedTimeConflicts.every((conflict) => {
+        const choice = accepted.get(conflict.conflictKey);
+        return choice
+          && choice.blockUpdatedAt === conflict.blockUpdatedAt
+          && choice.decision === conflict.requiredDecision;
+      });
+      if (protectedTimeConflicts.length && !hasExplicitDecisions) {
+        await json(409, { error: 'PROTECTED_TIME_CONFLICTS', conflicts: protectedTimeConflicts });
+        return;
+      }
       const createdAt = '2026-11-22T18:00:00.000Z';
       const row = {
         id: '0190f47a-7b2c-7abc-8def-0123456789be',
@@ -791,6 +807,7 @@ async function mockSupabaseSession(page, initialData = {}) {
         time_zone: event.timeZone ?? event.sourceTimeZone ?? null,
         starts_at: event.startsAt ?? null,
         ends_at: event.endsAt ?? null,
+        protected_time_decisions: decisions,
         archived_at: null,
         deleted_at: null,
         created_at: createdAt,
@@ -810,7 +827,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     await json(404, { message: `Unexpected mocked Supabase request: ${method} ${url.pathname}` });
   });
 
-  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, protectedTimeBlocks, protectedTimeMutationRequests, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
+  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, protectedTimeBlocks, protectedTimeMutationRequests, protectedTimeConflicts, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
 }
 
 test('mock-authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
@@ -3054,4 +3071,118 @@ test('Tiempo protegido funciona en móvil a 390px sin desbordar el documento', a
   }));
   expect(dimensions.document).toBeLessThanOrEqual(dimensions.viewport + 1);
   await expect(page.getByRole('button', { name: 'Nuevo bloque' })).toBeVisible();
+});
+
+
+test('Agenda requires one explicit Protected Time decision per hard/flexible overlap before Event creation', async ({ page }) => {
+  const today = await todayInBrowserHavana(page);
+  const occurrenceStartsAt = today + 'T14:00:00.000Z';
+  const occurrenceEndsAt = today + 'T15:00:00.000Z';
+  const overlapStartsAt = today + 'T14:15:00.000Z';
+  const overlapEndsAt = today + 'T14:45:00.000Z';
+  const hardBlock = {
+    id: '019a0000-0000-7000-8000-000000000211',
+    updated_at: '2026-11-20T10:00:00.000000+00:00',
+    label: 'Sueño protegido',
+    category: 'Salud',
+    protection_mode: 'hard',
+    pattern_kind: 'one_off',
+    time_zone: 'America/Havana',
+  };
+  const flexibleBlock = {
+    id: '019a0000-0000-7000-8000-000000000212',
+    updated_at: '2026-11-20T11:00:00.000000+00:00',
+    label: 'Lectura',
+    category: 'Personal',
+    protection_mode: 'flexible',
+    pattern_kind: 'one_off',
+    time_zone: 'America/Havana',
+  };
+  const protectedTimeConflicts = [
+    {
+      conflictKey: hardBlock.id + ':' + occurrenceStartsAt,
+      blockId: hardBlock.id,
+      blockUpdatedAt: hardBlock.updated_at,
+      label: hardBlock.label,
+      category: hardBlock.category,
+      protectionMode: hardBlock.protection_mode,
+      patternKind: hardBlock.pattern_kind,
+      occurrenceDate: today,
+      occurrenceStartsAt,
+      occurrenceEndsAt,
+      overlapStartsAt,
+      overlapEndsAt,
+      timeZone: 'America/Havana',
+      requiredDecision: 'override_hard',
+    },
+    {
+      conflictKey: flexibleBlock.id + ':' + occurrenceStartsAt,
+      blockId: flexibleBlock.id,
+      blockUpdatedAt: flexibleBlock.updated_at,
+      label: flexibleBlock.label,
+      category: flexibleBlock.category,
+      protectionMode: flexibleBlock.protection_mode,
+      patternKind: flexibleBlock.pattern_kind,
+      occurrenceDate: today,
+      occurrenceStartsAt,
+      occurrenceEndsAt,
+      overlapStartsAt,
+      overlapEndsAt,
+      timeZone: 'America/Havana',
+      requiredDecision: 'keep_flexible',
+    },
+  ];
+  const { calendarEvents, insertedAgendaEvents, idempotencyRequests } = await mockSupabaseSession(page, {
+    protectedTimeConflicts,
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.getByRole('navigation', { name: 'Navegación principal' })
+    .getByRole('button', { name: /Agenda/ }).click();
+
+  await page.getByRole('button', { name: 'Nuevo evento' }).click();
+  const composer = page.getByRole('dialog', { name: 'Crear evento' });
+  await composer.getByLabel('Nombre del evento').fill('Reunión que cruza tiempo protegido');
+  await composer.getByLabel('Desde', { exact: true }).fill(today);
+  await composer.getByLabel('Hasta (incluido)', { exact: true }).fill(today);
+  await composer.getByRole('button', { name: 'Guardar evento' }).click();
+
+  const decisionDialog = page.getByRole('alertdialog', { name: 'Hay compromisos que se cruzan' });
+  await expect(decisionDialog).toBeVisible();
+  await expect(decisionDialog.getByText('Sueño protegido')).toBeVisible();
+  await expect(decisionDialog.getByText('Lectura')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Reunión que cruza tiempo protegido' })).toBeVisible();
+  expect(idempotencyRequests).toHaveLength(1);
+  expect(idempotencyRequests[0].protectedTimeDecisions).toEqual([]);
+  expect(insertedAgendaEvents).toHaveLength(0);
+  expect(calendarEvents).toHaveLength(0);
+
+  const choices = decisionDialog.getByLabel('Tu decisión para este cruce');
+  await choices.nth(0).selectOption('override_hard');
+  await choices.nth(1).selectOption('keep_flexible');
+  await decisionDialog.getByRole('button', { name: 'Guardar con estas decisiones' }).click();
+
+  await expect(page.getByText('Evento guardado en Agenda.')).toBeVisible();
+  await expect(decisionDialog).toHaveCount(0);
+  await expect(page.getByText('Reunión que cruza tiempo protegido')).toBeVisible();
+  expect(idempotencyRequests).toHaveLength(2);
+  expect(idempotencyRequests[1].key).toBe(idempotencyRequests[0].key);
+  expect(idempotencyRequests[1].protectedTimeDecisions).toMatchObject([
+    {
+      blockId: hardBlock.id,
+      blockUpdatedAt: hardBlock.updated_at,
+      occurrenceStartsAt,
+      decision: 'override_hard',
+    },
+    {
+      blockId: flexibleBlock.id,
+      blockUpdatedAt: flexibleBlock.updated_at,
+      occurrenceStartsAt,
+      decision: 'keep_flexible',
+    },
+  ]);
+  expect(insertedAgendaEvents).toHaveLength(1);
+  expect(insertedAgendaEvents[0].protected_time_decisions).toHaveLength(2);
 });
