@@ -1,4 +1,4 @@
-# Agenda — recurrence v1 decision proposal
+# Agenda — recurrence v1 decision record
 
 **Status:** APPROVED DECISION RECORD — Robert approved all eight decisions and the hybrid model on 21 November 2026.  
 **Approval PR:** [PR #71](https://github.com/SimpleLife9/simplelife/pull/71), merge SHA `5158b32cf4019ef37d4dfff7c054b05e59b3c8ab`.  
@@ -6,7 +6,7 @@
 
 This approved product/technical decision record does not authorize schema changes, migrations, hosted Supabase operations, cron, Edge Function deployment, production data changes, or release.
 
-## 1. Executive recommendation
+## 1. Executive decision
 
 Adopt a deliberately bounded v1 recurrence engine, preserve stable civil-slot identity, and use bounded materialization rather than generating an unlimited future. Keep all generation deterministic and idempotent. Do not implement full RFC 5545 compatibility.
 
@@ -32,7 +32,7 @@ Reject unsupported combinations. No arbitrary RRULE strings, BYSETPOS, multiple 
 
 ### D2 — Month-end behavior
 
-**Recommendation:** distinguish explicit BYMONTHDAY=31 from BYMONTHDAY=LAST.
+**Approved decision:** distinguish explicit BYMONTHDAY=31 from BYMONTHDAY=LAST.
 
 - A numbered day that does not exist in a month is skipped; do not clamp to the final day and do not roll into the next month.
 - LAST explicitly means the final calendar day of each selected month.
@@ -43,7 +43,7 @@ Reject unsupported combinations. No arbitrary RRULE strings, BYSETPOS, multiple 
 
 ### D3 — Materialization horizon and batch size
 
-**Recommendation:** materialize a rolling 90-day horizon, in bounded batches of at most 500 candidate occurrences per transaction. Make both values configuration constants, not user-facing settings in v1.
+**Approved decision:** materialize a rolling 90-day horizon, in bounded batches of at most 500 candidate occurrences per transaction. Make both values configuration constants, not user-facing settings in v1.
 
 - Materialize only eligible future occurrences.
 - Use a unique (series_id, occurrence_key) constraint and deterministic civil-slot keys.
@@ -55,7 +55,7 @@ Reject unsupported combinations. No arbitrary RRULE strings, BYSETPOS, multiple 
 
 ### D4 — Materialization trigger and operational ownership
 
-**Recommendation:** no cron or scheduled workflow in v1. Use two deterministic entry points:
+**Approved decision:** no cron or scheduled workflow in v1. Use two deterministic entry points:
 1. On series create/edit, materialize the affected range within the rolling horizon.
 2. On authenticated Agenda range reads, perform an idempotent top-up when the requested window approaches or exceeds the current materialized boundary.
 
@@ -65,7 +65,7 @@ The top-up must be bounded, concurrency-safe and observable. It must not hold th
 
 ### D5 — DST defaults for recurring timed occurrences
 
-**Recommendation:** use the same defaults already specified for the server resolver and one-off Event behavior:
+**Approved decision:** use the same defaults already specified for the server resolver and one-off Event behavior:
 - Gap: move to the next valid local minute; record requested local value, resolved local value and adjustment.
 - Fold: choose the earlier instant by default; allow the later instant only when explicitly selected and stored.
 - Resolve start and end atomically against the same loaded TZDB release and resolver version.
@@ -77,7 +77,7 @@ Series-level choices are inherited; an explicit occurrence override takes preced
 
 ### D6 — Occurrence-specific duration/end overrides
 
-**Recommendation:** inherit duration/end semantics from the series by default, but allow an occurrence to override its end/duration. Keep the original series rule unchanged.
+**Approved decision:** inherit duration/end semantics from the series by default, but allow an occurrence to override its end/duration. Keep the original series rule unchanged.
 
 - The override is attached to the stable original occurrence key.
 - Validate positive duration after timezone resolution.
@@ -89,7 +89,7 @@ Series-level choices are inherited; an explicit occurrence override takes preced
 
 ### D7 — Task-to-occurrence linking
 
-**Recommendation:** defer direct Task-to-occurrence linking from recurrence v1.
+**Approved decision:** defer direct Task-to-occurrence linking from recurrence v1.
 
 - A recurring Event remains independent of Task identity.
 - Existing TaskSchedule remains the only Phase 1 relationship between a Task and a reserved time block.
@@ -100,7 +100,7 @@ Series-level choices are inherited; an explicit occurrence override takes preced
 
 ### D8 — TZDB review notification and stale-review behavior
 
-**Recommendation:** use an in-app Agenda review queue with a visible count and side-by-side prior/new local and UTC resolutions. No push, email, or guaranteed PWA alarm is promised in v1.
+**Approved decision:** use an in-app Agenda review queue with a visible count and side-by-side prior/new local and UTC resolutions. No push, email, or guaranteed PWA alarm is promised in v1.
 
 - A review item remains visible until accepted or dismissed through an explicit supported action.
 - Acceptance is bound to the exact occurrence version and comparison that the user reviewed.
@@ -119,7 +119,7 @@ The current documents describe two different occurrence strategies:
 
 These approaches cannot both be the authoritative persistence model for the same future occurrence. The TZDB policy approved on 21 November requires already-materialized future occurrences to preserve confirmed UTC instants and enter review if a new TZDB release changes their resolution.
 
-**Recommendation:** use a hybrid bounded model:
+**Approved decision:** use a hybrid bounded model:
 - Persist the series definition.
 - Materialize timed occurrences inside the rolling horizon so confirmed UTC instants and TZDB versions are durable.
 - Persist exceptions, exclusions, overrides, review states and terminal lifecycle states.
