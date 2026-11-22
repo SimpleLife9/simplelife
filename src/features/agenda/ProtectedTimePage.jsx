@@ -178,9 +178,11 @@ export function ProtectedTimePage({ profile, refreshKey, runAction, busy }) {
   const setField = (name, value) => {
     setDraft((current) => ({ ...current, [name]: value }));
     setPendingKey(null);
+    setLocalError('');
   };
 
   const openCreate = () => {
+    setLocalError('');
     setEditingBlock(null);
     setDraft(defaultDraft(timeZone));
     setPendingKey(null);
@@ -188,6 +190,7 @@ export function ProtectedTimePage({ profile, refreshKey, runAction, busy }) {
   };
 
   const openEdit = (block) => {
+    setLocalError('');
     setEditingBlock(block);
     setDraft({
       label: block.label || '',
