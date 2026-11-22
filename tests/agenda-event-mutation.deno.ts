@@ -223,10 +223,26 @@ Deno.test("Event mutation hash binds action, Event, exact expected version and n
     action: "cancel",
     eventDraft: null,
   });
+  const consent = {
+    blockId: "019a0000-0000-7000-8000-000000000111",
+    blockUpdatedAt: "2026-11-20T10:00:00.000000+00:00",
+    occurrenceStartsAt: "2026-12-24T06:00:00.000Z",
+    decision: "override_hard",
+  };
+  const withConsent = await hashEventMutationIntent({
+    ...mutation,
+    protectedTimeDecisions: [consent],
+  });
+  const changedConsent = await hashEventMutationIntent({
+    ...mutation,
+    protectedTimeDecisions: [{ ...consent, decision: "keep_flexible" }],
+  });
   assertEquals(first.payloadHash, replay.payloadHash, "stable hash");
   assertEquals(first.payloadHash.length, 64, "SHA-256 length");
   assertEquals(first.payloadHash === changedVersion.payloadHash, false, "version participates in hash");
   assertEquals(first.payloadHash === changedAction.payloadHash, false, "action participates in hash");
+  assertEquals(first.payloadHash === withConsent.payloadHash, false, "Protected Time consent participates in hash");
+  assertEquals(withConsent.payloadHash === changedConsent.payloadHash, false, "a changed consent choice changes the hash");
 });
 
 Deno.test("authenticated edit invokes only the atomic owner-scoped mutation RPC with server-derived owner", async () => {
