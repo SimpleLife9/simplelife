@@ -84,6 +84,8 @@ CREATE TABLE public.calendar_event (
   CONSTRAINT calendar_event_phase1_actor_check
     CHECK (owner_user_id = created_by_user_id AND owner_user_id = updated_by_user_id),
   CONSTRAINT calendar_event_owner_identity_uq UNIQUE (id, owner_user_id),
+  CONSTRAINT calendar_event_archive_trash_exclusive_check
+    CHECK (archived_at IS NULL OR deleted_at IS NULL),
   CONSTRAINT calendar_event_trash_retention_check
     CHECK (
       (deleted_at IS NULL AND purge_after IS NULL)
@@ -143,7 +145,9 @@ CREATE TABLE public.calendar_event (
       AND ends_at > starts_at
       AND start_disambiguation IS NOT NULL
       AND end_disambiguation IS NOT NULL
+      AND start_gap_strategy IS NOT NULL
       AND start_gap_strategy = 'next-valid'
+      AND end_gap_strategy IS NOT NULL
       AND end_gap_strategy = 'next-valid'
     )
   )
