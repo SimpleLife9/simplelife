@@ -38,6 +38,7 @@ const EDIT_FIELDS = [
 ] as const;
 
 type RpcClient = {
+  from(table: string): any;
   rpc(
     name: string,
     args: Record<string, unknown>,
@@ -146,8 +147,40 @@ export async function handleRequest(
         : null,
     });
     const intent = await hashEventMutationIntent(mutation);
-    const now = (dependencies.now ?? (() => new Date().toISOString()))();
 
+    // Replay a completed receipt before resolving civil time. A retry must
+    // return its original result even if the current TZDB package is unavailable
+    // or has changed since the winning mutation.
+    const existing = await ctx.supabaseAdmin
+      .from("event_mutation_request")
+      .select("event_id,payload_version,payload_hash,response_http_status,response_body")
+      .eq("owner_user_id", profile.profileId)
+      .eq("idempotency_key", idempotencyKey)
+      .maybeSingle();
+    if (existing.error) return json({ error: "IDEMPOTENCY_LOOKUP_FAILED" }, 503);
+    if (existing.data) {
+      const storedHash = existing.data.payload_hash instanceof Uint8Array
+        ? Array.from(existing.data.payload_hash as Uint8Array).map((byte) => byte.toString(16).padStart(2, "0")).join("")
+        : typeof existing.data.payload_hash === "string"
+        ? existing.data.payload_hash.replace(/^\\x/, "")
+        : "";
+      if (existing.data.event_id !== mutation.eventId
+        || existing.data.payload_version !== intent.version
+        || storedHash !== intent.payloadHash) {
+        return json({ error: "IDEMPOTENCY_KEY_REUSED" }, 409);
+      }
+      if (typeof existing.data.response_http_status !== "number"
+        || !existing.data.response_body
+        || typeof existing.data.response_body !== "object") {
+        return json({ error: "EVENT_MUTATION_RECEIPT_INCOMPLETE" }, 503);
+      }
+      return json({
+        ...(existing.data.response_body as Record<string, unknown>),
+        replayed: true,
+      }, existing.data.response_http_status);
+    }
+
+    const now = (dependencies.now ?? (() => new Date().toISOString()))();
     let eventPatch: Record<string, unknown> = {};
     if (mutation.action === "edit") {
       let readyDraft = mutation.eventDraft!;
