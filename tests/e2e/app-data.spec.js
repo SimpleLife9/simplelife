@@ -2467,8 +2467,8 @@ test('Agenda navigates day, week and month views and creates a confirmed all-day
   await expect(dialog).toBeVisible();
   await dialog.getByLabel('Nombre del evento').fill('Mi compromiso nuevo');
   await dialog.getByLabel('Descripción (opcional)').fill('Evento creado desde Agenda.');
-  await dialog.getByLabel('Desde').fill(today);
-  await dialog.getByLabel('Hasta (incluido)').fill(today);
+  await dialog.getByLabel('Desde', { exact: true }).fill(today);
+  await dialog.getByLabel('Hasta (incluido)', { exact: true }).fill(today);
   await dialog.getByRole('button', { name: 'Guardar evento' }).click();
 
   await expect(page.getByText('Evento guardado en Agenda.')).toBeVisible();
