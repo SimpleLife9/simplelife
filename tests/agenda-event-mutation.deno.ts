@@ -53,12 +53,14 @@ function mockContext({
     replayed: false,
   }],
   rpcError = null,
+  protectedBlocks = [] as Array<Record<string, unknown>>,
 }: {
   profileStatus?: string;
   existing?: Record<string, unknown> | null;
   lookupError?: unknown;
   rpcResult?: unknown;
   rpcError?: unknown;
+  protectedBlocks?: Array<Record<string, unknown>>;
 } = {}) {
   const calls: Record<string, unknown> = { profileLookup: 0, rpc: 0, rpcName: null, rpcArgs: null };
   const supabase = {
@@ -85,25 +87,43 @@ function mockContext({
   };
   const supabaseAdmin = {
     from(table: string) {
-      if (table !== "event_mutation_request") throw new Error("unexpected admin table " + table);
-      return {
-        select() {
-          return {
-            eq(_column: string, _value: string) {
-              return {
-                eq(_key: string, _value: string) {
-                  return {
-                    async maybeSingle() {
-                      calls.ledgerLookup = Number(calls.ledgerLookup ?? 0) + 1;
-                      return { data: existing, error: lookupError };
-                    },
-                  };
-                },
-              };
-            },
-          };
-        },
-      };
+      if (table === "event_mutation_request") {
+        return {
+          select() {
+            return {
+              eq(_column: string, _value: string) {
+                return {
+                  eq(_key: string, _value: string) {
+                    return {
+                      async maybeSingle() {
+                        calls.ledgerLookup = Number(calls.ledgerLookup ?? 0) + 1;
+                        return { data: existing, error: lookupError };
+                      },
+                    };
+                  },
+                };
+              },
+            };
+          },
+        };
+      }
+      if (table === "protected_time_block") {
+        const query: Record<string, unknown> = {};
+        query.select = () => query;
+        query.eq = () => query;
+        query.is = () => query;
+        query.order = () => query;
+        query.limit = async () => ({ data: protectedBlocks, error: null });
+        return query;
+      }
+      if (table === "user_preference") {
+        const query: Record<string, unknown> = {};
+        query.select = () => query;
+        query.eq = () => query;
+        query.maybeSingle = async () => ({ data: { time_zone: "America/Havana" }, error: null });
+        return query;
+      }
+      throw new Error("unexpected admin table " + table);
     },
     async rpc(name: string, args: Record<string, unknown>) {
       calls.rpc = Number(calls.rpc) + 1;
@@ -209,13 +229,15 @@ Deno.test("authenticated edit invokes only the atomic owner-scoped mutation RPC 
   assertEquals(response.status, 200, "edit status");
   assertEquals((await body(response)).eventId, EVENT_ID, "edit response Event ID");
   assertEquals(calls.rpc, 1, "atomic mutation RPC count");
-  assertEquals(calls.rpcName, "mutate_calendar_event_once", "RPC name");
+  assertEquals(calls.rpcName, "mutate_calendar_event_with_protected_time_once", "guarded edit RPC");
   const args = calls.rpcArgs as Record<string, unknown>;
   assertEquals(args.p_owner_user_id, PROFILE_ID, "owner from verified profile");
   assertEquals(args.p_event_id, EVENT_ID, "Event id");
   assertEquals(args.p_expected_updated_at, VERSION, "optimistic version");
   assertEquals(args.p_mutation, "edit", "mutation kind");
   assertEquals(args.p_idempotency_key, KEY, "UUIDv7 key");
+  assertEquals(args.p_protected_time_snapshot, [], "empty Protected Time snapshot");
+  assertEquals(args.p_conflict_decisions, [], "no consent when there is no overlap");
   const patch = args.p_event_patch as Record<string, unknown>;
   assertEquals(Object.keys(patch).length, 16, "only the editable Event fields are sent");
   assertEquals(patch.title, "Reunión actualizada", "title patch");
@@ -414,4 +436,73 @@ Deno.test("mutation receipt lookup failure blocks the write", async () => {
   }), ctx);
   assertEquals(response.status, 503, "ledger lookup failure");
   assertEquals(calls.rpc, 0, "failed receipt lookup never writes");
+});
+
+
+const HARD_BLOCK = {
+  id: "0190f47a-7b2c-7abc-8def-0123456789b2",
+  label: "Descanso",
+  category: null,
+  protection_mode: "hard",
+  pattern_kind: "one_off",
+  time_zone: "America/Havana",
+  starts_at: "2026-12-24T15:00:00.000Z",
+  ends_at: "2026-12-24T16:00:00.000Z",
+  start_date: null,
+  end_date_exclusive: null,
+  weekdays: null,
+  start_time_local: null,
+  end_time_local: null,
+  ends_next_day: null,
+  updated_at: "2026-11-22T18:00:00.123456Z",
+};
+
+Deno.test("Event edit returns the current Protected Time conflict without invoking a writer", async () => {
+  const { ctx, calls } = mockContext({ protectedBlocks: [HARD_BLOCK] });
+  const response = await handleRequest(request({
+    eventId: EVENT_ID,
+    expectedUpdatedAt: VERSION,
+    action: "edit",
+    event: {
+      title: "Reunión actualizada",
+      temporalKind: "all_day",
+      startDate: "2026-12-24",
+      endDateExclusive: "2026-12-26",
+    },
+  }), ctx);
+  assertEquals(response.status, 409, "edit conflict status");
+  const result = await body(response);
+  assertEquals(result.error, "PROTECTED_TIME_CONFLICTS", "conflict code");
+  assertEquals((result.conflicts as Array<Record<string, unknown>>)[0].blockId, HARD_BLOCK.id, "block identity");
+  assertEquals(calls.rpc, 0, "conflicted edit is not written without consent");
+});
+
+Deno.test("Event edit binds explicit hard override consent to the current block version", async () => {
+  const decisions = [{
+    blockId: HARD_BLOCK.id,
+    blockUpdatedAt: HARD_BLOCK.updated_at,
+    protectionMode: "hard",
+    decision: "override",
+  }];
+  const { ctx, calls } = mockContext({ protectedBlocks: [HARD_BLOCK] });
+  const response = await handleRequest(request({
+    eventId: EVENT_ID,
+    expectedUpdatedAt: VERSION,
+    action: "edit",
+    event: {
+      title: "Reunión actualizada",
+      temporalKind: "all_day",
+      startDate: "2026-12-24",
+      endDateExclusive: "2026-12-26",
+    },
+    conflictDecisions: decisions,
+  }), ctx);
+  assertEquals(response.status, 200, "consented edit status");
+  assertEquals(calls.rpcName, "mutate_calendar_event_with_protected_time_once", "guarded edit RPC");
+  const args = calls.rpcArgs as Record<string, unknown>;
+  assertEquals(args.p_protected_time_snapshot, [{
+    id: HARD_BLOCK.id,
+    updatedAt: HARD_BLOCK.updated_at,
+  }], "snapshot version");
+  assertEquals(args.p_conflict_decisions, decisions, "explicit consent");
 });
