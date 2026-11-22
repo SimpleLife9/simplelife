@@ -171,7 +171,7 @@ try {
       apikey: publishable,
       origin: "https://simplelife.example",
       "access-control-request-method": "PATCH",
-      "access-control-request-headers": "authorization,content-type",
+      "access-control-request-headers": "authorization,content-type,x-supabase-api-version",
     },
     signal: AbortSignal.timeout(10000),
   });
