@@ -140,9 +140,12 @@ BEGIN
   IF EXISTS (
     SELECT 1
     FROM jsonb_array_elements(p_snapshot) AS item(value)
-    WHERE jsonb_typeof(item.value) IS DISTINCT FROM 'object'
-       OR jsonb_object_length(item.value) <> 2
-       OR NOT (item.value ? 'id' AND item.value ? 'updatedAt')
+    WHERE CASE
+      WHEN jsonb_typeof(item.value) = 'object' THEN
+        jsonb_object_length(item.value) <> 2
+        OR NOT (item.value ? 'id' AND item.value ? 'updatedAt')
+      ELSE true
+    END
   ) THEN
     RAISE EXCEPTION 'Protected Time snapshot contains an invalid row'
       USING ERRCODE = '22023';
@@ -223,14 +226,17 @@ BEGIN
   IF jsonb_array_length(p_decisions) > 50 OR EXISTS (
     SELECT 1
     FROM jsonb_array_elements(p_decisions) AS item(value)
-    WHERE jsonb_typeof(item.value) IS DISTINCT FROM 'object'
-       OR jsonb_object_length(item.value) <> 4
-       OR NOT (
-         item.value ? 'blockId'
-         AND item.value ? 'blockUpdatedAt'
-         AND item.value ? 'protectionMode'
-         AND item.value ? 'decision'
-       )
+    WHERE CASE
+      WHEN jsonb_typeof(item.value) = 'object' THEN
+        jsonb_object_length(item.value) <> 4
+        OR NOT (
+          item.value ? 'blockId'
+          AND item.value ? 'blockUpdatedAt'
+          AND item.value ? 'protectionMode'
+          AND item.value ? 'decision'
+        )
+      ELSE true
+    END
   ) THEN
     RAISE EXCEPTION 'Protected Time conflict decisions contain invalid rows'
       USING ERRCODE = '22023';
