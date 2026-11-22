@@ -122,13 +122,17 @@ export async function handleRequest(
     return json({ error: "BODY_MUST_CONTAIN_EVENT_AND_OPTIONAL_PROTECTED_TIME_DECISIONS" }, 422);
   }
   const input = body as { event: unknown; protectedTimeDecisions?: unknown };
+  const requestedProtectedTimeDecisions = input.protectedTimeDecisions ?? [];
+  if (!Array.isArray(requestedProtectedTimeDecisions)) {
+    return json({ error: "PROTECTED_TIME_DECISIONS_MUST_BE_AN_ARRAY" }, 422);
+  }
 
   try {
     const eventDraft = createEventDraft(input.event);
     const intent = await hashEventCreateIntent(
       eventDraft,
       undefined,
-      input.protectedTimeDecisions ?? [],
+      requestedProtectedTimeDecisions,
     );
 
     // Fast replay path: no IANA resolution, new Event ID or mutable resolver
@@ -171,7 +175,7 @@ export async function handleRequest(
       supabaseAdmin: ctx.supabaseAdmin,
       ownerProfileId: profile.profileId,
       event: candidateRecord,
-      suppliedDecisions: input.protectedTimeDecisions ?? [],
+      suppliedDecisions: requestedProtectedTimeDecisions,
       now,
     });
     if (!conflictAssessment.ok) {
