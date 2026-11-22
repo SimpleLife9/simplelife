@@ -140,7 +140,8 @@ function protectedTimeDecisionTuple(value) {
     assert(typeof item.occurrenceStartsAt === 'string' && OFFSET_INSTANT_PATTERN.test(item.occurrenceStartsAt)
       && Number.isFinite(Date.parse(item.occurrenceStartsAt)),
     'Protected Time decision occurrenceStartsAt must be an ISO timestamp with an explicit offset.');
-    assert(item.decision === 'override_hard' || item.decision === 'keep_flexible',
+    assert(item.decision === 'override_hard' || item.decision === 'keep_flexible'
+      || item.decision === 'keep_overlap',
       'Protected Time decision must be override_hard or keep_flexible.');
     return [
       item.blockId.toLowerCase(),
