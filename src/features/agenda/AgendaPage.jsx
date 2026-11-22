@@ -444,6 +444,24 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
         </div>
       </section>
 
+      <nav className="agenda-lifecycle-switch" aria-label="Estado de los eventos">
+        {[
+          { id: 'active', label: 'Activos' },
+          { id: 'archived', label: 'Archivados' },
+          { id: 'trash', label: 'Papelera' },
+        ].map((item) => (
+          <button
+            type="button"
+            key={item.id}
+            className={lifecycleView === item.id ? 'active' : ''}
+            aria-pressed={lifecycleView === item.id}
+            onClick={() => { setLifecycleView(item.id); setSelectedEvent(null); setPendingKey(null); }}
+          >
+            {item.label}
+          </button>
+        ))}
+      </nav>
+
       {timeZoneNotice && <div className="agenda-timezone-notice">{timeZoneNotice}</div>}
       {loading && <p className="muted agenda-loading">Cargando Agenda…</p>}
       {!loading && localError && <div className="form-error agenda-error">{localError}</div>}
@@ -540,7 +558,7 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
         <div className="agenda-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeComposer(); }}>
           <section className="agenda-dialog" role="dialog" aria-modal="true" aria-labelledby="agenda-create-title">
             <header className="agenda-dialog-header">
-              <div><span className="agenda-section-kicker">NUEVO COMPROMISO</span><h2 id="agenda-create-title">Crear evento</h2></div>
+              <div><span className="agenda-section-kicker">{editingEvent ? 'EDITAR COMPROMISO' : 'NUEVO COMPROMISO'}</span><h2 id="agenda-create-title">{editingEvent ? 'Editar evento' : 'Crear evento'}</h2></div>
               <button type="button" className="agenda-close-button" aria-label="Cerrar" onClick={closeComposer} disabled={busy}>×</button>
             </header>
             <form className="agenda-form" onSubmit={submitEvent}>
@@ -551,9 +569,14 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
               <div className="agenda-form-row">
                 <label className="agenda-field">
                   <span>Tipo de horario</span>
-                  <select value={temporalKind} onChange={(event) => setTemporalKind(event.target.value)}>
+                  <select
+                    value={temporalKind}
+                    disabled={editingEvent?.temporal_kind === 'fixed_instant'}
+                    onChange={(event) => setTemporalKind(event.target.value)}
+                  >
                     <option value="all_day">Día completo</option>
                     <option value="zoned_civil">Con hora</option>
+                    {editingEvent?.temporal_kind === 'fixed_instant' && <option value="fixed_instant">Instante fijo</option>}
                   </select>
                 </label>
                 <label className="agenda-field">
@@ -566,7 +589,7 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
                   <label className="agenda-field"><span>Desde</span><input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} required /></label>
                   <label className="agenda-field"><span>Hasta (incluido)</span><input type="date" value={endDate} min={startDate} onChange={(event) => setEndDate(event.target.value)} required /></label>
                 </div>
-              ) : (
+              ) : temporalKind === 'zoned_civil' ? (
                 <>
                   <div className="agenda-form-row">
                     <label className="agenda-field"><span>Comienza</span><input type="datetime-local" value={startLocalDateTime} onChange={(event) => setStartLocalDateTime(event.target.value)} required /></label>
@@ -578,6 +601,13 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
                     <small>Las horas se interpretan en esta zona; el servidor resuelve los cambios DST.</small>
                   </label>
                 </>
+              ) : (
+                <div className="agenda-fixed-range">
+                  <strong>Instantes fijos</strong>
+                  <span>Inicio: {formatInstantInTimeZone(fixedStartsAt, timeZone)} ({timeZone})</span>
+                  <span>Fin: {formatInstantInTimeZone(fixedEndsAt, timeZone)} ({timeZone})</span>
+                  <small>Al editar los detalles se conservarán estos instantes exactos. Para cambiar la hora, crea una nueva versión del evento con zona horaria.</small>
+                </div>
               )}
               <div className="agenda-form-row">
                 <label className="agenda-field">
@@ -600,7 +630,7 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
               </label>
               <footer className="agenda-dialog-actions">
                 <button type="button" className="agenda-secondary-button" onClick={closeComposer} disabled={busy}>Cancelar</button>
-                <button type="submit" className="button button-primary" disabled={busy || !title.trim()}>{busy ? 'Guardando…' : 'Guardar evento'}</button>
+                <button type="submit" className="button button-primary" disabled={busy || !title.trim()}>{busy ? 'Guardando…' : editingEvent ? 'Guardar cambios' : 'Guardar evento'}</button>
               </footer>
             </form>
           </section>
