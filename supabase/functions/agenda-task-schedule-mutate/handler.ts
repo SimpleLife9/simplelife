@@ -170,6 +170,7 @@ export async function handleRequest(
         taskScheduleId: mutation.action === "edit" ? mutation.taskScheduleId : null,
         suppliedEventDecisions: mutation.eventDecisions,
         suppliedProtectedTimeDecisions: mutation.protectedTimeDecisions,
+        suppliedTaskScheduleDecisions: mutation.taskScheduleDecisions,
         now,
       });
       if (!assessment.ok) {
