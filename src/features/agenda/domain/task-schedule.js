@@ -221,11 +221,33 @@ export function buildTaskSchedulePatch({
   assert(resolution.start?.requestedLocalDateTime === request.start.localDateTime
     && resolution.end?.requestedLocalDateTime === request.end.localDateTime,
   'Resolver endpoints do not match the requested TaskSchedule wall times.');
-  assert(resolution.start?.disambiguation === request.start.disambiguation
-    && resolution.end?.disambiguation === request.end.disambiguation,
-  'Resolver disambiguation does not match the TaskSchedule draft.');
-  assert(resolution.start?.gapStrategy === 'next-valid' && resolution.end?.gapStrategy === 'next-valid',
-    'Resolver gap strategy must be next-valid.');
+  for (const [label, endpoint, requested] of [
+    ['start', resolution.start, request.start],
+    ['end', resolution.end, request.end],
+  ]) {
+    assert(endpoint && endpoint.requestedLocalDateTime === requested.localDateTime
+      && endpoint.requestedTimeZone === request.timeZone
+      && endpoint.timeZone === resolution.timeZone
+      && endpoint.rulesVersion === resolution.rulesVersion
+      && endpoint.resolverVersion === resolution.resolverVersion
+      && endpoint.rulesSource === 'iana-tzdb',
+    label + ' resolver endpoint evidence does not match the TaskSchedule draft.');
+    if (endpoint.resolution === 'ambiguous-first') {
+      assert(requested.disambiguation === 'earlier',
+        label + ' endpoint ignored the requested later fold choice.');
+    }
+    if (endpoint.resolution === 'ambiguous-later') {
+      assert(requested.disambiguation === 'later',
+        label + ' endpoint ignored the requested earlier fold choice.');
+    }
+    assert(
+      endpoint.resolution === 'exact'
+        || endpoint.resolution === 'ambiguous-first'
+        || endpoint.resolution === 'ambiguous-later'
+        || endpoint.resolution === 'gap-adjusted-next-valid',
+      label + ' resolver endpoint state is unsupported.',
+    );
+  }
   assert(typeof resolution.startsAt === 'string' && Number.isFinite(Date.parse(resolution.startsAt))
     && typeof resolution.endsAt === 'string' && Number.isFinite(Date.parse(resolution.endsAt))
     && Date.parse(resolution.endsAt) > Date.parse(resolution.startsAt),
