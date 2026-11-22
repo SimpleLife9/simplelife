@@ -87,10 +87,16 @@ run("docker", [
   "exec", "-i", "supabase_db_simplelife",
   "psql", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "postgres", "-c", seedSql,
 ]);
-const initialUpdatedAt = sqlScalar(
-  "SELECT to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') " +
-  "FROM public.calendar_event WHERE id = '" + eventId + "'::uuid",
+const fixtureVersionResponse = await fetch(
+  BASE_URL + "/rest/v1/calendar_event?id=eq." + eventId + "&select=updated_at",
+  { headers: { apikey: secret, authorization: "Bearer " + secret }, signal: AbortSignal.timeout(10000) },
 );
+if (fixtureVersionResponse.status !== 200) {
+  fail("Could not read fixture version through local PostgREST: " + await fixtureVersionResponse.text());
+}
+const fixtureVersions = await fixtureVersionResponse.json();
+const initialUpdatedAt = fixtureVersions[0]?.updated_at;
+if (typeof initialUpdatedAt !== "string") fail("Local PostgREST did not return Event updated_at.");
 
 const url = BASE_URL + "/functions/v1/" + FUNCTION_NAME;
 const server = spawn("supabase", ["functions", "serve", FUNCTION_NAME, "--no-verify-jwt"], {
