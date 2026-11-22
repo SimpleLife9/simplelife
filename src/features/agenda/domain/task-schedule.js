@@ -1,7 +1,7 @@
 // TaskSchedule intent and temporal contract. This module performs no I/O and
 // never treats Task due_date/due_at as a reserved calendar interval.
 
-export const TASK_SCHEDULE_INTENT_VERSION = 'task-schedule-mutation-v1';
+export const TASK_SCHEDULE_INTENT_VERSION = 'task-schedule-mutation-v2';
 export const TASK_SCHEDULE_STATUSES = Object.freeze([
   'proposed', 'confirmed', 'cancelled', 'released', 'elapsed',
 ]);
@@ -80,7 +80,7 @@ function normalizeScheduleDraft(input) {
   });
 }
 
-function normalizeDecisionArrays(eventDecisions, protectedTimeDecisions) {
+function normalizeDecisionArrays(eventDecisions, protectedTimeDecisions, taskScheduleDecisions) {
   assert(Array.isArray(eventDecisions) && eventDecisions.length <= 500,
     'eventDecisions must be an array with at most 500 entries.');
   const events = eventDecisions.map((item) => {
@@ -130,9 +130,34 @@ function normalizeDecisionArrays(eventDecisions, protectedTimeDecisions) {
   assert(new Set(protectedKeys).size === protectedKeys.length,
     'Protected Time decisions cannot contain duplicate occurrences.');
 
+  assert(Array.isArray(taskScheduleDecisions) && taskScheduleDecisions.length <= 500,
+    'taskScheduleDecisions must be an array with at most 500 entries.');
+  const taskSchedules = taskScheduleDecisions.map((item) => {
+    assert(item && typeof item === 'object' && !Array.isArray(item),
+      'Each TaskSchedule conflict decision must be an object.');
+    const keys = ['taskScheduleId', 'taskScheduleUpdatedAt', 'decision'];
+    assert(Object.keys(item).length === keys.length && Object.keys(item).every((key) => keys.includes(key)),
+      'TaskSchedule conflict decision contains unsupported or missing fields.');
+    assert(item.decision === 'keep_overlap',
+      'TaskSchedule conflict decision must be keep_overlap.');
+    assert(typeof item.taskScheduleUpdatedAt === 'string'
+      && OFFSET_INSTANT_PATTERN.test(item.taskScheduleUpdatedAt)
+      && Number.isFinite(Date.parse(item.taskScheduleUpdatedAt)),
+    'taskScheduleUpdatedAt must be an ISO timestamp with an explicit offset.');
+    return Object.freeze({
+      taskScheduleId: normalizeUuidV7(item.taskScheduleId, 'taskScheduleId'),
+      taskScheduleUpdatedAt: item.taskScheduleUpdatedAt,
+      decision: item.decision,
+    });
+  });
+  const taskScheduleKeys = taskSchedules.map((item) => item.taskScheduleId);
+  assert(new Set(taskScheduleKeys).size === taskScheduleKeys.length,
+    'TaskSchedule conflict decisions cannot contain duplicates.');
+
   return Object.freeze({
     eventDecisions: Object.freeze(events),
     protectedTimeDecisions: Object.freeze(protectedDecisions),
+    taskScheduleDecisions: Object.freeze(taskSchedules),
   });
 }
 
@@ -144,11 +169,11 @@ export function normalizeTaskScheduleMutation(input) {
   assert(TASK_SCHEDULE_MUTATIONS.includes(action), 'Unsupported TaskSchedule mutation action.');
 
   if (action === 'create') {
-    const allowed = ['action', 'taskId', 'schedule', 'eventDecisions', 'protectedTimeDecisions'];
+    const allowed = ['action', 'taskId', 'schedule', 'eventDecisions', 'protectedTimeDecisions', 'taskScheduleDecisions'];
     assert(Object.keys(input).every((key) => allowed.includes(key))
       && 'taskId' in input && 'schedule' in input,
     'TaskSchedule create body contains unsupported or missing fields.');
-    const decisions = normalizeDecisionArrays(input.eventDecisions ?? [], input.protectedTimeDecisions ?? []);
+    const decisions = normalizeDecisionArrays(input.eventDecisions ?? [], input.protectedTimeDecisions ?? [], input.taskScheduleDecisions ?? []);
     return Object.freeze({
       action,
       taskId: normalizeUuidV7(input.taskId, 'taskId'),
@@ -161,14 +186,14 @@ export function normalizeTaskScheduleMutation(input) {
 
   const scheduleMutation = action === 'edit';
   const allowed = scheduleMutation
-    ? ['action', 'taskScheduleId', 'expectedUpdatedAt', 'schedule', 'eventDecisions', 'protectedTimeDecisions']
+    ? ['action', 'taskScheduleId', 'expectedUpdatedAt', 'schedule', 'eventDecisions', 'protectedTimeDecisions', 'taskScheduleDecisions']
     : ['action', 'taskScheduleId', 'expectedUpdatedAt'];
   assert(Object.keys(input).every((key) => allowed.includes(key))
     && 'taskScheduleId' in input && 'expectedUpdatedAt' in input
     && (!scheduleMutation || 'schedule' in input),
   'TaskSchedule mutation body contains unsupported or missing fields.');
-  const decisions = normalizeDecisionArrays(input.eventDecisions ?? [], input.protectedTimeDecisions ?? []);
-  assert(scheduleMutation || (decisions.eventDecisions.length === 0 && decisions.protectedTimeDecisions.length === 0),
+  const decisions = normalizeDecisionArrays(input.eventDecisions ?? [], input.protectedTimeDecisions ?? [], input.taskScheduleDecisions ?? []);
+  assert(scheduleMutation || (decisions.eventDecisions.length === 0 && decisions.protectedTimeDecisions.length === 0 && decisions.taskScheduleDecisions.length === 0),
     'Only TaskSchedule edit may include conflict decisions.');
   return Object.freeze({
     action,
@@ -300,6 +325,12 @@ function protectedDecisionTuple(values) {
     || String(a[2]).localeCompare(String(b[2])));
 }
 
+function taskScheduleDecisionTuple(values) {
+  return values.map((item) => [
+    item.taskScheduleId, item.taskScheduleUpdatedAt, item.decision,
+  ]).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+}
+
 function scheduleTuple(draft) {
   return draft ? [
     draft.startLocalDateTime,
@@ -323,6 +354,7 @@ export function buildTaskScheduleMutationIntent(mutation) {
       scheduleTuple(mutation.schedule),
       eventDecisionTuple(mutation.eventDecisions),
       protectedDecisionTuple(mutation.protectedTimeDecisions),
+      taskScheduleDecisionTuple(mutation.taskScheduleDecisions),
     ]),
   });
 }
