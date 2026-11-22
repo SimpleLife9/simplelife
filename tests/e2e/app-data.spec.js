@@ -50,6 +50,8 @@ async function mockSupabaseSession(page, initialData = {}) {
   const calendarEvents = [...(initialData.calendarEvents || [])];
   const protectedTimeBlocks = [...(initialData.protectedTimeBlocks || [])];
   const protectedTimeMutationRequests = [];
+  const taskSchedules = [...(initialData.taskSchedules || [])];
+  const taskScheduleMutationRequests = [];
   const protectedTimeConflicts = [...(initialData.protectedTimeConflicts || [])];
   const insertedAgendaEvents = [];
   const idempotencyRequests = [];
@@ -206,6 +208,13 @@ async function mockSupabaseSession(page, initialData = {}) {
           : deletedFilter === 'is.null' ? row.deleted_at == null : true;
         return archivedMatch && deletedMatch;
       });
+      await json(200, rows);
+      return;
+    }
+
+    if (url.pathname === '/rest/v1/task_schedule' && method === 'GET') {
+      const ownerFilter = url.searchParams.get('owner_user_id') || '';
+      const rows = taskSchedules.filter((row) => !ownerFilter || ownerFilter === 'eq.' + row.owner_user_id);
       await json(200, rows);
       return;
     }
@@ -696,6 +705,74 @@ async function mockSupabaseSession(page, initialData = {}) {
       return;
     }
 
+    if (url.pathname === '/functions/v1/agenda-task-schedule-mutate' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const key = request.headers()['idempotency-key'] || '';
+      taskScheduleMutationRequests.push({ key, payload });
+      const now = new Date(Date.now() + taskScheduleMutationRequests.length * 3).toISOString();
+      let row = payload.action === 'create'
+        ? null
+        : taskSchedules.find((item) => item.id === payload.taskScheduleId && item.owner_user_id === profile.id);
+      if (payload.action !== 'create' && !row) {
+        await json(404, { error: 'TASK_SCHEDULE_NOT_FOUND' });
+        return;
+      }
+      if (payload.action !== 'create' && row.updated_at !== payload.expectedUpdatedAt) {
+        await json(409, { error: 'TASK_SCHEDULE_VERSION_CONFLICT' });
+        return;
+      }
+      if (payload.action === 'create') {
+        const schedule = payload.schedule;
+        const created = {
+          id: '019a0000-0000-7000-8000-000000000501',
+          owner_user_id: profile.id,
+          created_by_user_id: profile.id,
+          updated_by_user_id: profile.id,
+          task_id: payload.taskId,
+          schedule_status: 'proposed',
+          start_local: schedule.startLocalDateTime,
+          end_local: schedule.endLocalDateTime,
+          time_zone: schedule.timeZone,
+          starts_at: new Date(schedule.startLocalDateTime + ':00-05:00').toISOString(),
+          ends_at: new Date(schedule.endLocalDateTime + ':00-05:00').toISOString(),
+          start_disambiguation: schedule.startDisambiguation,
+          end_disambiguation: schedule.endDisambiguation,
+          start_gap_strategy: 'next-valid',
+          end_gap_strategy: 'next-valid',
+          resolver_metadata: { rulesSource: 'iana-tzdb', rulesVersion: '2026f', resolverVersion: 'agenda-iana-resolver-v1', authoritative: true },
+          conflict_decisions: [],
+          conflict_snapshot: [],
+          created_at: now,
+          updated_at: now,
+        };
+        taskSchedules.unshift(created);
+        await json(201, {
+          taskScheduleId: created.id, taskId: created.task_id,
+          scheduleStatus: created.schedule_status, updatedAt: created.updated_at,
+          startsAt: created.starts_at, endsAt: created.ends_at, replayed: false,
+        });
+        return;
+      }
+      if (payload.action === 'edit') {
+        Object.assign(row, {
+          start_local: payload.schedule.startLocalDateTime,
+          end_local: payload.schedule.endLocalDateTime,
+          starts_at: new Date(payload.schedule.startLocalDateTime + ':00-05:00').toISOString(),
+          ends_at: new Date(payload.schedule.endLocalDateTime + ':00-05:00').toISOString(),
+          time_zone: payload.schedule.timeZone,
+        });
+      } else if (payload.action === 'confirm') row.schedule_status = 'confirmed';
+      else if (payload.action === 'cancel') row.schedule_status = 'cancelled';
+      else if (payload.action === 'release') row.schedule_status = 'released';
+      else if (payload.action === 'elapsed') row.schedule_status = 'elapsed';
+      row.updated_at = now;
+      await json(200, {
+        taskScheduleId: row.id, taskId: row.task_id, scheduleStatus: row.schedule_status,
+        updatedAt: row.updated_at, startsAt: row.starts_at, endsAt: row.ends_at, replayed: false,
+      });
+      return;
+    }
+
     if (url.pathname === '/functions/v1/agenda-event-mutate' && method === 'POST') {
       const payload = request.postDataJSON();
       const key = request.headers()['idempotency-key'] || '';
@@ -841,7 +918,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     await json(404, { message: `Unexpected mocked Supabase request: ${method} ${url.pathname}` });
   });
 
-  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, protectedTimeBlocks, protectedTimeMutationRequests, protectedTimeConflicts, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
+  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, protectedTimeBlocks, protectedTimeMutationRequests, taskSchedules, taskScheduleMutationRequests, protectedTimeConflicts, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
 }
 
 test('mock-authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
