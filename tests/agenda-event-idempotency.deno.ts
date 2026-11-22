@@ -186,6 +186,40 @@ Deno.test("includes all user-visible semantic fields in the request hash", async
   }
 });
 
+Deno.test("binds explicit Protected Time decisions to Event create idempotency", async () => {
+  const draft = allDayDraft();
+  const base = await hashEventCreateIntent(draft);
+  const decisions = [
+    {
+      blockId: "019a0000-0000-7000-8000-000000000111",
+      blockUpdatedAt: "2026-11-20T10:00:00.000000+00:00",
+      occurrenceStartsAt: "2026-12-24T06:00:00.000Z",
+      decision: "override_hard",
+    },
+    {
+      blockId: "019a0000-0000-7000-8000-000000000112",
+      blockUpdatedAt: "2026-11-20T11:00:00.000000+00:00",
+      occurrenceStartsAt: "2026-12-24T07:00:00.000Z",
+      decision: "keep_flexible",
+    },
+  ];
+  const accepted = await hashEventCreateIntent(draft, undefined, decisions);
+  const reordered = await hashEventCreateIntent(draft, undefined, [...decisions].reverse());
+  const changedChoice = await hashEventCreateIntent(draft, undefined, [
+    decisions[0],
+    { ...decisions[1], decision: "keep_flexible" === decisions[1].decision ? "override_hard" : "keep_flexible" },
+  ]);
+
+  assertEquals(base.payloadHash, (await hashEventCreateIntent(draft, undefined, [])).payloadHash,
+    "empty decisions preserve the historical Event-create intent hash");
+  assert(accepted.payloadHash !== base.payloadHash,
+    "explicit consent must participate in Event-create idempotency");
+  assertEquals(accepted.payloadHash, reordered.payloadHash,
+    "decision array order does not change canonical idempotency identity");
+  assert(accepted.payloadHash !== changedChoice.payloadHash,
+    "a changed consent action cannot reuse the same create idempotency intent");
+});
+
 Deno.test("hashes equivalent normalized payloads identically with SHA-256", async () => {
   const a = await hashEventCreateIntent(fixedDraft());
   const b = await hashEventCreateIntent(fixedDraft({

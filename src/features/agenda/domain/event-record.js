@@ -130,11 +130,23 @@ function createCommonRecord({ eventDraft, eventId, ownerProfileId, timestamp }) 
  * eventId must be generated server-side. The caller cannot supply either value
  * through the Event draft. This helper is a mapping guard, not an auth boundary.
  */
+/**
+ * @param {{
+ *   eventDraft: any,
+ *   eventId: string,
+ *   ownerProfileId: string,
+ *   now: string,
+ *   protectedTimeDecisions?: readonly Record<string, unknown>[],
+ *   protectedTimeSnapshot?: readonly { id: string; updated_at: string }[],
+ * }} input
+ */
 export function buildEventInsertRecord({
   eventDraft,
   eventId,
   ownerProfileId,
   now,
+  protectedTimeDecisions = /** @type {Record<string, unknown>[]} */ ([]),
+  protectedTimeSnapshot = /** @type {{ id: string; updated_at: string }[]} */ ([]),
 }) {
   const timestamp = normalizeTimestamp(now);
   const record = createCommonRecord({
@@ -143,6 +155,23 @@ export function buildEventInsertRecord({
     ownerProfileId,
     timestamp,
   });
+  assert(Array.isArray(protectedTimeDecisions) && protectedTimeDecisions.length <= 500,
+    'protectedTimeDecisions must be an array with at most 500 entries.');
+  assert(protectedTimeDecisions.every((item) => item && typeof item === 'object' && !Array.isArray(item)),
+    'Every protected-time decision must be an object.');
+  assert(Array.isArray(protectedTimeSnapshot) && protectedTimeSnapshot.length <= 500,
+    'protectedTimeSnapshot must be an array with at most 500 entries.');
+  assert(protectedTimeSnapshot.every((item) => item && typeof item.id === 'string'
+    && UUID_V7_PATTERN.test(item.id) && typeof item.updated_at === 'string'
+    && Number.isFinite(Date.parse(item.updated_at))),
+  'Every Protected Time snapshot entry must contain a UUIDv7 and updated_at timestamp.');
+  record.protected_time_decisions = protectedTimeDecisions.map((item) => ({ ...item }));
+  // Transient RPC evidence: the SQL writer compares this full owner snapshot after
+  // acquiring the same advisory lock as Protected Time mutations. It is not stored.
+  record.protected_time_snapshot = protectedTimeSnapshot.map((item) => ({
+    id: item.id.toLowerCase(),
+    updated_at: item.updated_at,
+  }));
   const temporal = eventDraft.temporal;
   assert(temporal && typeof temporal === 'object', 'A normalized Event temporal value is required.');
 

@@ -92,7 +92,9 @@ DECLARE
     'start_disambiguation', NULL,
     'end_disambiguation', NULL,
     'start_gap_strategy', NULL,
-    'end_gap_strategy', NULL
+    'end_gap_strategy', NULL,
+    'protected_time_decisions', '[]'::jsonb,
+    'protected_time_snapshot', '[]'::jsonb
   );
 BEGIN
   IF NOT EXISTS (

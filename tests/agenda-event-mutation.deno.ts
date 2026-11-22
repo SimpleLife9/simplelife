@@ -53,12 +53,23 @@ function mockContext({
     replayed: false,
   }],
   rpcError = null,
+  protectedBlocks = [] as Record<string, unknown>[],
+  currentEvent = {
+    temporal_kind: "all_day",
+    start_date: "2026-12-24",
+    end_date_exclusive: "2026-12-26",
+    starts_at: null,
+    ends_at: null,
+    protected_time_decisions: [],
+  } as Record<string, unknown>,
 }: {
   profileStatus?: string;
   existing?: Record<string, unknown> | null;
   lookupError?: unknown;
   rpcResult?: unknown;
   rpcError?: unknown;
+  protectedBlocks?: Record<string, unknown>[];
+  currentEvent?: Record<string, unknown>;
 } = {}) {
   const calls: Record<string, unknown> = { profileLookup: 0, rpc: 0, rpcName: null, rpcArgs: null };
   const supabase = {
@@ -85,25 +96,54 @@ function mockContext({
   };
   const supabaseAdmin = {
     from(table: string) {
-      if (table !== "event_mutation_request") throw new Error("unexpected admin table " + table);
-      return {
-        select() {
-          return {
-            eq(_column: string, _value: string) {
-              return {
-                eq(_key: string, _value: string) {
-                  return {
-                    async maybeSingle() {
-                      calls.ledgerLookup = Number(calls.ledgerLookup ?? 0) + 1;
-                      return { data: existing, error: lookupError };
-                    },
-                  };
-                },
-              };
-            },
-          };
-        },
-      };
+      if (table === "event_mutation_request") {
+        return {
+          select() {
+            return {
+              eq(_column: string, _value: string) {
+                return {
+                  eq(_key: string, _value: string) {
+                    return {
+                      async maybeSingle() {
+                        calls.ledgerLookup = Number(calls.ledgerLookup ?? 0) + 1;
+                        return { data: existing, error: lookupError };
+                      },
+                    };
+                  },
+                };
+              },
+            };
+          },
+        };
+      }
+      if (table === "calendar_event") {
+        const query: any = {
+          select() { return this; },
+          eq() { return this; },
+          async maybeSingle() { return { data: currentEvent, error: null }; },
+        };
+        return query;
+      }
+      if (table === "user_preference") {
+        return {
+          select() {
+            return {
+              eq() { return { async maybeSingle() { return { data: { time_zone: "America/Havana" }, error: null }; } }; },
+            };
+          },
+        };
+      }
+      if (table === "protected_time_block") {
+        const query: any = {
+          select() { return this; },
+          eq() { return this; },
+          is() { return this; },
+          order() { return this; },
+          async limit() { return { data: protectedBlocks, error: null }; },
+        };
+        return query;
+      }
+      throw new Error("unexpected admin table " + table);
     },
     async rpc(name: string, args: Record<string, unknown>) {
       calls.rpc = Number(calls.rpc) + 1;
@@ -147,6 +187,7 @@ Deno.test("Event mutation normalizes UUIDv7 and preserves PostgreSQL microsecond
     expectedUpdatedAt: VERSION,
     action: "cancel",
     eventDraft: null,
+    protectedTimeDecisions: [],
   }, "normalized cancel mutation");
 });
 
@@ -182,10 +223,26 @@ Deno.test("Event mutation hash binds action, Event, exact expected version and n
     action: "cancel",
     eventDraft: null,
   });
+  const consent = {
+    blockId: "019a0000-0000-7000-8000-000000000111",
+    blockUpdatedAt: "2026-11-20T10:00:00.000000+00:00",
+    occurrenceStartsAt: "2026-12-24T06:00:00.000Z",
+    decision: "override_hard",
+  };
+  const withConsent = await hashEventMutationIntent({
+    ...mutation,
+    protectedTimeDecisions: [consent],
+  });
+  const changedConsent = await hashEventMutationIntent({
+    ...mutation,
+    protectedTimeDecisions: [{ ...consent, decision: "keep_flexible" }],
+  });
   assertEquals(first.payloadHash, replay.payloadHash, "stable hash");
   assertEquals(first.payloadHash.length, 64, "SHA-256 length");
   assertEquals(first.payloadHash === changedVersion.payloadHash, false, "version participates in hash");
   assertEquals(first.payloadHash === changedAction.payloadHash, false, "action participates in hash");
+  assertEquals(first.payloadHash === withConsent.payloadHash, false, "Protected Time consent participates in hash");
+  assertEquals(withConsent.payloadHash === changedConsent.payloadHash, false, "a changed consent choice changes the hash");
 });
 
 Deno.test("authenticated edit invokes only the atomic owner-scoped mutation RPC with server-derived owner", async () => {
@@ -217,9 +274,83 @@ Deno.test("authenticated edit invokes only the atomic owner-scoped mutation RPC 
   assertEquals(args.p_mutation, "edit", "mutation kind");
   assertEquals(args.p_idempotency_key, KEY, "UUIDv7 key");
   const patch = args.p_event_patch as Record<string, unknown>;
-  assertEquals(Object.keys(patch).length, 16, "only the editable Event fields are sent");
+  assertEquals(Object.keys(patch).length, 18, "editable Event fields plus decisions and transient snapshot");
   assertEquals(patch.title, "Reunión actualizada", "title patch");
+  assertEquals(patch.protected_time_decisions, [], "no overlap decisions needed");
+  assertEquals(patch.protected_time_snapshot, [], "empty owner snapshot supplied");
   assertEquals(patch.owner_user_id, undefined, "no owner identity in patch");
+});
+
+Deno.test("a detail-only Event edit preserves the original Protected Time consent timestamp", async () => {
+  const blockId = "019a0000-0000-7000-8000-000000000211";
+  const blockUpdatedAt = "2026-11-20T10:00:00.000000+00:00";
+  const occurrenceStartsAt = "2026-12-24T06:00:00.000Z";
+  const priorConsent = {
+    policyVersion: "protected-time-decision-v1",
+    blockId,
+    blockUpdatedAt,
+    protectionMode: "hard",
+    occurrenceDate: null,
+    occurrenceStartsAt,
+    occurrenceEndsAt: "2026-12-24T07:00:00.000Z",
+    overlapStartsAt: occurrenceStartsAt,
+    overlapEndsAt: "2026-12-24T07:00:00.000Z",
+    timeZone: "America/Havana",
+    decision: "override_hard",
+    consentedAt: "2026-11-20T12:00:00.000Z",
+  };
+  const currentEvent = {
+    temporal_kind: "all_day",
+    start_date: "2026-12-24",
+    end_date_exclusive: "2026-12-26",
+    starts_at: null,
+    ends_at: null,
+    protected_time_decisions: [priorConsent],
+  };
+  const protectedBlock = {
+    id: blockId,
+    updated_at: blockUpdatedAt,
+    label: "Sueño protegido",
+    category: "salud",
+    protection_mode: "hard",
+    pattern_kind: "one_off",
+    time_zone: "America/Havana",
+    starts_at: occurrenceStartsAt,
+    ends_at: "2026-12-24T07:00:00.000Z",
+    archived_at: null,
+    deleted_at: null,
+  };
+  const { ctx, calls } = mockContext({
+    currentEvent,
+    protectedBlocks: [protectedBlock],
+  });
+  const response = await handleRequest(request({
+    eventId: EVENT_ID,
+    expectedUpdatedAt: VERSION,
+    action: "edit",
+    event: {
+      title: "Reunión actualizada",
+      description: "Sólo cambió la descripción",
+      locationLabel: "Sala A",
+      locationKind: "physical",
+      eventStatus: "confirmed",
+      temporalKind: "all_day",
+      startDate: "2026-12-24",
+      endDateExclusive: "2026-12-26",
+    },
+  }), ctx, { now: () => "2026-11-22T18:10:00.000Z" });
+
+  assertEquals(response.status, 200, "detail-only edit succeeds with existing consent");
+  const args = calls.rpcArgs as Record<string, unknown>;
+  const patch = args.p_event_patch as Record<string, unknown>;
+  const decisions = patch.protected_time_decisions as Array<Record<string, unknown>>;
+  assertEquals(decisions.length, 1, "one still-current overlap decision remains");
+  assertEquals(decisions[0].consentedAt, priorConsent.consentedAt,
+    "original user consent timestamp is preserved");
+  assertEquals(decisions[0].blockUpdatedAt, blockUpdatedAt,
+    "decision stays tied to the exact Protected Time version");
+  assertEquals((patch.protected_time_snapshot as unknown[]).length, 1,
+    "current full owner snapshot accompanies the Event write");
 });
 
 Deno.test("finish action is a distinct terminal Event transition", async () => {

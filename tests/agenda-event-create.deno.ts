@@ -14,11 +14,14 @@ function assertEquals(actual: unknown, expected: unknown, label: string): void {
 async function body(response: Response): Promise<Record<string, unknown>> {
   return await response.json() as Record<string, unknown>;
 }
-function request(event: Record<string, unknown>, key = KEY): Request {
+function request(event: Record<string, unknown>, key = KEY, protectedTimeDecisions?: unknown): Request {
   return new Request("https://local.test/agenda-event-create", {
     method: "POST",
     headers: { "content-type": "application/json", "idempotency-key": key },
-    body: JSON.stringify({ event }),
+    body: JSON.stringify({
+      event,
+      ...(protectedTimeDecisions === undefined ? {} : { protectedTimeDecisions }),
+    }),
   });
 }
 function allDayEvent(overrides: Record<string, unknown> = {}) {
@@ -36,12 +39,14 @@ function mockContext({
   lookupError = null as unknown,
   rpcResult = [{ http_status: 201, response_body: { eventId: EVENT_ID, createdAt: "2026-11-22T18:00:00.000Z", eventStatus: "confirmed" }, replayed: false }],
   rpcError = null as unknown,
+  protectedBlocks = [] as Record<string, unknown>[],
 }: {
   profileStatus?: string;
   existing?: Record<string, unknown> | null;
   lookupError?: unknown;
   rpcResult?: unknown;
   rpcError?: unknown;
+  protectedBlocks?: Record<string, unknown>[];
 } = {}) {
   const calls: Record<string, unknown> = { rpc: 0, rpcArgs: null, profileLookup: 0, ledgerLookup: 0 };
   const supabase = {
@@ -65,25 +70,48 @@ function mockContext({
   };
   const supabaseAdmin = {
     from(table: string) {
-      if (table !== "event_create_request") throw new Error("unexpected admin table " + table);
-      return {
-        select() {
-          return {
-            eq(_column: string, _value: string) {
-              return {
-                eq(_key: string, _value: string) {
-                  return {
-                    async maybeSingle() {
-                      calls.ledgerLookup = Number(calls.ledgerLookup) + 1;
-                      return { data: existing, error: lookupError };
-                    },
-                  };
-                },
-              };
-            },
-          };
-        },
-      };
+      if (table === "event_create_request") {
+        return {
+          select() {
+            return {
+              eq(_column: string, _value: string) {
+                return {
+                  eq(_key: string, _value: string) {
+                    return {
+                      async maybeSingle() {
+                        calls.ledgerLookup = Number(calls.ledgerLookup) + 1;
+                        return { data: existing, error: lookupError };
+                      },
+                    };
+                  },
+                };
+              },
+            };
+          },
+        };
+      }
+      if (table === "user_preference") {
+        return {
+          select() {
+            return {
+              eq() {
+                return { async maybeSingle() { return { data: { time_zone: "America/Havana" }, error: null }; } };
+              },
+            };
+          },
+        };
+      }
+      if (table === "protected_time_block") {
+        const query: any = {
+          select() { return this; },
+          eq() { return this; },
+          is() { return this; },
+          order() { return this; },
+          async limit() { return { data: protectedBlocks, error: null }; },
+        };
+        return query;
+      }
+      throw new Error("unexpected admin table " + table);
     },
     async rpc(name: string, args: Record<string, unknown>) {
       calls.rpc = Number(calls.rpc) + 1;
@@ -122,6 +150,72 @@ Deno.test("creates an all-day Event through the atomic RPC with server-derived o
   assertEquals(record.owner_user_id, PROFILE_ID, "record owner");
   assertEquals(record.created_by_user_id, PROFILE_ID, "record creator");
   assertEquals(record.updated_by_user_id, PROFILE_ID, "record updater");
+  assertEquals(record.protected_time_decisions, [], "no unneeded conflict decisions");
+  assertEquals(record.protected_time_snapshot, [], "complete empty owner block snapshot");
+  assertEquals(Object.keys(record).length, 28, "exact Event RPC record shape");
+});
+
+Deno.test("hard Protected Time overlap returns conflict before creating or claiming the Event", async () => {
+  const block = {
+    id: "019a0000-0000-7000-8000-000000000111",
+    updated_at: "2026-11-20T10:00:00.000000+00:00",
+    label: "Sueño",
+    category: "salud",
+    protection_mode: "hard",
+    pattern_kind: "one_off",
+    time_zone: "America/Havana",
+    starts_at: "2026-12-24T06:00:00.000Z",
+    ends_at: "2026-12-24T07:00:00.000Z",
+    archived_at: null,
+    deleted_at: null,
+  };
+  const { ctx, calls } = mockContext({ protectedBlocks: [block] });
+  const response = await handleRequest(request(allDayEvent()), ctx, {
+    now: () => "2026-11-22T18:00:00.000Z",
+    newEventId: () => EVENT_ID,
+  });
+  assertEquals(response.status, 409, "hard overlap status");
+  const payload = await body(response);
+  assertEquals(payload.error, "PROTECTED_TIME_CONFLICTS", "hard overlap code");
+  const conflicts = payload.conflicts as Array<Record<string, unknown>>;
+  assertEquals(conflicts.length, 1, "one conflict");
+  assertEquals(conflicts[0].requiredDecision, "override_hard", "hard override required");
+  assertEquals(calls.rpc, 0, "conflict must not reach create RPC");
+});
+
+Deno.test("hard Protected Time overlap can be saved only with the exact occurrence and current block version decision", async () => {
+  const block = {
+    id: "019a0000-0000-7000-8000-000000000111",
+    updated_at: "2026-11-20T10:00:00.000000+00:00",
+    label: "Sueño",
+    category: "salud",
+    protection_mode: "hard",
+    pattern_kind: "one_off",
+    time_zone: "America/Havana",
+    starts_at: "2026-12-24T06:00:00.000Z",
+    ends_at: "2026-12-24T07:00:00.000Z",
+    archived_at: null,
+    deleted_at: null,
+  };
+  const decisions = [{
+    blockId: block.id,
+    blockUpdatedAt: block.updated_at,
+    occurrenceStartsAt: block.starts_at,
+    decision: "override_hard",
+  }];
+  const { ctx, calls } = mockContext({ protectedBlocks: [block] });
+  const response = await handleRequest(request(allDayEvent(), KEY, decisions), ctx, {
+    now: () => "2026-11-22T18:00:00.000Z",
+    newEventId: () => EVENT_ID,
+  });
+  assertEquals(response.status, 201, "explicit hard override status");
+  const args = calls.rpcArgs as Record<string, unknown>;
+  const record = args.p_event_record as Record<string, unknown>;
+  assertEquals(record.protected_time_decisions && (record.protected_time_decisions as unknown[]).length, 1,
+    "persisted decision count");
+  assertEquals((record.protected_time_decisions as Array<Record<string, unknown>>)[0].decision,
+    "override_hard", "explicit override stored");
+  assertEquals((record.protected_time_snapshot as unknown[]).length, 1, "one block version snapshot");
 });
 
 Deno.test("replays an existing receipt before resolver or RPC and returns the original Event", async () => {

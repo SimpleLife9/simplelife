@@ -72,7 +72,9 @@ AS $function$
     'deleted_at', NULL,
     'purge_after', NULL,
     'created_at', p_created_at,
-    'updated_at', p_created_at
+    'updated_at', p_created_at,
+    'protected_time_decisions', '[]'::jsonb,
+    'protected_time_snapshot', '[]'::jsonb
   );
 $function$;
 

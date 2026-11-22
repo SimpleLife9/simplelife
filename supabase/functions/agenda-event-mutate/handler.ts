@@ -12,6 +12,7 @@ import {
   type EventAuthenticatedContext,
 } from "../_shared/agenda-event-profile.ts";
 import { resolveLocalDateTimeRange, TzdbVersionError } from "../agenda-time-resolve/resolver.ts";
+import { assessOwnerProtectedTimeConflicts } from "../_shared/protected-time-conflicts.ts";
 
 export const MAX_REQUEST_BYTES = 32 * 1024;
 const JSON_HEADERS = {
@@ -35,6 +36,7 @@ const EDIT_FIELDS = [
   "end_disambiguation",
   "start_gap_strategy",
   "end_gap_strategy",
+  "protected_time_decisions",
 ] as const;
 
 type RpcClient = {
@@ -85,7 +87,48 @@ async function readBoundedBody(request: Request): Promise<string | null> {
 function toEventPatch(record: Record<string, unknown>): Record<string, unknown> {
   const patch: Record<string, unknown> = {};
   for (const field of EDIT_FIELDS) patch[field] = record[field];
+  patch.protected_time_snapshot = record.protected_time_snapshot;
   return patch;
+}
+
+function sameEventWindow(current: Record<string, unknown>, candidate: Record<string, unknown>): boolean {
+  if (current.temporal_kind !== candidate.temporal_kind) return false;
+  if (current.temporal_kind === "all_day") {
+    return current.start_date === candidate.start_date
+      && current.end_date_exclusive === candidate.end_date_exclusive;
+  }
+  return typeof current.starts_at === "string"
+    && typeof current.ends_at === "string"
+    && Date.parse(current.starts_at) === Date.parse(String(candidate.starts_at))
+    && Date.parse(current.ends_at) === Date.parse(String(candidate.ends_at));
+}
+
+function storedDecisionInputs(value: unknown): unknown[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    const decision = item as Record<string, unknown>;
+    return {
+      blockId: decision.blockId,
+      blockUpdatedAt: decision.blockUpdatedAt,
+      occurrenceStartsAt: decision.occurrenceStartsAt,
+      decision: decision.decision,
+    };
+  });
+}
+
+function storedDecisionMap(value: unknown): Map<string, Record<string, unknown>> {
+  if (!Array.isArray(value)) return new Map();
+  const entries: Array<[string, Record<string, unknown>]> = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const decision = item as Record<string, unknown>;
+    if (typeof decision.blockId !== "string"
+      || typeof decision.occurrenceStartsAt !== "string"
+      || !Number.isFinite(Date.parse(decision.occurrenceStartsAt))) continue;
+    const key = decision.blockId + ":" + new Date(decision.occurrenceStartsAt).toISOString();
+    entries.push([key, decision]);
+  }
+  return new Map(entries);
 }
 
 /**
@@ -129,12 +172,20 @@ export async function handleRequest(
     return json({ error: "EVENT_MUTATION_BODY_MUST_BE_AN_OBJECT" }, 422);
   }
   const input = body as Record<string, unknown>;
-  const allowedKeys = input.action === "edit"
+  const requiredKeys = input.action === "edit"
     ? ["action", "event", "eventId", "expectedUpdatedAt"]
     : ["action", "eventId", "expectedUpdatedAt"];
-  if (Object.keys(input).length !== allowedKeys.length
+  const allowedKeys = input.action === "edit"
+    ? [...requiredKeys, "protectedTimeDecisions"]
+    : requiredKeys;
+  if (requiredKeys.some((key) => !(key in input))
     || Object.keys(input).some((key) => !allowedKeys.includes(key))) {
     return json({ error: "EVENT_MUTATION_BODY_HAS_UNSUPPORTED_FIELDS" }, 422);
+  }
+
+  const requestedProtectedTimeDecisions = input.protectedTimeDecisions ?? [];
+  if (!Array.isArray(requestedProtectedTimeDecisions)) {
+    return json({ error: "PROTECTED_TIME_DECISIONS_MUST_BE_AN_ARRAY" }, 422);
   }
 
   try {
@@ -145,6 +196,7 @@ export async function handleRequest(
       eventDraft: input.action === "edit"
         ? createEventDraft(input.event)
         : null,
+      protectedTimeDecisions: requestedProtectedTimeDecisions as Record<string, unknown>[],
     });
     const intent = await hashEventMutationIntent(mutation);
 
@@ -188,11 +240,88 @@ export async function handleRequest(
         const resolution = resolveLocalDateTimeRange(buildEventTimeResolutionRequest(readyDraft));
         readyDraft = applyAuthoritativeEventResolution(readyDraft, resolution);
       }
+      const currentResult = await ctx.supabaseAdmin
+        .from("calendar_event")
+        .select("temporal_kind,start_date,end_date_exclusive,starts_at,ends_at,protected_time_decisions")
+        .eq("owner_user_id", profile.profileId)
+        .eq("id", mutation.eventId)
+        .maybeSingle();
+      if (currentResult.error) return json({ error: "EVENT_CONFLICT_CONTEXT_LOOKUP_FAILED" }, 503);
+      if (!currentResult.data) return json({ error: "EVENT_NOT_FOUND" }, 404);
+
+      const candidateRecord = buildEventInsertRecord({
+        eventDraft: readyDraft,
+        eventId: mutation.eventId,
+        ownerProfileId: profile.profileId,
+        now,
+      });
+      const sameWindow = sameEventWindow(currentResult.data, candidateRecord);
+      const retainExistingConsent = input.protectedTimeDecisions === undefined && sameWindow;
+      const previousDecisionRecords = Array.isArray(currentResult.data.protected_time_decisions)
+        ? currentResult.data.protected_time_decisions as Record<string, unknown>[]
+        : [];
+      const previousDecisionMap = storedDecisionMap(previousDecisionRecords);
+      const priorDecisions = storedDecisionInputs(previousDecisionRecords);
+      let decisionInputs = input.protectedTimeDecisions !== undefined
+        ? input.protectedTimeDecisions
+        : retainExistingConsent ? priorDecisions : [];
+      let conflictAssessment = await assessOwnerProtectedTimeConflicts({
+        supabaseAdmin: ctx.supabaseAdmin,
+        ownerProfileId: profile.profileId,
+        event: candidateRecord,
+        suppliedDecisions: decisionInputs,
+        now,
+      });
+
+      // When only Event details change, preserve the original consent timestamp
+      // for occurrences that are still identical and backed by the same block
+      // version. Drop approvals for removed occurrences. A new/changed overlap
+      // remains incomplete and is returned to the user for a fresh decision.
+      if (!conflictAssessment.ok && retainExistingConsent) {
+        const reusable = conflictAssessment.conflicts.flatMap((conflict) => {
+          const previous = previousDecisionMap.get(
+            typeof conflict.conflictKey === "string" ? conflict.conflictKey : "",
+          );
+          if (!previous || previous.blockUpdatedAt !== conflict.blockUpdatedAt
+            || previous.decision !== conflict.requiredDecision) return [];
+          return [{
+            blockId: conflict.blockId,
+            blockUpdatedAt: conflict.blockUpdatedAt,
+            occurrenceStartsAt: conflict.occurrenceStartsAt,
+            decision: conflict.requiredDecision,
+          }];
+        });
+        decisionInputs = reusable;
+        conflictAssessment = await assessOwnerProtectedTimeConflicts({
+          supabaseAdmin: ctx.supabaseAdmin,
+          ownerProfileId: profile.profileId,
+          event: candidateRecord,
+          suppliedDecisions: decisionInputs,
+          now,
+        });
+      }
+
+      if (!conflictAssessment.ok) {
+        return json({
+          error: conflictAssessment.code,
+          conflicts: conflictAssessment.conflicts,
+        }, 409);
+      }
+      const decisionsToPersist = retainExistingConsent
+        ? conflictAssessment.assessment.conflicts.flatMap((conflict) => {
+          const previous = previousDecisionMap.get(
+            typeof conflict.conflictKey === "string" ? conflict.conflictKey : "",
+          );
+          return previous ? [previous] : [];
+        })
+        : conflictAssessment.assessment.decisions;
       const record = buildEventInsertRecord({
         eventDraft: readyDraft,
         eventId: mutation.eventId,
         ownerProfileId: profile.profileId,
         now,
+        protectedTimeDecisions: [...decisionsToPersist],
+        protectedTimeSnapshot: [...conflictAssessment.assessment.snapshot],
       });
       eventPatch = toEventPatch(record as unknown as Record<string, unknown>);
     }
@@ -225,6 +354,10 @@ export async function handleRequest(
     if (error instanceof TzdbVersionError) return json({ error: "TIMEZONE_RULES_UNAVAILABLE" }, 503);
     if (error instanceof TypeError || error instanceof RangeError) {
       return json({ error: error.message }, 422);
+    }
+    if (error instanceof Error && (error.message === "AGENDA_TIME_ZONE_LOOKUP_FAILED"
+      || error.message === "PROTECTED_TIME_CONFLICT_LOOKUP_FAILED")) {
+      return json({ error: error.message }, 503);
     }
     return json({ error: "EVENT_MUTATION_FAILED" }, 500);
   }

@@ -14,6 +14,7 @@ import {
   type EventAuthenticatedContext,
 } from "../_shared/agenda-event-profile.ts";
 import { resolveLocalDateTimeRange, TzdbVersionError } from "../agenda-time-resolve/resolver.ts";
+import { assessOwnerProtectedTimeConflicts } from "../_shared/protected-time-conflicts.ts";
 
 export const MAX_REQUEST_BYTES = 32 * 1024;
 const JSON_HEADERS = {
@@ -116,13 +117,23 @@ export async function handleRequest(
   let body: unknown;
   try { body = JSON.parse(raw); } catch { return json({ error: "VALID_JSON_REQUIRED" }, 400); }
   if (!body || typeof body !== "object" || Array.isArray(body)
-    || Object.keys(body).length !== 1 || !("event" in body)) {
-    return json({ error: "BODY_MUST_CONTAIN_ONLY_EVENT" }, 422);
+    || !("event" in body)
+    || Object.keys(body).some((key) => !["event", "protectedTimeDecisions"].includes(key))) {
+    return json({ error: "BODY_MUST_CONTAIN_EVENT_AND_OPTIONAL_PROTECTED_TIME_DECISIONS" }, 422);
+  }
+  const input = body as { event: unknown; protectedTimeDecisions?: unknown };
+  const requestedProtectedTimeDecisions = input.protectedTimeDecisions ?? [];
+  if (!Array.isArray(requestedProtectedTimeDecisions)) {
+    return json({ error: "PROTECTED_TIME_DECISIONS_MUST_BE_AN_ARRAY" }, 422);
   }
 
   try {
-    const eventDraft = createEventDraft((body as { event: unknown }).event);
-    const intent = await hashEventCreateIntent(eventDraft);
+    const eventDraft = createEventDraft(input.event);
+    const intent = await hashEventCreateIntent(
+      eventDraft,
+      undefined,
+      requestedProtectedTimeDecisions,
+    );
 
     // Fast replay path: no IANA resolution, new Event ID or mutable resolver
     // metadata is needed once the original committed receipt exists.
@@ -153,11 +164,33 @@ export async function handleRequest(
     }
 
     const now = (dependencies.now ?? (() => new Date().toISOString()))();
-    const eventRecord = buildEventInsertRecord({
+    const eventId = (dependencies.newEventId ?? uuidv7)();
+    const candidateRecord = buildEventInsertRecord({
       eventDraft: readyDraft,
-      eventId: (dependencies.newEventId ?? uuidv7)(),
+      eventId,
       ownerProfileId: profile.profileId,
       now,
+    });
+    const conflictAssessment = await assessOwnerProtectedTimeConflicts({
+      supabaseAdmin: ctx.supabaseAdmin,
+      ownerProfileId: profile.profileId,
+      event: candidateRecord,
+      suppliedDecisions: requestedProtectedTimeDecisions,
+      now,
+    });
+    if (!conflictAssessment.ok) {
+      return json({
+        error: conflictAssessment.code,
+        conflicts: conflictAssessment.conflicts,
+      }, 409);
+    }
+    const eventRecord = buildEventInsertRecord({
+      eventDraft: readyDraft,
+      eventId,
+      ownerProfileId: profile.profileId,
+      now,
+      protectedTimeDecisions: [...conflictAssessment.assessment.decisions],
+      protectedTimeSnapshot: [...conflictAssessment.assessment.snapshot],
     });
     const result = await ctx.supabaseAdmin.rpc("create_calendar_event_once", {
       p_owner_user_id: profile.profileId,
@@ -179,6 +212,10 @@ export async function handleRequest(
     if (error instanceof TzdbVersionError) return json({ error: "TIMEZONE_RULES_UNAVAILABLE" }, 503);
     if (error instanceof TypeError || error instanceof RangeError) {
       return json({ error: error.message }, 422);
+    }
+    if (error instanceof Error && (error.message === "AGENDA_TIME_ZONE_LOOKUP_FAILED"
+      || error.message === "PROTECTED_TIME_CONFLICT_LOOKUP_FAILED")) {
+      return json({ error: error.message }, 503);
     }
     return json({ error: "EVENT_CREATE_FAILED" }, 500);
   }
