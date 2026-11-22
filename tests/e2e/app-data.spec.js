@@ -48,6 +48,8 @@ async function mockSupabaseSession(page, initialData = {}) {
   const insertedTasks = [];
   const updatedTasks = [];
   const calendarEvents = [...(initialData.calendarEvents || [])];
+  const protectedTimeBlocks = [...(initialData.protectedTimeBlocks || [])];
+  const protectedTimeMutationRequests = [];
   const insertedAgendaEvents = [];
   const idempotencyRequests = [];
   const mutationRequests = [];
@@ -188,6 +190,22 @@ async function mockSupabaseSession(page, initialData = {}) {
 
     if (url.pathname === '/rest/v1/user_preference' && method === 'GET') {
       await json(200, preference);
+      return;
+    }
+
+    if (url.pathname === '/rest/v1/protected_time_block' && method === 'GET') {
+      const archivedFilter = url.searchParams.get('archived_at') || '';
+      const deletedFilter = url.searchParams.get('deleted_at') || '';
+      const rows = protectedTimeBlocks.filter((row) => {
+        const archivedMatch = archivedFilter === 'not.is.null'
+          ? row.archived_at != null
+          : archivedFilter === 'is.null' ? row.archived_at == null : true;
+        const deletedMatch = deletedFilter === 'not.is.null'
+          ? row.deleted_at != null
+          : deletedFilter === 'is.null' ? row.deleted_at == null : true;
+        return archivedMatch && deletedMatch;
+      });
+      await json(200, rows);
       return;
     }
 
@@ -590,6 +608,93 @@ async function mockSupabaseSession(page, initialData = {}) {
       return;
     }
 
+    if (url.pathname === '/functions/v1/agenda-protected-time-mutate' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const key = request.headers()['idempotency-key'] || '';
+      protectedTimeMutationRequests.push({ key, payload });
+      const now = new Date(Date.now() + protectedTimeMutationRequests.length * 3).toISOString();
+      let row = payload.action === 'create'
+        ? null
+        : protectedTimeBlocks.find((item) => item.id === payload.blockId && item.owner_user_id === profile.id);
+      if (payload.action !== 'create' && !row) {
+        await json(404, { error: 'PROTECTED_TIME_BLOCK_NOT_FOUND' });
+        return;
+      }
+      if (payload.action === 'create') {
+        const block = payload.block;
+        row = {
+          id: '0190f47a-7b2c-7abc-8def-0123456789d1',
+          owner_user_id: profile.id,
+          created_by_user_id: profile.id,
+          updated_by_user_id: profile.id,
+          label: block.label,
+          category: block.category ?? null,
+          protection_mode: block.protectionMode,
+          pattern_kind: block.patternKind,
+          time_zone: block.timeZone,
+          start_local: block.startLocalDateTime ?? null,
+          end_local: block.endLocalDateTime ?? null,
+          starts_at: block.patternKind === 'one_off' ? '2026-11-23T14:00:00.000Z' : null,
+          ends_at: block.patternKind === 'one_off' ? '2026-11-23T15:00:00.000Z' : null,
+          start_disambiguation: block.startDisambiguation ?? null,
+          end_disambiguation: block.endDisambiguation ?? null,
+          start_gap_strategy: block.patternKind === 'one_off' ? 'next-valid' : null,
+          end_gap_strategy: block.patternKind === 'one_off' ? 'next-valid' : null,
+          start_date: block.startDate ?? null,
+          end_date_exclusive: block.endDateExclusive ?? null,
+          weekdays: block.weekdays ?? null,
+          start_time_local: block.startLocalTime ?? null,
+          end_time_local: block.endLocalTime ?? null,
+          ends_next_day: block.endsNextDay ?? null,
+          resolver_metadata: { rulesSource: 'iana-tzdb', rulesVersion: '2026f', resolverVersion: 'agenda-iana-resolver-v1', authoritative: true },
+          archived_at: null,
+          deleted_at: null,
+          created_at: now,
+          updated_at: now,
+        };
+        protectedTimeBlocks.unshift(row);
+      } else {
+        if (row.updated_at !== payload.expectedUpdatedAt) {
+          await json(409, { error: 'PROTECTED_TIME_VERSION_CONFLICT' });
+          return;
+        }
+        if (payload.action === 'edit') {
+          const block = payload.block;
+          Object.assign(row, {
+            label: block.label,
+            category: block.category ?? null,
+            protection_mode: block.protectionMode,
+            pattern_kind: block.patternKind,
+            time_zone: block.timeZone,
+            start_local: block.startLocalDateTime ?? null,
+            end_local: block.endLocalDateTime ?? null,
+            start_disambiguation: block.startDisambiguation ?? null,
+            end_disambiguation: block.endDisambiguation ?? null,
+            start_date: block.startDate ?? null,
+            end_date_exclusive: block.endDateExclusive ?? null,
+            weekdays: block.weekdays ?? null,
+            start_time_local: block.startLocalTime ?? null,
+            end_time_local: block.endLocalTime ?? null,
+            ends_next_day: block.endsNextDay ?? null,
+          });
+        } else if (payload.action === 'archive') {
+          row.archived_at = now;
+        } else if (payload.action === 'restore') {
+          row.archived_at = null;
+          row.deleted_at = null;
+        } else if (payload.action === 'delete') {
+          row.archived_at = null;
+          row.deleted_at = now;
+        }
+        row.updated_at = now;
+        row.updated_by_user_id = profile.id;
+      }
+      await json(payload.action === 'create' ? 201 : 200, {
+        blockId: row.id, updatedAt: row.updated_at, lifecycle: row.deleted_at ? 'trash' : row.archived_at ? 'archived' : 'active', replayed: false,
+      });
+      return;
+    }
+
     if (url.pathname === '/functions/v1/agenda-event-mutate' && method === 'POST') {
       const payload = request.postDataJSON();
       const key = request.headers()['idempotency-key'] || '';
@@ -705,7 +810,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     await json(404, { message: `Unexpected mocked Supabase request: ${method} ${url.pathname}` });
   });
 
-  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
+  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, protectedTimeBlocks, protectedTimeMutationRequests, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
 }
 
 test('mock-authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
