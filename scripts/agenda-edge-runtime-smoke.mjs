@@ -80,7 +80,7 @@ server.stderr.on("data", capture);
 let serverExit = null;
 server.on("exit", (code) => { serverExit = code; });
 
-async function request(headers, body, timeoutMs = 5000) {
+async function request(headers, body, timeoutMs = 15000) {
   try {
     return await fetch(functionUrl, {
       method: body === undefined ? "GET" : "POST",
@@ -97,20 +97,34 @@ async function request(headers, body, timeoutMs = 5000) {
 
 try {
   let ready = false;
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    if (serverExit !== null) fail("Edge Runtime function server exited early (" + serverExit + ").\n" + serverLogs);
+  let readinessDetail = "no response received";
+  // Bound readiness to 60 seconds total. A 401 confirms the route is mounted
+  // and the invalid readiness credential was rejected by the gateway.
+  const readinessDeadline = Date.now() + 60_000;
+  while (Date.now() < readinessDeadline) {
+    if (serverExit !== null) fail("Edge Runtime function server exited early (" + serverExit + ").\\n" + serverLogs);
     try {
-      const response = await request({ authorization: "Bearer " + localPublishableKey });
+      const response = await request(
+        { authorization: "Bearer " + localPublishableKey },
+        undefined,
+        2000,
+      );
+      readinessDetail = "HTTP " + response.status;
       if (response.status === 401) {
         ready = true;
         break;
       }
-    } catch {
-      // Wait for the local gateway and Edge Runtime route to become ready.
+      await response.body?.cancel().catch(() => {});
+    } catch (error) {
+      readinessDetail = String(error);
     }
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await new Promise((resolve) => setTimeout(resolve, 500));
   }
-  if (!ready) fail("Local Edge Runtime did not become ready at " + functionUrl + ".\n" + serverLogs);
+  if (!ready) {
+    fail("Local Edge Runtime did not become ready at " + functionUrl
+      + " within 60 seconds. Last probe: " + readinessDetail
+      + "\\nEdge Runtime logs:\\n" + serverLogs);
+  }
 
   const rangePayload = JSON.stringify({
     timeZone: "America/New_York",
@@ -118,10 +132,13 @@ try {
     end: { localDateTime: "2026-11-01T01:45", disambiguation: "later" },
   });
 
+  // The first authenticated invocation may cold-start the local Edge Runtime
+  // and load the pinned TZDB bundle. Keep the request bounded, but allow the
+  // same 15-second window already used by the negative JWT checks below.
   const valid = await request({
     authorization: "Bearer " + session.access_token,
     "content-type": "application/json",
-  }, rangePayload);
+  }, rangePayload, 30000);
   const validBody = await valid.text();
   if (valid.status !== 200) {
     fail("Auth-issued user JWT response status: expected 200, received " + valid.status

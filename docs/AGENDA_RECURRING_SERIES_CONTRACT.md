@@ -1,153 +1,139 @@
 # Agenda — recurring series and occurrence contract
 
-Status: technical design proposal following the approved TZDB-change product decision. This document does not authorize schema creation, migrations, hosted database changes, or deployment.
+**Status:** PRODUCT DECISIONS APPROVED — pure domain implementation in progress; persistence remains gated.  
+**Approval:** Robert approved the complete recurrence v1 proposal on 21 November 2026 (PR #71).  
+**Scope:** This contract defines the bounded v1 recurrence behavior. It does not authorize DDL, hosted migrations, RLS/grant/Auth changes, cron, production data operations, Edge Function deployment or release.
 
 ## 1. Domain separation
 
 A recurring series is the user's civil-time instruction. An occurrence is one dated instance produced by that instruction.
 
-- A series owns the recurrence rule, original local wall time, IANA timezone, duration/end semantics, default DST disambiguation, lifecycle, and series-level metadata.
-- An occurrence has stable identity, original scheduled local date/time, resolved UTC start/end, TZDB/resolver versions, resolution metadata, and occurrence lifecycle.
-- Exceptions and overrides belong to the occurrence identity; they must not mutate the recurrence rule unless the user explicitly chooses a series edit scope.
-- A generated occurrence is not a new Task. If the user associates a Task with an occurrence, preserve the Task identity and status independently.
-- A recurrence is not a fixed UTC interval. Generate civil dates first, then resolve each occurrence against the approved IANA TZDB authority.
+- A series owns the versioned recurrence rule, original local wall time, IANA timezone for timed Events, duration, default DST resolution and series metadata.
+- An occurrence owns stable identity, original civil slot, effective local slot, resolved UTC range when timed, resolver/TZDB version, override and lifecycle state.
+- An occurrence is not a new Task. Direct Task-to-occurrence linking is deferred in v1; TaskSchedule remains the Phase 1 relationship between a Task and reserved time.
+- Generate civil dates first. Resolve timed instances only through the approved, versioned server authority. Runtime `Intl` is not authoritative for persistence.
+- All-day recurrence stays date-only and never fabricates UTC midnight.
 
-## 2. Supported recurrence subset
+## 2. Approved v1 recurrence grammar
 
-Do not claim full RFC 5545 compatibility. Initial implementation should support an explicitly versioned subset only:
+Version 1 is normalized structured data, not an arbitrary RFC 5545 string. The only supported frequencies are DAILY, WEEKLY, MONTHLY and YEARLY.
 
-- Daily: every N days.
-- Weekly: every N weeks, with an explicit set of weekdays.
-- Monthly: every N months, with either a day-of-month or an ordinal weekday selector.
-- Optional local-date end boundary or occurrence count.
-- Explicit excluded dates and per-occurrence overrides.
+Common fields:
+- `version: 1`, `frequency`, `interval` (integer 1–1000; default 1), `startDate` (inclusive local calendar date), and `temporalKind` (`all_day` or `zoned_civil`).
+- Timed rules require `localTime`, IANA `timeZone`, positive `durationMinutes`, and `disambiguation` (`earlier` by default, `later` only by explicit choice). Gap strategy is fixed to `next-valid`.
+- All-day rules have no clock time, timezone conversion, or duration in minutes.
+- Optional termination is exactly one of `count` or `until`; `until` is an inclusive local date. COUNT counts rule-generated civil slots before exclusions; an excluded date does not extend COUNT.
+- `excludedDates` excludes original local dates. Occurrence-specific changes are represented as overrides against the stable original occurrence identity.
 
-Unsupported combinations must be rejected with a clear validation error, not silently approximated. The exact v1 rule grammar, month-end behavior (for example, day 31 in a shorter month), and whether yearly rules belong in v1 remain open design decisions before persistence.
-
-Store the recurrence rule in a normalized, versioned representation; do not persist an opaque provider-specific string as the only source of truth.
+Frequency selectors:
+- DAILY: interval in calendar days; no weekday/month selectors.
+- WEEKLY: interval in Monday-based weeks plus a non-empty set of ISO weekdays (`MO` through `SU`). The start date is an inclusive lower bound; earlier weekdays in its first week are not generated.
+- MONTHLY: interval in calendar months plus exactly one selector: `byMonthDay` (1–31 or `LAST`) or `byOrdinalWeekday` (ordinal 1–4 or -1 for last, plus weekday).
+- YEARLY: interval in calendar years, a required `byMonth` (1–12), and exactly one of the same day-of-month or ordinal-weekday selectors.
+- A numeric day that does not exist in a selected month is skipped. It is not clamped or rolled forward. `LAST` explicitly means the last calendar day. February 29 therefore occurs only in leap years.
+- Unsupported selectors/combinations are rejected; no sub-daily intervals, multiple selectors, BYSETPOS or implicit full-RFC compatibility.
 
 ## 3. Stable occurrence identity and idempotency
 
-The occurrence key must identify the intended civil occurrence, not its current UTC instant.
+The occurrence key identifies the original intended civil slot, not its current UTC instant.
 
-Recommended logical identity:
+Logical key components:
 - series ID;
-- original scheduled local date;
-- original scheduled local time;
+- original local date;
+- original local clock time, or `ALL_DAY`;
 - occurrence-key format version.
 
-The deterministic key must not include UTC start/end, TZDB version, or current timezone offset. A TZDB update must not create a second occurrence for the same civil slot.
+The key must not contain UTC instants, offsets, TZDB version, current resolved local time, or DST fold choice. Moving an occurrence or changing its duration preserves its original key. Re-evaluating the same slot after a TZDB update cannot create a duplicate.
 
-Enforce a unique constraint on (series_id, occurrence_key) in the eventual schema. Materialization must be idempotent: retrying the same generation window cannot duplicate rows, reset user edits, or overwrite an accepted override.
+The eventual persistence layer must enforce a unique `(series_id, occurrence_key)` constraint. Repeated or concurrent materialization must not duplicate rows, overwrite an override, reset a review state or rewrite a terminal lifecycle state.
 
-If a series edit changes the original local slot, apply the selected edit scope and create/reconcile the corresponding identities transactionally. Preserve audit evidence of replaced, cancelled, or superseded occurrences; do not physically delete audit history.
+## 4. Hybrid materialization model — approved
 
-## 4. Materialization lifecycle
+Use a rolling 90-calendar-day horizon. Materialize eligible occurrences within that horizon in batches of at most 500 candidates per transaction.
 
-Recommended occurrence states (exact names may be normalized during implementation):
+- Timed materialized occurrences retain original civil date/time, IANA zone, resolved UTC start/end, exact resolver/TZDB versions and resolution metadata.
+- All-day materialized occurrences retain date-only start/end values and no UTC instants.
+- Persist occurrence lifecycle and review state, exclusions, overrides and terminal tombstones. A moved instance retains its original occurrence key.
+- Occurrences beyond the horizon may be calculated as bounded calendar previews, but those previews are not persisted and must not be presented as already-confirmed materialized commitments.
+- A preview must never overwrite an existing materialized occurrence or its accepted UTC instants.
+- The materializer is deterministic and idempotent. It must be concurrency-safe, observable, bounded and resumable through a civil-date cursor.
+- The 90-day horizon and 500-item maximum are fixed v1 operational constants, not user-facing settings.
 
-- scheduled: materialized and awaiting its scheduled time.
-- completed: historical, immutable for TZDB recalculation.
-- cancelled: explicit user cancellation; retained as a tombstone.
-- skipped: intentionally omitted; retained so regeneration cannot recreate it.
-- needs_review: a newer approved TZDB version resolves this already-materialized future slot differently.
-- superseded: replaced by an explicit series/occurrence edit; retained for audit and idempotency.
+### Trigger policy
 
-A materializer should generate occurrences only within a bounded rolling horizon and should be safe to rerun. The horizon length, execution trigger (on series write, app open, scheduled job, or a combination), and maximum batch size are OPEN decisions. Do not create a cron or scheduled workflow until those are approved and operationally owned.
+No cron or scheduled workflow in v1.
+
+1. Create/edit of a series materializes the affected eligible range within the horizon.
+2. Authenticated Agenda range reads perform an idempotent top-up when needed.
+3. A top-up must not hold a calendar request open for unbounded work. If later volume requires background processing, propose a separately reviewed job with a named operator and a new Human Gate.
 
 ## 5. Approved TZDB update behavior
-
-The following is an approved product decision by Robert (21 November 2026), also recorded in AGENDA_TZDB_LIFECYCLE_POLICY.md:
 
 1. Historical, completed, skipped and cancelled occurrences are immutable.
 2. Materialized future occurrences keep their confirmed UTC instants and original rules version; no silent shift.
 3. Future occurrences not yet materialized use the latest approved TZDB release when generated.
-4. If a new TZDB release changes a materialized future occurrence, mark it needs_review and show the prior and newly resolved instants.
-5. Only explicit user acceptance applies the new instant. Record the accepted rules version, old/new instants, actor and timestamp in append-only audit evidence.
-6. Keep the series' original local wall time and IANA zone. A user profile timezone change does not rewrite the series.
-7. Preserve explicit edit scopes: this occurrence / this and following / entire series.
+4. If a new TZDB release changes a materialized future occurrence, mark it `needs_review` and show prior and newly resolved local/UTC values.
+5. Only explicit user acceptance applies the new instant. Append actor, timestamp, old/new values and accepted rules version in the trusted audit path.
+6. The series keeps its original local wall time and IANA zone. A profile timezone change does not rewrite the series.
+7. Edit scope remains explicit: this occurrence / this and following / entire series.
 
-A review action must be idempotent and concurrency-safe. If the occurrence was edited or cancelled after the review was generated, reject stale acceptance and refresh the comparison.
+A review action is idempotent and version-bound. If the occurrence or candidate changed after the review was generated, reject the stale action and refresh the comparison.
 
-## 6. DST behavior for generated occurrences
+## 6. DST defaults for recurring timed occurrences
 
-Use the same versioned server resolver as one-off Events. Browser Intl may preview but is never authoritative for persistence.
+- Gap: advance to the next valid local minute; record requested local value, resolved local value and adjustment.
+- Fold: select the earlier instant by default; select the later instant only when explicitly stored.
+- Series-level choice is inherited; an explicit occurrence override takes precedence.
+- Resolve the start/end range atomically against one loaded TZDB release and resolver version. Validate resolved end > start.
+- All-day recurrence is date-only and bypasses the UTC resolver.
 
-Recommended v1 defaults, pending confirmation in the detailed product acceptance:
-- Gap: resolve to the next valid local minute and record the requested and resolved local values plus adjustment.
-- Fold: choose the earlier instant by default; permit a later choice only when explicitly stored on the series or occurrence.
-- A series-level DST choice is inherited by generated occurrences; an occurrence override takes precedence.
-- All-day recurrence remains date-only and does not pass through UTC conversion.
+## 7. Occurrence overrides
 
-Every generated timed occurrence must be resolved as one atomic start/end range against one loaded TZDB release and resolver version. Validate ends_at > starts_at after resolution.
+An override is attached to the original occurrence key and does not mutate the series rule.
 
-## 7. Editing scopes
+- `cancelled`: retain a tombstone so regeneration cannot recreate the occurrence.
+- `moved`: replace the effective local date and/or local clock time while retaining the original date/key.
+- `modified`: change the occurrence duration/end semantics without changing its original local slot.
+- Duration defaults to the series value; a single occurrence may override it. Duration must remain positive after authoritative timezone resolution.
+- Overrides are audited by trusted server code. A failed domain mutation and audit append must roll back together.
 
-- This occurrence: create/update an occurrence override or exception; leave the series rule unchanged.
-- This and following: split the series at the selected original civil occurrence. The prior series retains earlier slots; the new series begins at the selected slot with the revised rule. Preserve the selected occurrence's identity/history and link the split series.
-- Entire series: update the rule and reconcile only future nonterminal occurrences. Never rewrite completed/skipped/cancelled history. Materialized future occurrences affected by the change must be previewed before confirmation if their UTC instants or local slots change.
+## 8. Edit scopes
 
-The UI must state the selected scope before committing. A failed partial edit must roll back the complete operation and its audit append.
+- This occurrence: add/change its override or exclusion; the series stays unchanged.
+- This and following: split the series at the selected original civil occurrence. Preserve the selected occurrence's identity/history and link the split segment.
+- Entire series: update the rule and reconcile only future nonterminal occurrences. Historical/completed/skipped/cancelled history is immutable.
+- The UI must state the edit scope and preview affected future commitments before confirmation.
 
-## 8. Required persistence and security invariants
+## 9. Lifecycle and persistence invariants
 
-When a separate migration is authorized, the schema should support:
-- owner-scoped series and occurrence rows;
-- immutable series owner and server-derived actor fields;
-- stable occurrence key with a unique (series_id, occurrence_key) constraint;
-- source local slot, IANA zone, UTC instants and resolver/TZDB version metadata;
-- explicit override/exclusion/review state;
-- no client direct INSERT/UPDATE/DELETE grants;
-- authenticated Edge Function writes, strict owner checks, and same-transaction append-only audit;
-- no physical deletion of occurrence history required for idempotency.
+Recommended occurrence states: `scheduled`, `completed`, `cancelled`, `skipped`, `needs_review`, `superseded`.
 
-All owner/actor fields and canonical UTC/version metadata must be derived by trusted server code, never accepted from browser JSON.
+When a separate persistence migration is authorized, it must support:
+- owner-scoped series and materialized occurrence rows;
+- immutable owner identity and server-derived actor fields;
+- stable occurrence key and a unique series/key constraint;
+- original/effective civil slot, date-only all-day semantics or timed UTC+IANA+resolver/TZDB metadata;
+- override/exclusion/review/lifecycle state and optimistic versioning for stale review rejection;
+- no direct browser INSERT/UPDATE/DELETE; authenticated trusted Edge Function writes with explicit owner checks;
+- same-transaction append-only audit and no physical deletion needed for idempotency.
 
-## 9. Required test matrix
+All owner/actor/canonical UTC/version values must be derived by trusted server code, never accepted from browser JSON.
 
-### Rule generation
-- Daily/weekly/monthly rules, interval boundaries, weekday sets, count/until boundaries.
-- Month-end behavior and leap days.
-- Excluded dates, overrides, split-series boundaries and each edit scope.
-- Unsupported grammar rejected deterministically.
+## 10. Required test matrix
 
-### Idempotency and concurrency
-- Same generation window executed twice creates no duplicate occurrence.
-- Concurrent materializers converge on the same unique occurrence keys.
-- Retries do not overwrite occurrence overrides, review state, or terminal state.
-- Stale review acceptance is rejected after edit/cancel.
-- TZDB re-evaluation never creates a second identity for the same civil slot.
+- Rule parser: all four frequencies, interval boundaries, weekday normalization, ordinal selectors, invalid combinations and unknown fields.
+- COUNT/UNTIL: inclusive UNTIL, mutually exclusive termination, COUNT behavior with exclusions.
+- Month-end/leap: numeric day skip, LAST, 28/29/30/31, leap and non-leap February.
+- Identity: same civil slot and key across resolver/TZDB versions, fold choices and moved overrides.
+- Materialization: 90-day boundary, 500-row ceiling, paging cursor, retry/concurrency, bounded scans, no overwriting overrides or terminal states.
+- DST: Havana, gaps/folds, half-hour transitions, skipped civil date and atomic start/end.
+- TZDB review: immutable history, needs_review for changed materialized future slots, fresh/stale acceptance and audit.
+- Override: cancellation tombstone, moved identity, duration-only modification and positive duration.
+- Real-auth isolation: two disposable users cannot read/write one another's series, occurrences or review actions.
+- UI: clear recurrence rule, edit scope and TZDB review; no claim of guaranteed push delivery.
 
-### Timezone
-- Exact local times, DST gaps/folds, 30-minute transitions, skipped civil dates, midnight crossing, all-day date-only behavior.
-- Atomic start/end resolution and positive UTC duration.
-- New TZDB version: historical immutable, materialized future needs_review, unmaterialized future uses new rules, acceptance updates only the selected occurrence and appends audit.
+## 11. Explicit non-effects and Human Gates
 
-### Real-auth isolation
-- Two disposable users cannot read, write, link, or review each other's series/occurrences.
-- Direct Data API writes are denied.
-- Tampered owner, actor, UTC instants, TZDB metadata and occurrence key are rejected or ignored.
-- Audit append and domain mutation commit or roll back atomically.
+The domain generator and planner are pure logic. They create no database rows, migrations, RPCs, policies, grants, triggers, cron jobs, audit entries or production data.
 
-## 10. Open decisions before implementation
-
-These decisions are not included in the 21 November TZDB product approval and must be resolved before the corresponding implementation:
-
-1. Exact v1 recurrence grammar and whether yearly rules are included.
-2. Month-end behavior for monthly rules.
-3. Materialization horizon and batch size.
-4. Trigger strategy and operational owner for materialization; no cron is authorized.
-5. DST gap/fold defaults for recurring series (the values above are recommendations).
-6. Whether an occurrence can have a different duration/end rule from its series.
-7. User-facing review notification and stale-review handling details.
-8. Whether Task-to-occurrence linking is in v1 or deferred.
-
-## 11. Explicit non-effects and gates
-
-This is a design contract only. It creates no tables, columns, constraints, indexes, triggers, functions, RPCs, migrations, cron jobs, policies, grants, audit rows, Events, series, occurrences, users or secrets. It changes no remote Supabase state and deploys nothing.
-
-A separate explicit Human Gate remains mandatory before:
-- implementing or applying the first hosted schema migration;
-- changing RLS, grants, Auth, triggers or audit append behavior;
-- deploying the Event/series Edge Functions;
-- creating scheduled materialization jobs or touching production data.
+A separate explicit Human Gate remains mandatory before hosted DDL/migrations, RLS/grant/Auth/security changes, Edge Function deployment, creation of scheduled jobs, production data operations or release.
