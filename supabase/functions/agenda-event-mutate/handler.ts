@@ -180,6 +180,11 @@ export async function handleRequest(
     return json({ error: "EVENT_MUTATION_BODY_HAS_UNSUPPORTED_FIELDS" }, 422);
   }
 
+  const requestedProtectedTimeDecisions = input.protectedTimeDecisions ?? [];
+  if (!Array.isArray(requestedProtectedTimeDecisions)) {
+    return json({ error: "PROTECTED_TIME_DECISIONS_MUST_BE_AN_ARRAY" }, 422);
+  }
+
   try {
     const mutation = normalizeEventMutation({
       eventId: input.eventId,
@@ -188,7 +193,7 @@ export async function handleRequest(
       eventDraft: input.action === "edit"
         ? createEventDraft(input.event)
         : null,
-      protectedTimeDecisions: input.protectedTimeDecisions ?? [],
+      protectedTimeDecisions: requestedProtectedTimeDecisions as Record<string, unknown>[],
     });
     const intent = await hashEventMutationIntent(mutation);
 
@@ -271,7 +276,9 @@ export async function handleRequest(
       // remains incomplete and is returned to the user for a fresh decision.
       if (!conflictAssessment.ok && retainExistingConsent) {
         const reusable = conflictAssessment.conflicts.flatMap((conflict) => {
-          const previous = previousDecisionMap.get(conflict.conflictKey);
+          const previous = previousDecisionMap.get(
+            typeof conflict.conflictKey === "string" ? conflict.conflictKey : "",
+          );
           if (!previous || previous.blockUpdatedAt !== conflict.blockUpdatedAt
             || previous.decision !== conflict.requiredDecision) return [];
           return [{
@@ -299,7 +306,9 @@ export async function handleRequest(
       }
       const decisionsToPersist = retainExistingConsent
         ? conflictAssessment.assessment.conflicts.flatMap((conflict) => {
-          const previous = previousDecisionMap.get(conflict.conflictKey);
+          const previous = previousDecisionMap.get(
+            typeof conflict.conflictKey === "string" ? conflict.conflictKey : "",
+          );
           return previous ? [previous] : [];
         })
         : conflictAssessment.assessment.decisions;
