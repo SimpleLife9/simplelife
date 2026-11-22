@@ -222,6 +222,34 @@ Deno.test("authenticated edit invokes only the atomic owner-scoped mutation RPC 
   assertEquals(patch.owner_user_id, undefined, "no owner identity in patch");
 });
 
+Deno.test("finish action is a distinct terminal Event transition", async () => {
+  const { ctx, calls } = mockContext({
+    rpcResult: [{
+      http_status: 200,
+      response_body: {
+        eventId: EVENT_ID,
+        updatedAt: "2026-11-22T18:10:00.000000Z",
+        eventStatus: "finished",
+        lifecycle: "active",
+        archivedAt: null,
+        deletedAt: null,
+        purgeAfter: null,
+      },
+      replayed: false,
+    }],
+  });
+  const response = await handleRequest(request({
+    eventId: EVENT_ID,
+    expectedUpdatedAt: VERSION,
+    action: "finish",
+  }), ctx);
+  assertEquals(response.status, 200, "finish status");
+  assertEquals((await body(response)).eventStatus, "finished", "finish result status");
+  const args = calls.rpcArgs as Record<string, unknown>;
+  assertEquals(args.p_mutation, "finish", "finish action");
+  assertEquals(args.p_event_patch, {}, "finish does not accept a caller patch");
+});
+
 Deno.test("cancel action has no caller-supplied Event patch and returns the recorded status", async () => {
   const { ctx, calls } = mockContext({
     rpcResult: [{
