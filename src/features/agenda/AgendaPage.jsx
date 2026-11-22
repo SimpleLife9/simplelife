@@ -403,6 +403,37 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
 
   const canEditEvent = (event) => !event.archived_at && !event.deleted_at
     && !['cancelled', 'finished'].includes(event.event_status);
+  const isActiveEvent = (event) => !event.archived_at && !event.deleted_at;
+  const canRestoreEvent = (event) => {
+    if (event.deleted_at) return Boolean(event.purge_after && Date.parse(event.purge_after) > Date.now());
+    return Boolean(event.archived_at);
+  };
+  const requestEventMutation = (action) => {
+    setPendingKey(null);
+    setConfirmAction(action);
+  };
+  const confirmDetails = {
+    cancel: {
+      title: 'Cancelar evento',
+      description: 'El evento conservará su fecha y su historial, pero quedará marcado como cancelado.',
+      button: 'Confirmar cancelación',
+    },
+    finish: {
+      title: 'Finalizar evento',
+      description: 'El evento pasará al estado finalizado. No podrá cancelarse después.',
+      button: 'Confirmar finalización',
+    },
+    archive: {
+      title: 'Archivar evento',
+      description: 'El evento saldrá de la agenda activa, pero podrá restaurarse más adelante.',
+      button: 'Archivar',
+    },
+    trash: {
+      title: 'Mover a papelera',
+      description: 'El evento se conservará durante 30 días para permitir su restauración. No se borrará físicamente.',
+      button: 'Mover a papelera',
+    },
+  };
 
 
   const eventsForDate = (dateKey) => orderedEvents.filter((event) => eventOccursOnDate(event, dateKey, timeZone));
@@ -478,7 +509,7 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
                 <div className="agenda-all-day-lane">
                   <div className="agenda-lane-label">Todo el día</div>
                   <div className="agenda-lane-events">
-                    {allDayEvents.map((item) => <EventChip key={item.id} event={item} timeZone={timeZone} onClick={setSelectedEvent} />)}
+                    {allDayEvents.map((item) => <EventChip key={item.id} event={item} timeZone={timeZone} onClick={openEventDetail} />)}
                   </div>
                 </div>
               )}
@@ -492,7 +523,7 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
                         <div className="agenda-timeline-time">{continues ? 'Sigue' : range.startTime}</div>
                         <div className="agenda-timeline-track">
                           <span className="agenda-timeline-marker" />
-                          <button type="button" className="agenda-timeline-card" onClick={() => setSelectedEvent(item)}>
+                          <button type="button" className="agenda-timeline-card" onClick={() => openEventDetail(item)}>
                             <strong>{item.title}</strong>
                             <span>{continues ? 'Continúa · ' : ''}{formatEventTime(item, timeZone)}</span>
                             {item.location_label && <small>{item.location_label}</small>}
@@ -520,7 +551,7 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
                         <strong>{Number(dateKey.slice(8, 10))}</strong>
                       </button>
                       <div className="agenda-week-events">
-                        {dayEvents.slice(0, 6).map((item) => <EventChip key={item.id} event={item} timeZone={timeZone} onClick={setSelectedEvent} compact />)}
+                        {dayEvents.slice(0, 6).map((item) => <EventChip key={item.id} event={item} timeZone={timeZone} onClick={openEventDetail} compact />)}
                         {dayEvents.length > 6 && <span className="agenda-more-events">+{dayEvents.length - 6} más</span>}
                         {!dayEvents.length && <span className="agenda-week-empty">—</span>}
                       </div>
@@ -542,7 +573,7 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
                     <article className={'agenda-month-day' + (!inMonth ? ' is-outside' : '') + (dateKey === today ? ' is-today' : '') + (dateKey === activeDate ? ' is-selected' : '')} key={dateKey}>
                       <button type="button" className="agenda-month-date" onClick={() => { setSelectedDate(dateKey); setView('day'); }}>{Number(dateKey.slice(8, 10))}</button>
                       <div className="agenda-month-events">
-                        {dayEvents.slice(0, 3).map((item) => <EventChip key={item.id} event={item} timeZone={timeZone} onClick={setSelectedEvent} compact />)}
+                        {dayEvents.slice(0, 3).map((item) => <EventChip key={item.id} event={item} timeZone={timeZone} onClick={openEventDetail} compact />)}
                         {dayEvents.length > 3 && <span className="agenda-more-events">+{dayEvents.length - 3}</span>}
                       </div>
                     </article>
@@ -638,18 +669,64 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
       )}
 
       {selectedEvent && (
-        <div className="agenda-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedEvent(null); }}>
+        <div className="agenda-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) { setSelectedEvent(null); setConfirmAction(null); setPendingKey(null); } }}>
           <section className="agenda-dialog agenda-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="agenda-detail-title">
             <header className="agenda-dialog-header">
-              <div><span className="agenda-section-kicker">{statusLabel(selectedEvent.event_status)}</span><h2 id="agenda-detail-title">{selectedEvent.title}</h2></div>
-              <button type="button" className="agenda-close-button" aria-label="Cerrar" onClick={() => setSelectedEvent(null)}>×</button>
+              <div><span className="agenda-section-kicker">{statusLabel(selectedEvent.event_status)} · {lifecycleLabel(selectedEvent)}</span><h2 id="agenda-detail-title">{selectedEvent.title}</h2></div>
+              <button type="button" className="agenda-close-button" aria-label="Cerrar" onClick={() => { setSelectedEvent(null); setConfirmAction(null); setPendingKey(null); }}>×</button>
             </header>
             <div className="agenda-detail-content">
               <div><span>Fecha y hora</span><strong>{getEventDateLabel(selectedEvent, timeZone)}</strong><small>{formatEventTime(selectedEvent, timeZone)}{selectedEvent.time_zone ? ' · ' + selectedEvent.time_zone : ''}</small></div>
               {selectedEvent.location_label && <div><span>Lugar</span><strong>{selectedEvent.location_label}</strong></div>}
               {selectedEvent.description && <div><span>Descripción</span><p>{selectedEvent.description}</p></div>}
+              {selectedEvent.deleted_at && selectedEvent.purge_after && (
+                <div><span>Recuperación hasta</span><strong>{new Intl.DateTimeFormat('es', { dateStyle: 'medium', timeStyle: 'short', timeZone }).format(new Date(selectedEvent.purge_after))}</strong></div>
+              )}
             </div>
-            <footer className="agenda-dialog-actions"><button type="button" className="agenda-secondary-button" onClick={() => setSelectedEvent(null)}>Cerrar</button></footer>
+            <div className="agenda-event-actions">
+              {canEditEvent(selectedEvent) && (
+                <button type="button" className="agenda-secondary-button" onClick={() => openEditComposer(selectedEvent)} disabled={busy}>Editar</button>
+              )}
+              {isActiveEvent(selectedEvent) && selectedEvent.event_status === 'cancelled' && (
+                <button type="button" className="agenda-secondary-button" onClick={() => mutateSelectedEvent('reopen')} disabled={busy}>Reabrir</button>
+              )}
+              {isActiveEvent(selectedEvent) && !['cancelled', 'finished'].includes(selectedEvent.event_status) && (
+                <button type="button" className="agenda-secondary-button agenda-action-warning" onClick={() => requestEventMutation('cancel')} disabled={busy}>Cancelar evento</button>
+              )}
+              {isActiveEvent(selectedEvent) && selectedEvent.event_status === 'confirmed' && (
+                <button type="button" className="agenda-secondary-button" onClick={() => requestEventMutation('finish')} disabled={busy}>Finalizar</button>
+              )}
+              {isActiveEvent(selectedEvent) && (
+                <button type="button" className="agenda-secondary-button" onClick={() => requestEventMutation('archive')} disabled={busy}>Archivar</button>
+              )}
+              {!selectedEvent.deleted_at && (
+                <button type="button" className="agenda-secondary-button agenda-action-danger" onClick={() => requestEventMutation('trash')} disabled={busy}>Papelera</button>
+              )}
+              {canRestoreEvent(selectedEvent) && (
+                <button type="button" className="button button-primary" onClick={() => mutateSelectedEvent('restore')} disabled={busy}>Restaurar evento</button>
+              )}
+              {selectedEvent.deleted_at && !canRestoreEvent(selectedEvent) && (
+                <p className="agenda-expired-notice">La ventana de recuperación de 30 días ha vencido.</p>
+              )}
+            </div>
+            <footer className="agenda-dialog-actions"><button type="button" className="agenda-secondary-button" onClick={() => { setSelectedEvent(null); setConfirmAction(null); setPendingKey(null); }}>Cerrar</button></footer>
+          </section>
+        </div>
+      )}
+      {selectedEvent && confirmAction && (
+        <div className="agenda-dialog-backdrop agenda-confirm-backdrop" role="presentation">
+          <section className="agenda-dialog agenda-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="agenda-confirm-title">
+            <header className="agenda-dialog-header">
+              <div><span className="agenda-section-kicker">CONFIRMACIÓN</span><h2 id="agenda-confirm-title">{confirmDetails[confirmAction]?.title}</h2></div>
+              <button type="button" className="agenda-close-button" aria-label="Cerrar" onClick={() => setConfirmAction(null)} disabled={busy}>×</button>
+            </header>
+            <p className="agenda-confirm-copy">{confirmDetails[confirmAction]?.description}</p>
+            <footer className="agenda-dialog-actions">
+              <button type="button" className="agenda-secondary-button" onClick={() => setConfirmAction(null)} disabled={busy}>Volver</button>
+              <button type="button" className="button button-primary" onClick={() => mutateSelectedEvent(confirmAction)} disabled={busy}>
+                {busy ? 'Procesando…' : confirmDetails[confirmAction]?.button}
+              </button>
+            </footer>
           </section>
         </div>
       )}
