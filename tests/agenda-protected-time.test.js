@@ -50,6 +50,8 @@ test('hard-protected overlap blocks progress until an explicit override', () => 
 
   assert.equal(accepted.outcome, 'overridden');
   assert.equal(accepted.requiredAction, null);
+  assert.equal(accepted.userAcceptedOverlap, true);
+  assert.equal(accepted.blocksAutomaticScheduling, true);
   assert.equal(accepted.canProceed, true);
 });
 
@@ -75,6 +77,8 @@ test('flexible-protected overlap requires an explicit keep-or-reschedule choice'
   });
 
   assert.equal(accepted.outcome, 'kept_by_user_choice');
+  assert.equal(accepted.userAcceptedOverlap, true);
+  assert.equal(accepted.blocksAutomaticScheduling, true);
   assert.equal(accepted.canProceed, true);
 });
 
