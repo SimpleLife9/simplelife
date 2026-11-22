@@ -36,8 +36,12 @@ BEGIN
   IF jsonb_array_length(NEW.protected_time_decisions) = 0 THEN
     RETURN NEW;
   END IF;
-  IF TG_OP = 'UPDATE' AND NEW.protected_time_decisions IS NOT DISTINCT FROM OLD.protected_time_decisions THEN
-    RETURN NEW;
+  IF TG_OP = 'UPDATE' THEN
+    IF NEW.protected_time_decisions IS NOT DISTINCT FROM OLD.protected_time_decisions THEN
+      RETURN NEW;
+    END IF;
+  ELSIF TG_OP <> 'INSERT' THEN
+    RAISE EXCEPTION 'Unsupported Protected Time decision audit operation: %', TG_OP;
   END IF;
 
   INSERT INTO public.audit_event (
