@@ -16,6 +16,7 @@ import {
 import { createEventDraft } from './domain/event.js';
 import { formatInstantInTimeZone, isSupportedTimeZone } from './domain/temporal.js';
 import './AgendaPage.css';
+import './AgendaMutations.css';
 
 const DEFAULT_TIME_ZONE = 'America/Havana';
 const VIEW_OPTIONS = [
@@ -139,9 +140,12 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
   const [timeZone, setTimeZone] = useState(DEFAULT_TIME_ZONE);
   const [timeZoneNotice, setTimeZoneNotice] = useState('');
   const [view, setView] = useState('week');
+  const [lifecycleView, setLifecycleView] = useState('active');
   const [selectedDate, setSelectedDate] = useState(null);
   const [showComposer, setShowComposer] = useState(false);
+  const [editingEvent, setEditingEvent] = useState(null);
   const [selectedEvent, setSelectedEvent] = useState(null);
+  const [confirmAction, setConfirmAction] = useState(null);
   const [pendingKey, setPendingKey] = useState(null);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -153,6 +157,8 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
   const [startLocalDateTime, setStartLocalDateTime] = useState('');
   const [endLocalDateTime, setEndLocalDateTime] = useState('');
   const [eventTimeZone, setEventTimeZone] = useState(DEFAULT_TIME_ZONE);
+  const [fixedStartsAt, setFixedStartsAt] = useState('');
+  const [fixedEndsAt, setFixedEndsAt] = useState('');
 
   useEffect(() => {
     let alive = true;
@@ -190,12 +196,15 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
       try {
         // RLS restricts this SELECT to the profile associated with auth.uid().
         // There is intentionally no browser write path for calendar_event.
-        const { data, error } = await supabase
-          .from('calendar_event')
-          .select('*')
-          .is('archived_at', null)
-          .is('deleted_at', null)
-          .order('created_at', { ascending: false });
+        let query = supabase.from('calendar_event').select('*');
+        if (lifecycleView === 'active') {
+          query = query.is('archived_at', null).is('deleted_at', null);
+        } else if (lifecycleView === 'archived') {
+          query = query.not('archived_at', 'is', null).is('deleted_at', null);
+        } else {
+          query = query.not('deleted_at', 'is', null);
+        }
+        const { data, error } = await query.order('created_at', { ascending: false });
         if (error) throw error;
         if (alive) setEvents(data || []);
       } catch (error) {
@@ -206,12 +215,13 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
     }
     void loadEvents();
     return () => { alive = false; };
-  }, [profile?.id, refreshKey]);
+  }, [profile?.id, refreshKey, lifecycleView]);
 
   const today = todayInZone(timeZone);
   const activeDate = selectedDate || today;
   const orderedEvents = useMemo(() => sortEventsForCalendar(events, timeZone), [events, timeZone]);
   const openComposer = () => {
+    setEditingEvent(null);
     setTitle('');
     setDescription('');
     setLocationLabel('');
@@ -222,13 +232,49 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
     setStartLocalDateTime(activeDate + 'T09:00');
     setEndLocalDateTime(activeDate + 'T10:00');
     setEventTimeZone(timeZone);
+    setFixedStartsAt('');
+    setFixedEndsAt('');
     setPendingKey(null);
+    setShowComposer(true);
+  };
+
+  const openEventDetail = (event) => {
+    setPendingKey(null);
+    setConfirmAction(null);
+    setSelectedEvent(event);
+  };
+
+  // Keep seconds and milliseconds from the persisted civil-time intent.
+  // datetime-local with step=0.001 accepts millisecond precision.
+  const localInputValue = (value) => String(value || '').replace(' ', 'T').slice(0, 23);
+
+  const openEditComposer = (event) => {
+    setEditingEvent(event);
+    setTitle(event.title || '');
+    setDescription(event.description || '');
+    setLocationLabel(event.location_label || '');
+    setLocationKind(event.location_kind || '');
+    setTemporalKind(event.temporal_kind);
+    if (event.temporal_kind === 'all_day') {
+      setStartDate(event.start_date);
+      setEndDate(addCalendarDays(event.end_date_exclusive, -1));
+    } else if (event.temporal_kind === 'zoned_civil') {
+      setStartLocalDateTime(localInputValue(event.start_local));
+      setEndLocalDateTime(localInputValue(event.end_local));
+    } else {
+      setFixedStartsAt(event.starts_at);
+      setFixedEndsAt(event.ends_at);
+    }
+    setEventTimeZone(event.time_zone || timeZone);
+    setPendingKey(null);
+    setSelectedEvent(null);
     setShowComposer(true);
   };
 
   const closeComposer = () => {
     if (busy) return;
     setShowComposer(false);
+    setEditingEvent(null);
     setPendingKey(null);
   };
 
@@ -244,18 +290,18 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
           description,
           locationLabel,
           locationKind: locationKind || null,
-          eventStatus: 'confirmed',
+          eventStatus: editingEvent?.event_status || 'confirmed',
           temporalKind: 'all_day',
           startDate,
           endDateExclusive: addCalendarDays(endDate, 1),
         };
-      } else {
+      } else if (temporalKind === 'zoned_civil') {
         draftInput = {
           title,
           description,
           locationLabel,
           locationKind: locationKind || null,
-          eventStatus: 'confirmed',
+          eventStatus: editingEvent?.event_status || 'confirmed',
           temporalKind: 'zoned_civil',
           timeZone: eventTimeZone,
           startLocalDateTime,
@@ -265,12 +311,37 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
           startGapStrategy: 'next-valid',
           endGapStrategy: 'next-valid',
         };
+      } else {
+        if (!editingEvent || !fixedStartsAt || !fixedEndsAt) {
+          throw new Error('Los eventos de instante fijo solo conservan su intervalo original al editar.');
+        }
+        draftInput = {
+          title,
+          description,
+          locationLabel,
+          locationKind: locationKind || null,
+          eventStatus: editingEvent.event_status,
+          temporalKind: 'fixed_instant',
+          startsAt: fixedStartsAt,
+          endsAt: fixedEndsAt,
+          sourceTimeZone: editingEvent.time_zone || null,
+        };
       }
       const draft = createEventDraft(draftInput);
-      const { data, error } = await supabase.functions.invoke('agenda-event-create', {
-        body: { event: buildEventRequest(draft) },
-        headers: { 'Idempotency-Key': key },
-      });
+      const { data, error } = editingEvent
+        ? await supabase.functions.invoke('agenda-event-mutate', {
+          body: {
+            eventId: editingEvent.id,
+            expectedUpdatedAt: editingEvent.updated_at,
+            action: 'edit',
+            event: buildEventRequest(draft),
+          },
+          headers: { 'Idempotency-Key': key },
+        })
+        : await supabase.functions.invoke('agenda-event-create', {
+          body: { event: buildEventRequest(draft) },
+          headers: { 'Idempotency-Key': key },
+        });
       if (error) {
         let message = error.message || 'No se pudo guardar el evento.';
         try {
@@ -280,13 +351,93 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
         throw new Error(message);
       }
       if (!data?.eventId) throw new Error('El servidor no devolvió el identificador del evento.');
-    }, 'Evento guardado en Agenda.');
+    }, editingEvent ? 'Cambios guardados.' : 'Evento guardado en Agenda.');
 
     if (success) {
       setShowComposer(false);
+      setEditingEvent(null);
+      setSelectedEvent(null);
       setPendingKey(null);
     }
   };
+
+  const mutateSelectedEvent = async (action) => {
+    if (!selectedEvent) return;
+    const key = pendingKey || uuidv7();
+    setPendingKey(key);
+    const target = selectedEvent;
+    const messages = {
+      cancel: 'Evento cancelado.',
+      reopen: 'Evento reabierto.',
+      finish: 'Evento finalizado.',
+      archive: 'Evento archivado.',
+      restore: lifecycleView === 'trash' ? 'Evento restaurado.' : 'Evento restaurado.',
+      trash: 'Evento movido a la papelera.',
+    };
+    const success = await runAction(async () => {
+      const { data, error } = await supabase.functions.invoke('agenda-event-mutate', {
+        body: {
+          eventId: target.id,
+          expectedUpdatedAt: target.updated_at,
+          action,
+        },
+        headers: { 'Idempotency-Key': key },
+      });
+      if (error) {
+        let message = error.message || 'No se pudo actualizar el evento.';
+        try {
+          const response = error.context instanceof Response ? await error.context.clone().json() : null;
+          if (response?.error) message = response.error;
+        } catch { /* keep SDK error message */ }
+        throw new Error(message);
+      }
+      if (!data?.eventId) throw new Error('El servidor no confirmó el cambio del evento.');
+    }, messages[action] || 'Evento actualizado.');
+    if (success) {
+      setSelectedEvent(null);
+      setConfirmAction(null);
+      setPendingKey(null);
+    }
+  };
+
+  const lifecycleLabel = (event) => event.deleted_at
+    ? 'En papelera'
+    : event.archived_at ? 'Archivado' : 'Activo';
+
+  const canEditEvent = (event) => !event.archived_at && !event.deleted_at
+    && !['cancelled', 'finished'].includes(event.event_status);
+  const isActiveEvent = (event) => !event.archived_at && !event.deleted_at;
+  const canRestoreEvent = (event) => {
+    if (event.deleted_at) return Boolean(event.purge_after && Date.parse(event.purge_after) > Date.now());
+    return Boolean(event.archived_at);
+  };
+  const requestEventMutation = (action) => {
+    setPendingKey(null);
+    setConfirmAction(action);
+  };
+  const confirmDetails = {
+    cancel: {
+      title: 'Cancelar evento',
+      description: 'El evento conservará su fecha y su historial, pero quedará marcado como cancelado.',
+      button: 'Confirmar cancelación',
+    },
+    finish: {
+      title: 'Finalizar evento',
+      description: 'El evento pasará al estado finalizado. No podrá cancelarse después.',
+      button: 'Confirmar finalización',
+    },
+    archive: {
+      title: 'Archivar evento',
+      description: 'El evento saldrá de la agenda activa, pero podrá restaurarse más adelante.',
+      button: 'Archivar',
+    },
+    trash: {
+      title: 'Mover a papelera',
+      description: 'El evento se conservará durante 30 días para permitir su restauración. No se borrará físicamente.',
+      button: 'Mover a papelera',
+    },
+  };
+
 
   const eventsForDate = (dateKey) => orderedEvents.filter((event) => eventOccursOnDate(event, dateKey, timeZone));
   const allDayEvents = eventsForDate(activeDate).filter((event) => event.temporal_kind === 'all_day');
@@ -327,6 +478,24 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
         </div>
       </section>
 
+      <nav className="agenda-lifecycle-switch" aria-label="Estado de los eventos">
+        {[
+          { id: 'active', label: 'Activos' },
+          { id: 'archived', label: 'Archivados' },
+          { id: 'trash', label: 'Papelera' },
+        ].map((item) => (
+          <button
+            type="button"
+            key={item.id}
+            className={lifecycleView === item.id ? 'active' : ''}
+            aria-pressed={lifecycleView === item.id}
+            onClick={() => { setLifecycleView(item.id); setSelectedEvent(null); setPendingKey(null); }}
+          >
+            {item.label}
+          </button>
+        ))}
+      </nav>
+
       {timeZoneNotice && <div className="agenda-timezone-notice">{timeZoneNotice}</div>}
       {loading && <p className="muted agenda-loading">Cargando Agenda…</p>}
       {!loading && localError && <div className="form-error agenda-error">{localError}</div>}
@@ -343,7 +512,7 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
                 <div className="agenda-all-day-lane">
                   <div className="agenda-lane-label">Todo el día</div>
                   <div className="agenda-lane-events">
-                    {allDayEvents.map((item) => <EventChip key={item.id} event={item} timeZone={timeZone} onClick={setSelectedEvent} />)}
+                    {allDayEvents.map((item) => <EventChip key={item.id} event={item} timeZone={timeZone} onClick={openEventDetail} />)}
                   </div>
                 </div>
               )}
@@ -357,7 +526,7 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
                         <div className="agenda-timeline-time">{continues ? 'Sigue' : range.startTime}</div>
                         <div className="agenda-timeline-track">
                           <span className="agenda-timeline-marker" />
-                          <button type="button" className="agenda-timeline-card" onClick={() => setSelectedEvent(item)}>
+                          <button type="button" className="agenda-timeline-card" onClick={() => openEventDetail(item)}>
                             <strong>{item.title}</strong>
                             <span>{continues ? 'Continúa · ' : ''}{formatEventTime(item, timeZone)}</span>
                             {item.location_label && <small>{item.location_label}</small>}
@@ -385,7 +554,7 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
                         <strong>{Number(dateKey.slice(8, 10))}</strong>
                       </button>
                       <div className="agenda-week-events">
-                        {dayEvents.slice(0, 6).map((item) => <EventChip key={item.id} event={item} timeZone={timeZone} onClick={setSelectedEvent} compact />)}
+                        {dayEvents.slice(0, 6).map((item) => <EventChip key={item.id} event={item} timeZone={timeZone} onClick={openEventDetail} compact />)}
                         {dayEvents.length > 6 && <span className="agenda-more-events">+{dayEvents.length - 6} más</span>}
                         {!dayEvents.length && <span className="agenda-week-empty">—</span>}
                       </div>
@@ -407,7 +576,7 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
                     <article className={'agenda-month-day' + (!inMonth ? ' is-outside' : '') + (dateKey === today ? ' is-today' : '') + (dateKey === activeDate ? ' is-selected' : '')} key={dateKey}>
                       <button type="button" className="agenda-month-date" onClick={() => { setSelectedDate(dateKey); setView('day'); }}>{Number(dateKey.slice(8, 10))}</button>
                       <div className="agenda-month-events">
-                        {dayEvents.slice(0, 3).map((item) => <EventChip key={item.id} event={item} timeZone={timeZone} onClick={setSelectedEvent} compact />)}
+                        {dayEvents.slice(0, 3).map((item) => <EventChip key={item.id} event={item} timeZone={timeZone} onClick={openEventDetail} compact />)}
                         {dayEvents.length > 3 && <span className="agenda-more-events">+{dayEvents.length - 3}</span>}
                       </div>
                     </article>
@@ -423,7 +592,7 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
         <div className="agenda-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeComposer(); }}>
           <section className="agenda-dialog" role="dialog" aria-modal="true" aria-labelledby="agenda-create-title">
             <header className="agenda-dialog-header">
-              <div><span className="agenda-section-kicker">NUEVO COMPROMISO</span><h2 id="agenda-create-title">Crear evento</h2></div>
+              <div><span className="agenda-section-kicker">{editingEvent ? 'EDITAR COMPROMISO' : 'NUEVO COMPROMISO'}</span><h2 id="agenda-create-title">{editingEvent ? 'Editar evento' : 'Crear evento'}</h2></div>
               <button type="button" className="agenda-close-button" aria-label="Cerrar" onClick={closeComposer} disabled={busy}>×</button>
             </header>
             <form className="agenda-form" onSubmit={submitEvent}>
@@ -434,14 +603,19 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
               <div className="agenda-form-row">
                 <label className="agenda-field">
                   <span>Tipo de horario</span>
-                  <select value={temporalKind} onChange={(event) => setTemporalKind(event.target.value)}>
+                  <select
+                    value={temporalKind}
+                    disabled={editingEvent?.temporal_kind === 'fixed_instant'}
+                    onChange={(event) => setTemporalKind(event.target.value)}
+                  >
                     <option value="all_day">Día completo</option>
                     <option value="zoned_civil">Con hora</option>
+                    {editingEvent?.temporal_kind === 'fixed_instant' && <option value="fixed_instant">Instante fijo</option>}
                   </select>
                 </label>
                 <label className="agenda-field">
                   <span>Estado</span>
-                  <input value="Confirmado" readOnly />
+                  <input value={statusLabel(editingEvent?.event_status || 'confirmed')} readOnly />
                 </label>
               </div>
               {temporalKind === 'all_day' ? (
@@ -449,11 +623,11 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
                   <label className="agenda-field"><span>Desde</span><input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} required /></label>
                   <label className="agenda-field"><span>Hasta (incluido)</span><input type="date" value={endDate} min={startDate} onChange={(event) => setEndDate(event.target.value)} required /></label>
                 </div>
-              ) : (
+              ) : temporalKind === 'zoned_civil' ? (
                 <>
                   <div className="agenda-form-row">
-                    <label className="agenda-field"><span>Comienza</span><input type="datetime-local" value={startLocalDateTime} onChange={(event) => setStartLocalDateTime(event.target.value)} required /></label>
-                    <label className="agenda-field"><span>Termina</span><input type="datetime-local" value={endLocalDateTime} onChange={(event) => setEndLocalDateTime(event.target.value)} required /></label>
+                    <label className="agenda-field"><span>Comienza</span><input type="datetime-local" step="0.001" value={startLocalDateTime} onChange={(event) => setStartLocalDateTime(event.target.value)} required /></label>
+                    <label className="agenda-field"><span>Termina</span><input type="datetime-local" step="0.001" value={endLocalDateTime} onChange={(event) => setEndLocalDateTime(event.target.value)} required /></label>
                   </div>
                   <label className="agenda-field agenda-field-full">
                     <span>Zona horaria (IANA)</span>
@@ -461,6 +635,13 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
                     <small>Las horas se interpretan en esta zona; el servidor resuelve los cambios DST.</small>
                   </label>
                 </>
+              ) : (
+                <div className="agenda-fixed-range">
+                  <strong>Instantes fijos</strong>
+                  <span>Inicio: {formatInstantInTimeZone(fixedStartsAt, timeZone)} ({timeZone})</span>
+                  <span>Fin: {formatInstantInTimeZone(fixedEndsAt, timeZone)} ({timeZone})</span>
+                  <small>Al editar los detalles se conservarán estos instantes exactos. Para cambiar la hora, crea una nueva versión del evento con zona horaria.</small>
+                </div>
               )}
               <div className="agenda-form-row">
                 <label className="agenda-field">
@@ -483,7 +664,7 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
               </label>
               <footer className="agenda-dialog-actions">
                 <button type="button" className="agenda-secondary-button" onClick={closeComposer} disabled={busy}>Cancelar</button>
-                <button type="submit" className="button button-primary" disabled={busy || !title.trim()}>{busy ? 'Guardando…' : 'Guardar evento'}</button>
+                <button type="submit" className="button button-primary" disabled={busy || !title.trim()}>{busy ? 'Guardando…' : editingEvent ? 'Guardar cambios' : 'Guardar evento'}</button>
               </footer>
             </form>
           </section>
@@ -491,18 +672,64 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
       )}
 
       {selectedEvent && (
-        <div className="agenda-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedEvent(null); }}>
+        <div className="agenda-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) { setSelectedEvent(null); setConfirmAction(null); setPendingKey(null); } }}>
           <section className="agenda-dialog agenda-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="agenda-detail-title">
             <header className="agenda-dialog-header">
-              <div><span className="agenda-section-kicker">{statusLabel(selectedEvent.event_status)}</span><h2 id="agenda-detail-title">{selectedEvent.title}</h2></div>
-              <button type="button" className="agenda-close-button" aria-label="Cerrar" onClick={() => setSelectedEvent(null)}>×</button>
+              <div><span className="agenda-section-kicker">{statusLabel(selectedEvent.event_status)} · {lifecycleLabel(selectedEvent)}</span><h2 id="agenda-detail-title">{selectedEvent.title}</h2></div>
+              <button type="button" className="agenda-close-button" aria-label="Cerrar" onClick={() => { setSelectedEvent(null); setConfirmAction(null); setPendingKey(null); }}>×</button>
             </header>
             <div className="agenda-detail-content">
               <div><span>Fecha y hora</span><strong>{getEventDateLabel(selectedEvent, timeZone)}</strong><small>{formatEventTime(selectedEvent, timeZone)}{selectedEvent.time_zone ? ' · ' + selectedEvent.time_zone : ''}</small></div>
               {selectedEvent.location_label && <div><span>Lugar</span><strong>{selectedEvent.location_label}</strong></div>}
               {selectedEvent.description && <div><span>Descripción</span><p>{selectedEvent.description}</p></div>}
+              {selectedEvent.deleted_at && selectedEvent.purge_after && (
+                <div><span>Recuperación hasta</span><strong>{new Intl.DateTimeFormat('es', { dateStyle: 'medium', timeStyle: 'short', timeZone }).format(new Date(selectedEvent.purge_after))}</strong></div>
+              )}
             </div>
-            <footer className="agenda-dialog-actions"><button type="button" className="agenda-secondary-button" onClick={() => setSelectedEvent(null)}>Cerrar</button></footer>
+            <div className="agenda-event-actions">
+              {canEditEvent(selectedEvent) && (
+                <button type="button" className="agenda-secondary-button" onClick={() => openEditComposer(selectedEvent)} disabled={busy}>Editar</button>
+              )}
+              {isActiveEvent(selectedEvent) && selectedEvent.event_status === 'cancelled' && (
+                <button type="button" className="agenda-secondary-button" onClick={() => mutateSelectedEvent('reopen')} disabled={busy}>Reabrir</button>
+              )}
+              {isActiveEvent(selectedEvent) && !['cancelled', 'finished'].includes(selectedEvent.event_status) && (
+                <button type="button" className="agenda-secondary-button agenda-action-warning" onClick={() => requestEventMutation('cancel')} disabled={busy}>Cancelar evento</button>
+              )}
+              {isActiveEvent(selectedEvent) && selectedEvent.event_status === 'confirmed' && (
+                <button type="button" className="agenda-secondary-button" onClick={() => requestEventMutation('finish')} disabled={busy}>Finalizar</button>
+              )}
+              {isActiveEvent(selectedEvent) && (
+                <button type="button" className="agenda-secondary-button" onClick={() => requestEventMutation('archive')} disabled={busy}>Archivar</button>
+              )}
+              {!selectedEvent.deleted_at && (
+                <button type="button" className="agenda-secondary-button agenda-action-danger" onClick={() => requestEventMutation('trash')} disabled={busy}>Papelera</button>
+              )}
+              {canRestoreEvent(selectedEvent) && (
+                <button type="button" className="button button-primary" onClick={() => mutateSelectedEvent('restore')} disabled={busy}>Restaurar evento</button>
+              )}
+              {selectedEvent.deleted_at && !canRestoreEvent(selectedEvent) && (
+                <p className="agenda-expired-notice">La ventana de recuperación de 30 días ha vencido.</p>
+              )}
+            </div>
+            <footer className="agenda-dialog-actions"><button type="button" className="agenda-secondary-button" onClick={() => { setSelectedEvent(null); setConfirmAction(null); setPendingKey(null); }}>Cerrar</button></footer>
+          </section>
+        </div>
+      )}
+      {selectedEvent && confirmAction && (
+        <div className="agenda-dialog-backdrop agenda-confirm-backdrop" role="presentation">
+          <section className="agenda-dialog agenda-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="agenda-confirm-title">
+            <header className="agenda-dialog-header">
+              <div><span className="agenda-section-kicker">CONFIRMACIÓN</span><h2 id="agenda-confirm-title">{confirmDetails[confirmAction]?.title}</h2></div>
+              <button type="button" className="agenda-close-button" aria-label="Cerrar" onClick={() => setConfirmAction(null)} disabled={busy}>×</button>
+            </header>
+            <p className="agenda-confirm-copy">{confirmDetails[confirmAction]?.description}</p>
+            <footer className="agenda-dialog-actions">
+              <button type="button" className="agenda-secondary-button" onClick={() => setConfirmAction(null)} disabled={busy}>Volver</button>
+              <button type="button" className="button button-primary" onClick={() => mutateSelectedEvent(confirmAction)} disabled={busy}>
+                {busy ? 'Procesando…' : confirmDetails[confirmAction]?.button}
+              </button>
+            </footer>
           </section>
         </div>
       )}

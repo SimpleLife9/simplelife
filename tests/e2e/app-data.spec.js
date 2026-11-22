@@ -50,6 +50,7 @@ async function mockSupabaseSession(page, initialData = {}) {
   const calendarEvents = [...(initialData.calendarEvents || [])];
   const insertedAgendaEvents = [];
   const idempotencyRequests = [];
+  const mutationRequests = [];
   const taskRows = [...(initialData.tasks || [])];
   const projects = [...(initialData.projects || [])];
   const insertedProjects = [];
@@ -191,7 +192,18 @@ async function mockSupabaseSession(page, initialData = {}) {
     }
 
     if (url.pathname === '/rest/v1/calendar_event' && method === 'GET') {
-      await json(200, calendarEvents.filter((row) => !row.archived_at && !row.deleted_at));
+      const archivedFilter = url.searchParams.get('archived_at') || '';
+      const deletedFilter = url.searchParams.get('deleted_at') || '';
+      const rows = calendarEvents.filter((row) => {
+        const archivedMatch = archivedFilter === 'not.is.null'
+          ? row.archived_at != null
+          : archivedFilter === 'is.null' ? row.archived_at == null : true;
+        const deletedMatch = deletedFilter === 'not.is.null'
+          ? row.deleted_at != null
+          : deletedFilter === 'is.null' ? row.deleted_at == null : true;
+        return archivedMatch && deletedMatch;
+      });
+      await json(200, rows);
       return;
     }
 
@@ -578,6 +590,69 @@ async function mockSupabaseSession(page, initialData = {}) {
       return;
     }
 
+    if (url.pathname === '/functions/v1/agenda-event-mutate' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const key = request.headers()['idempotency-key'] || '';
+      mutationRequests.push({ key, payload });
+      const row = calendarEvents.find((item) => item.id === payload.eventId && item.owner_user_id === profile.id);
+      if (!row) {
+        await json(404, { error: 'EVENT_NOT_FOUND' });
+        return;
+      }
+      if (row.updated_at !== payload.expectedUpdatedAt) {
+        await json(409, { error: 'EVENT_VERSION_CONFLICT' });
+        return;
+      }
+      const updatedAt = new Date(Date.now() + mutationRequests.length * 2).toISOString();
+      if (payload.action === 'edit') {
+        const event = payload.event;
+        Object.assign(row, {
+          title: event.title,
+          description: event.description ?? null,
+          location_label: event.locationLabel ?? null,
+          location_kind: event.locationKind ?? null,
+          event_status: event.eventStatus || row.event_status,
+          temporal_kind: event.temporalKind,
+          start_date: event.startDate ?? null,
+          end_date_exclusive: event.endDateExclusive ?? null,
+          start_local: event.startLocalDateTime ?? null,
+          end_local: event.endLocalDateTime ?? null,
+          time_zone: event.timeZone ?? event.sourceTimeZone ?? null,
+          starts_at: event.startsAt ?? null,
+          ends_at: event.endsAt ?? null,
+        });
+      } else if (payload.action === 'cancel') {
+        row.event_status = 'cancelled';
+      } else if (payload.action === 'reopen') {
+        row.event_status = 'confirmed';
+      } else if (payload.action === 'finish') {
+        row.event_status = 'finished';
+      } else if (payload.action === 'archive') {
+        row.archived_at = updatedAt;
+      } else if (payload.action === 'trash') {
+        row.archived_at = null;
+        row.deleted_at = updatedAt;
+        row.purge_after = new Date(Date.parse(updatedAt) + 30 * 86400000).toISOString();
+      } else if (payload.action === 'restore') {
+        row.archived_at = null;
+        row.deleted_at = null;
+        row.purge_after = null;
+      }
+      row.updated_at = updatedAt;
+      row.updated_by_user_id = profile.id;
+      await json(200, {
+        eventId: row.id,
+        updatedAt: row.updated_at,
+        eventStatus: row.event_status,
+        lifecycle: row.deleted_at ? 'trash' : row.archived_at ? 'archived' : 'active',
+        archivedAt: row.archived_at,
+        deletedAt: row.deleted_at,
+        purgeAfter: row.purge_after ?? null,
+        replayed: false,
+      });
+      return;
+    }
+
     if (url.pathname === '/functions/v1/agenda-event-create' && method === 'POST') {
       const requestBody = request.postDataJSON();
       const event = requestBody.event;
@@ -621,7 +696,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     await json(404, { message: `Unexpected mocked Supabase request: ${method} ${url.pathname}` });
   });
 
-  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, insertedAgendaEvents, idempotencyRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
+  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
 }
 
 test('mock-authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
@@ -2519,4 +2594,210 @@ test('Agenda keeps day, week and month controls usable on a 390px mobile screen 
   }));
   expect(dimensions.document).toBeLessThanOrEqual(dimensions.viewport + 1);
   await expect(page.getByRole('button', { name: 'Nuevo evento' })).toBeVisible();
+});
+
+
+test('Agenda edits, cancels, reopens, finishes, archives, trashes and restores Events through the authenticated mutation endpoint', async ({ page }) => {
+  const today = await todayInBrowserHavana(page);
+  const tomorrow = await page.evaluate((value) => {
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
+  }, today);
+  const seedEvent = {
+    id: '0190f47a-7b2c-7abc-8def-0123456789c1',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    updated_by_user_id: profile.id,
+    title: 'Evento de prueba',
+    description: 'Compromiso original',
+    location_label: 'Casa',
+    location_kind: 'physical',
+    event_status: 'confirmed',
+    temporal_kind: 'all_day',
+    start_date: today,
+    end_date_exclusive: tomorrow,
+    start_local: null,
+    end_local: null,
+    time_zone: null,
+    starts_at: null,
+    ends_at: null,
+    archived_at: null,
+    deleted_at: null,
+    purge_after: null,
+    created_at: '2026-11-22T17:00:00.000Z',
+    updated_at: '2026-11-22T17:00:00.000000Z',
+  };
+  const { calendarEvents, mutationRequests } = await mockSupabaseSession(page, {
+    calendarEvents: [seedEvent],
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  const navigation = page.getByRole('navigation', { name: 'Navegación principal' });
+  await navigation.getByRole('button', { name: /Agenda/ }).click();
+
+  const openEvent = async (title) => {
+    await page.locator('.agenda-event-chip').filter({ hasText: title }).first().click();
+  };
+  await openEvent('Evento de prueba');
+  let detail = page.getByRole('dialog', { name: 'Evento de prueba' });
+  await detail.getByRole('button', { name: 'Editar' }).click();
+
+  const editDialog = page.getByRole('dialog', { name: 'Editar evento' });
+  await editDialog.getByLabel('Nombre del evento').fill('Evento editado');
+  await editDialog.getByLabel('Descripción (opcional)').fill('Compromiso actualizado');
+  await editDialog.getByRole('button', { name: 'Guardar cambios' }).click();
+  await expect(page.getByText('Cambios guardados.')).toBeVisible();
+  await expect(page.locator('.agenda-event-chip').filter({ hasText: 'Evento editado' })).toBeVisible();
+  expect(mutationRequests[0].payload).toMatchObject({
+    action: 'edit',
+    eventId: seedEvent.id,
+    event: { title: 'Evento editado', temporalKind: 'all_day', startDate: today, endDateExclusive: tomorrow },
+  });
+  expect(mutationRequests[0].key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  expect(calendarEvents[0]).toMatchObject({
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    updated_by_user_id: profile.id,
+    title: 'Evento editado',
+    description: 'Compromiso actualizado',
+  });
+
+  await openEvent('Evento editado');
+  detail = page.getByRole('dialog', { name: 'Evento editado' });
+  await detail.getByRole('button', { name: 'Cancelar evento' }).click();
+  let confirm = page.getByRole('alertdialog', { name: 'Cancelar evento' });
+  await expect(confirm).toBeVisible();
+  await confirm.getByRole('button', { name: 'Confirmar cancelación' }).click();
+  await expect(page.getByText('Evento cancelado.')).toBeVisible();
+  expect(calendarEvents[0].event_status).toBe('cancelled');
+
+  await openEvent('Evento editado');
+  detail = page.getByRole('dialog', { name: 'Evento editado' });
+  await detail.getByRole('button', { name: 'Reabrir' }).click();
+  await expect(page.getByText('Evento reabierto.')).toBeVisible();
+  expect(calendarEvents[0].event_status).toBe('confirmed');
+
+  await openEvent('Evento editado');
+  detail = page.getByRole('dialog', { name: 'Evento editado' });
+  await detail.getByRole('button', { name: 'Finalizar' }).click();
+  confirm = page.getByRole('alertdialog', { name: 'Finalizar evento' });
+  await confirm.getByRole('button', { name: 'Confirmar finalización' }).click();
+  await expect(page.getByText('Evento finalizado.')).toBeVisible();
+  expect(calendarEvents[0].event_status).toBe('finished');
+
+  await openEvent('Evento editado');
+  detail = page.getByRole('dialog', { name: 'Evento editado' });
+  await expect(detail.getByRole('button', { name: 'Cancelar evento' })).toHaveCount(0);
+  await expect(detail.getByRole('button', { name: 'Editar' })).toHaveCount(0);
+  await detail.getByRole('button', { name: 'Archivar' }).click();
+  confirm = page.getByRole('alertdialog', { name: 'Archivar evento' });
+  await confirm.getByRole('button', { name: 'Archivar' }).click();
+  await expect(page.getByText('Evento archivado.')).toBeVisible();
+  expect(calendarEvents[0].archived_at).not.toBeNull();
+
+  await page.getByRole('navigation', { name: 'Estado de los eventos' }).getByRole('button', { name: 'Archivados' }).click();
+  await openEvent('Evento editado');
+  detail = page.getByRole('dialog', { name: 'Evento editado' });
+  await expect(detail.getByRole('button', { name: 'Restaurar evento' })).toBeVisible();
+  await detail.getByRole('button', { name: 'Restaurar evento' }).click();
+  await expect(page.getByText('Evento restaurado.')).toBeVisible();
+  expect(calendarEvents[0].archived_at).toBeNull();
+
+  await page.getByRole('navigation', { name: 'Estado de los eventos' }).getByRole('button', { name: 'Activos' }).click();
+  await openEvent('Evento editado');
+  detail = page.getByRole('dialog', { name: 'Evento editado' });
+  await detail.getByRole('button', { name: 'Papelera' }).click();
+  confirm = page.getByRole('alertdialog', { name: 'Mover a papelera' });
+  await confirm.getByRole('button', { name: 'Mover a papelera' }).click();
+  await expect(page.getByText('Evento movido a la papelera.')).toBeVisible();
+  expect(calendarEvents[0].deleted_at).not.toBeNull();
+  expect(Date.parse(calendarEvents[0].purge_after) - Date.parse(calendarEvents[0].deleted_at)).toBe(30 * 86400000);
+
+  await page.getByRole('navigation', { name: 'Estado de los eventos' }).getByRole('button', { name: 'Papelera' }).click();
+  await openEvent('Evento editado');
+  detail = page.getByRole('dialog', { name: 'Evento editado' });
+  await expect(detail.getByText('En papelera')).toBeVisible();
+  await detail.getByRole('button', { name: 'Restaurar evento' }).click();
+  await expect(page.getByText('Evento restaurado.')).toBeVisible();
+  expect(calendarEvents[0].deleted_at).toBeNull();
+  expect(calendarEvents[0].purge_after).toBeNull();
+
+  expect(mutationRequests.map((request) => request.payload.action)).toEqual([
+    'edit', 'cancel', 'reopen', 'finish', 'archive', 'restore', 'trash', 'restore',
+  ]);
+  expect(new Set(mutationRequests.map((request) => request.key)).size).toBe(mutationRequests.length);
+});
+
+
+test('Agenda editing preserves the original zoned-civil seconds and milliseconds when only the description changes', async ({ page }) => {
+  const today = await todayInBrowserHavana(page);
+  const startLocal = today + 'T09:30:45.250';
+  const endLocal = today + 'T10:15:30.125';
+  const timedEvent = {
+    id: '0190f47a-7b2c-7abc-8def-0123456789c2',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    updated_by_user_id: profile.id,
+    title: 'Cita con precisión',
+    description: 'Descripción original',
+    location_label: null,
+    location_kind: null,
+    event_status: 'confirmed',
+    temporal_kind: 'zoned_civil',
+    start_date: null,
+    end_date_exclusive: null,
+    start_local: startLocal,
+    end_local: endLocal,
+    time_zone: 'America/Havana',
+    starts_at: today + 'T14:30:45.250Z',
+    ends_at: today + 'T15:15:30.125Z',
+    start_disambiguation: 'earlier',
+    end_disambiguation: 'earlier',
+    start_gap_strategy: 'next-valid',
+    end_gap_strategy: 'next-valid',
+    archived_at: null,
+    deleted_at: null,
+    purge_after: null,
+    created_at: '2026-11-22T17:00:00.000Z',
+    updated_at: '2026-11-22T17:00:00.000000Z',
+  };
+  const { calendarEvents, mutationRequests } = await mockSupabaseSession(page, {
+    calendarEvents: [timedEvent],
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.getByRole('navigation', { name: 'Navegación principal' })
+    .getByRole('button', { name: /Agenda/ }).click();
+
+  await page.locator('.agenda-event-chip').filter({ hasText: 'Cita con precisión' }).click();
+  await page.getByRole('dialog', { name: 'Cita con precisión' }).getByRole('button', { name: 'Editar' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Editar evento' });
+  // Chromium canonicalizes datetime-local values by trimming trailing fractional zeros.
+  // The state and mutation payload must still preserve the original precision below.
+  const browserValue = (value) => value.replace(/(\.\d*?[1-9])0+$/, '$1');
+  await expect(dialog.getByLabel('Comienza')).toHaveValue(browserValue(startLocal));
+  await expect(dialog.getByLabel('Termina')).toHaveValue(browserValue(endLocal));
+  await dialog.getByLabel('Descripción (opcional)').fill('Descripción revisada');
+  await dialog.getByRole('button', { name: 'Guardar cambios' }).click();
+
+  await expect(page.getByText('Cambios guardados.')).toBeVisible();
+  expect(mutationRequests).toHaveLength(1);
+  expect(mutationRequests[0].payload.event).toMatchObject({
+    temporalKind: 'zoned_civil',
+    startLocalDateTime: startLocal,
+    endLocalDateTime: endLocal,
+    timeZone: 'America/Havana',
+  });
+  expect(calendarEvents[0]).toMatchObject({
+    description: 'Descripción revisada',
+    start_local: startLocal,
+    end_local: endLocal,
+    time_zone: 'America/Havana',
+    starts_at: timedEvent.starts_at,
+    ends_at: timedEvent.ends_at,
+  });
 });

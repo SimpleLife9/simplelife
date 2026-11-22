@@ -1,0 +1,14 @@
+.agenda-lifecycle-switch{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.agenda-lifecycle-switch button{border:1px solid #e4ebe4;border-radius:9px;background:#fff;color:#7b8a80;padding:8px 12px;font-size:.7rem;font-weight:700}
+.agenda-lifecycle-switch button.active{border-color:#cfdfd0;background:#edf4eb;color:#285a41}
+.agenda-event-actions{display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;padding:0 2px 14px}
+.agenda-event-actions .agenda-secondary-button{font-size:.7rem}
+.agenda-action-warning{border-color:#e9dfc9!important;color:#8d7547!important;background:#fbf8ef!important}
+.agenda-action-danger{border-color:#ead9d5!important;color:#9b5f55!important;background:#fbf2ef!important}
+.agenda-expired-notice{flex:1 0 100%;margin:0;padding:9px 11px;border-radius:8px;background:#f8eeeb;color:#9a5f54;font-size:.7rem}
+.agenda-confirm-backdrop{z-index:50;background:rgba(18,34,27,.54)}
+.agenda-confirm-dialog{width:min(460px,100%)}
+.agenda-confirm-copy{padding:17px 2px 8px;margin:0;color:#6f8176;font-size:.82rem;line-height:1.55}
+.agenda-fixed-range{display:grid;gap:7px;padding:13px 14px;border:1px solid #e3ebe3;border-radius:11px;background:#f7faf6;color:#4c6657;font-size:.74rem}
+.agenda-fixed-range strong{font-size:.78rem;color:#355343}
+.agenda-fixed-range small{font-size:.66rem;line-height:1.5;color:#829187}
