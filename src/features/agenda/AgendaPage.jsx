@@ -7,10 +7,13 @@ import {
   eventOccursOnDate,
   formatEventTime,
   getCalendarEventRange,
+  getCalendarTaskScheduleRange,
   getCalendarWindow,
   monthGridDays,
   shiftCalendarPeriod,
   sortEventsForCalendar,
+  sortTaskSchedulesForCalendar,
+  taskScheduleOccursOnDate,
   startOfWeekMonday,
 } from './domain/calendar-view.js';
 import { createEventDraft } from './domain/event.js';
@@ -135,8 +138,29 @@ function EventChip({ event, timeZone, onClick, compact = false }) {
   );
 }
 
+function TaskScheduleChip({ schedule, task, compact = false }) {
+  const range = getCalendarTaskScheduleRange(schedule);
+  const timeLabel = range.startDate === range.endDate
+    ? range.startTime + ' – ' + range.endTime
+    : range.startTime + ' · hasta ' + range.endDate + ' ' + range.endTime;
+  const title = task?.action || 'Tarea programada';
+  return (
+    <div
+      className={'agenda-task-schedule-chip' + (compact ? ' is-compact' : '')}
+      role="group"
+      aria-label={'Tarea reservada: ' + title}
+      title={title + ' · ' + timeLabel + ' · ' + (schedule.time_zone || '')}
+    >
+      <span className="agenda-task-schedule-chip-time">{range.startTime}</span>
+      <span className="agenda-task-schedule-chip-title">{title}</span>
+    </div>
+  );
+}
+
 function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
   const [events, setEvents] = useState([]);
+  const [taskSchedules, setTaskSchedules] = useState([]);
+  const [scheduledTasks, setScheduledTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [localError, setLocalError] = useState('');
   const [timeZone, setTimeZone] = useState(DEFAULT_TIME_ZONE);
@@ -208,9 +232,34 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
         } else {
           query = query.not('deleted_at', 'is', null);
         }
-        const { data, error } = await query.order('created_at', { ascending: false });
-        if (error) throw error;
-        if (alive) setEvents(data || []);
+        const scheduleQuery = lifecycleView === 'active'
+          ? supabase.from('task_schedule')
+            .select('id,task_id,schedule_status,start_local,end_local,time_zone,starts_at,ends_at')
+            .eq('owner_user_id', profile.id)
+            .in('schedule_status', ['proposed', 'confirmed'])
+            .order('starts_at', { ascending: true })
+          : Promise.resolve({ data: [], error: null });
+        const [eventResult, scheduleResult] = await Promise.all([
+          query.order('created_at', { ascending: false }),
+          scheduleQuery,
+        ]);
+        if (eventResult.error) throw eventResult.error;
+        if (scheduleResult.error) throw scheduleResult.error;
+        const nextSchedules = scheduleResult.data || [];
+        const taskIds = [...new Set(nextSchedules.map((item) => item.task_id))];
+        let nextTasks = [];
+        if (taskIds.length > 0) {
+          const taskResult = await supabase.from('task')
+            .select('id,action')
+            .in('id', taskIds);
+          if (taskResult.error) throw taskResult.error;
+          nextTasks = taskResult.data || [];
+        }
+        if (alive) {
+          setEvents(eventResult.data || []);
+          setTaskSchedules(nextSchedules);
+          setScheduledTasks(nextTasks);
+        }
       } catch (error) {
         if (alive) setLocalError(error?.message || 'No se pudieron cargar los eventos.');
       } finally {
@@ -224,6 +273,14 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
   const today = todayInZone(timeZone);
   const activeDate = selectedDate || today;
   const orderedEvents = useMemo(() => sortEventsForCalendar(events, timeZone), [events, timeZone]);
+  const orderedTaskSchedules = useMemo(
+    () => sortTaskSchedulesForCalendar(taskSchedules),
+    [taskSchedules],
+  );
+  const scheduledTaskById = useMemo(
+    () => new Map(scheduledTasks.map((task) => [task.id, task])),
+    [scheduledTasks],
+  );
   const openComposer = () => {
     setEditingEvent(null);
     setTitle('');
@@ -490,8 +547,15 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
 
 
   const eventsForDate = (dateKey) => orderedEvents.filter((event) => eventOccursOnDate(event, dateKey, timeZone));
+  const taskSchedulesForDate = (dateKey) => orderedTaskSchedules
+    .filter((schedule) => taskScheduleOccursOnDate(schedule, dateKey));
   const allDayEvents = eventsForDate(activeDate).filter((event) => event.temporal_kind === 'all_day');
   const timedEvents = eventsForDate(activeDate).filter((event) => event.temporal_kind !== 'all_day');
+  const dayTaskSchedules = taskSchedulesForDate(activeDate);
+  const dayTimelineItems = [
+    ...timedEvents.map((item) => ({ kind: 'event', item, sortAt: Date.parse(item.starts_at) })),
+    ...dayTaskSchedules.map((item) => ({ kind: 'task_schedule', item, sortAt: Date.parse(item.starts_at) })),
+  ].sort((left, right) => left.sortAt - right.sortAt);
   const monthDays = view === 'month' ? monthGridDays(activeDate) : [];
   const weekDays = view === 'week'
     ? Array.from({ length: 7 }, (_, index) => addCalendarDays(startOfWeekMonday(activeDate), index))
@@ -556,7 +620,7 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
             <section className="agenda-day-view" aria-label="Agenda diaria">
               <div className="agenda-day-summary">
                 <div><span className="agenda-section-kicker">DÍA SELECCIONADO</span><strong>{formatDate(activeDate, { weekday: 'long', day: 'numeric', month: 'long' })}</strong></div>
-                <span>{eventsForDate(activeDate).length} {eventsForDate(activeDate).length === 1 ? 'evento' : 'eventos'}</span>
+                <span>{eventsForDate(activeDate).length} eventos · {dayTaskSchedules.length} tareas reservadas</span>
               </div>
               {allDayEvents.length > 0 && (
                 <div className="agenda-all-day-lane">
@@ -566,13 +630,32 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
                   </div>
                 </div>
               )}
-              {timedEvents.length > 0 ? (
+              {dayTimelineItems.length > 0 ? (
                 <div className="agenda-timeline">
-                  {timedEvents.map((item) => {
+                  {dayTimelineItems.map(({ kind, item }) => {
+                    if (kind === 'task_schedule') {
+                      const range = getCalendarTaskScheduleRange(item);
+                      const continues = range.startDate < activeDate;
+                      return (
+                        <div className="agenda-timeline-row" key={'task-schedule:' + item.id}>
+                          <div className="agenda-timeline-time">{continues ? 'Sigue' : range.startTime}</div>
+                          <div className="agenda-timeline-track">
+                            <span className="agenda-timeline-marker is-task-schedule" />
+                            <div className="agenda-timeline-card is-task-schedule">
+                              <strong>{scheduledTaskById.get(item.task_id)?.action || 'Tarea programada'}</strong>
+                              <span>{continues ? 'Continúa · ' : ''}{range.startDate === range.endDate
+                                ? range.startTime + ' – ' + range.endTime
+                                : range.startTime + ' · hasta ' + range.endDate + ' ' + range.endTime}</span>
+                              <small>Tiempo reservado para una tarea</small>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
                     const range = getCalendarEventRange(item, timeZone);
                     const continues = range.startDate < activeDate;
                     return (
-                      <div className="agenda-timeline-row" key={item.id}>
+                      <div className="agenda-timeline-row" key={'event:' + item.id}>
                         <div className="agenda-timeline-time">{continues ? 'Sigue' : range.startTime}</div>
                         <div className="agenda-timeline-track">
                           <span className="agenda-timeline-marker" />
@@ -587,7 +670,7 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
                   })}
                 </div>
               ) : allDayEvents.length === 0 ? (
-                <EmptyState title="Tu calendario está despejado" detail="Crea un evento para reservar un compromiso en este día." icon="◷" />
+                <EmptyState title="Tu calendario está despejado" detail="Crea un evento o programa una tarea para reservar tiempo en este día." icon="◷" />
               ) : null}
             </section>
           )}
@@ -597,6 +680,17 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
               <div className="agenda-week-grid">
                 {weekDays.map((dateKey) => {
                   const dayEvents = eventsForDate(dateKey);
+                  const daySchedules = taskSchedulesForDate(dateKey);
+                  const dayItems = [
+                    ...dayEvents.map((item) => ({
+                      kind: 'event',
+                      item,
+                      sortAt: item.temporal_kind === 'all_day'
+                        ? Date.parse(item.start_date + 'T00:00:00.000Z')
+                        : Date.parse(item.starts_at),
+                    })),
+                    ...daySchedules.map((item) => ({ kind: 'task_schedule', item, sortAt: Date.parse(item.starts_at) })),
+                  ].sort((left, right) => left.sortAt - right.sortAt);
                   return (
                     <article className={'agenda-week-day' + (dateKey === today ? ' is-today' : '') + (dateKey === activeDate ? ' is-selected' : '')} key={dateKey}>
                       <button type="button" className="agenda-week-day-heading" onClick={() => { setSelectedDate(dateKey); setView('day'); }}>
@@ -604,9 +698,11 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
                         <strong>{Number(dateKey.slice(8, 10))}</strong>
                       </button>
                       <div className="agenda-week-events">
-                        {dayEvents.slice(0, 6).map((item) => <EventChip key={item.id} event={item} timeZone={timeZone} onClick={openEventDetail} compact />)}
-                        {dayEvents.length > 6 && <span className="agenda-more-events">+{dayEvents.length - 6} más</span>}
-                        {!dayEvents.length && <span className="agenda-week-empty">—</span>}
+                        {dayItems.slice(0, 6).map(({ kind, item }) => kind === 'event'
+                          ? <EventChip key={'event:' + item.id} event={item} timeZone={timeZone} onClick={openEventDetail} compact />
+                          : <TaskScheduleChip key={'task-schedule:' + item.id} schedule={item} task={scheduledTaskById.get(item.task_id)} compact />)}
+                        {dayItems.length > 6 && <span className="agenda-more-events">+{dayItems.length - 6} más</span>}
+                        {!dayItems.length && <span className="agenda-week-empty">—</span>}
                       </div>
                     </article>
                   );
@@ -621,13 +717,26 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
               <div className="agenda-month-grid">
                 {monthDays.map((dateKey) => {
                   const dayEvents = eventsForDate(dateKey);
+                  const daySchedules = taskSchedulesForDate(dateKey);
+                  const dayItems = [
+                    ...dayEvents.map((item) => ({
+                      kind: 'event',
+                      item,
+                      sortAt: item.temporal_kind === 'all_day'
+                        ? Date.parse(item.start_date + 'T00:00:00.000Z')
+                        : Date.parse(item.starts_at),
+                    })),
+                    ...daySchedules.map((item) => ({ kind: 'task_schedule', item, sortAt: Date.parse(item.starts_at) })),
+                  ].sort((left, right) => left.sortAt - right.sortAt);
                   const inMonth = dateKey.slice(0, 7) === activeDate.slice(0, 7);
                   return (
                     <article className={'agenda-month-day' + (!inMonth ? ' is-outside' : '') + (dateKey === today ? ' is-today' : '') + (dateKey === activeDate ? ' is-selected' : '')} key={dateKey}>
                       <button type="button" className="agenda-month-date" onClick={() => { setSelectedDate(dateKey); setView('day'); }}>{Number(dateKey.slice(8, 10))}</button>
                       <div className="agenda-month-events">
-                        {dayEvents.slice(0, 3).map((item) => <EventChip key={item.id} event={item} timeZone={timeZone} onClick={openEventDetail} compact />)}
-                        {dayEvents.length > 3 && <span className="agenda-more-events">+{dayEvents.length - 3}</span>}
+                        {dayItems.slice(0, 3).map(({ kind, item }) => kind === 'event'
+                          ? <EventChip key={'event:' + item.id} event={item} timeZone={timeZone} onClick={openEventDetail} compact />
+                          : <TaskScheduleChip key={'task-schedule:' + item.id} schedule={item} task={scheduledTaskById.get(item.task_id)} compact />)}
+                        {dayItems.length > 3 && <span className="agenda-more-events">+{dayItems.length - 3}</span>}
                       </div>
                     </article>
                   );
