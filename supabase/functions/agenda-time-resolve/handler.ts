@@ -84,13 +84,15 @@ export async function handleRequest(request: Request): Promise<Response> {
   }
 
   try {
-    const isObject = !!body && typeof body === "object" && !Array.isArray(body);
-    const isBatch = isObject && "ranges" in body;
-    const isRange = isObject && ("start" in body || "end" in body);
+    const objectBody = !!body && typeof body === "object" && !Array.isArray(body)
+      ? body as Record<string, unknown>
+      : null;
+    const isBatch = objectBody !== null && "ranges" in objectBody;
+    const isRange = objectBody !== null && ("start" in objectBody || "end" in objectBody);
     const resolved = isBatch
-      ? resolveLocalDateTimeRanges(body)
+      ? resolveLocalDateTimeRanges(objectBody)
       : isRange
-      ? resolveLocalDateTimeRange(body)
+      ? resolveLocalDateTimeRange(objectBody)
       : resolveLocalDateTime(body);
     return response(resolved, 200);
   } catch (error) {
