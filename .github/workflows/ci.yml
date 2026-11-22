@@ -124,6 +124,9 @@ jobs:
       - name: Verify Agenda auth in the actual local Edge Runtime
         run: node scripts/agenda-edge-runtime-smoke.mjs
 
+      - name: Verify Event Create JWT gate in the actual local Edge Runtime
+        run: node scripts/agenda-event-create-edge-smoke.mjs
+
       - name: Stop local Supabase stack
         if: always()
         run: |
