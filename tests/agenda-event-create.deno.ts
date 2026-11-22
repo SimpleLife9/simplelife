@@ -173,5 +173,11 @@ Deno.test("requires a UUIDv7 idempotency key and a bounded JSON body", async () 
   assertEquals(invalid.status, 422, "invalid key");
   const wrongMethod = await handleRequest(new Request("https://local.test", { method: "GET" }), ctx);
   assertEquals(wrongMethod.status, 405, "method");
+  const oversized = await handleRequest(new Request("https://local.test", {
+    method: "POST",
+    headers: { "content-type": "application/json", "idempotency-key": KEY },
+    body: "x".repeat(32769),
+  }), ctx);
+  assertEquals(oversized.status, 413, "oversized body");
   assertEquals(calls.rpc, 0, "invalid request never writes");
 });
