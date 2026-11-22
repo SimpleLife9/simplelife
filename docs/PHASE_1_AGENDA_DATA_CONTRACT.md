@@ -326,3 +326,18 @@ New public tables are not automatically exposed to the Data API on existing Supa
 ### Still not authorized
 
 This refresh is a design/read-only milestone only. It created no SQL file, migration, table, function, trigger, grant, policy, secret, row or deployment. The first database migration and any Edge Function deployment remain separate Human Gates.
+
+
+## Protected Time persistence v1 — implementation slice (22/11/2026)
+
+This implementation is source code on branch `feat/agenda-protected-time-v1`; it has not been applied to `Simplelife_dev` or any hosted Supabase project.
+
+- Migration source: `supabase/migrations/20261122170000_agenda_protected_time_v1.sql`.
+- Table: `public.protected_time_block`; owner, creator and updater are profile IDs resolved from the authenticated JWT. The browser cannot set any of those fields.
+- Private-by-default access: RLS permits authenticated SELECT for the owning profile only. Authenticated INSERT/UPDATE/DELETE/TRUNCATE and direct audit writes are revoked. All mutations go through `agenda-protected-time-mutate` with user JWT validation and the service-role-backed atomic RPC.
+- Patterns: `one_off` retains original local wall-clock values, IANA zone, DST ambiguity/gap choices and authoritative resolved instants. `weekly` retains effective date bounds, ISO weekdays, local start/end clocks and overnight flag; it does not invent a permanent UTC interval for an unbounded rule.
+- Modes: `hard` requires an explicit user override for an overlap; `flexible` requires an explicit keep-or-reschedule choice. Both remain unavailable to automatic scheduling. The existing half-open timed/date range conflict domain and its regression tests remain intact; no database exclusion constraint is added.
+- Integrity: server-side UUIDv7 identity; owner-scoped idempotency receipts; payload SHA-256; compare-and-swap on `updated_at`; append-only audit rows in the same transaction; archive/restore/logical delete without physical row deletion.
+- CI additions: Deno handler/domain tests, ephemeral PostgreSQL migration/RLS/audit/idempotency tests and a real Auth JWT Edge Runtime smoke with two owners and concurrent create replay.
+
+The source migration, CI test SQL and Edge Function must pass the PR workflow on the exact head SHA before merge. Hosted DDL/Edge deployment and product release remain separate Human Gates.
