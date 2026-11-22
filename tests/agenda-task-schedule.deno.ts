@@ -4,6 +4,7 @@ import {
   normalizeTaskScheduleMutation,
 } from "../src/features/agenda/domain/task-schedule.js";
 import type { EventAuthenticatedContext } from "../supabase/functions/_shared/agenda-event-profile.ts";
+import { resolveLocalDateTimeRange } from "../supabase/functions/agenda-time-resolve/resolver.ts";
 
 const AUTH_USER_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const PROFILE_ID = "019a0000-0000-7000-8000-000000000001";
@@ -168,14 +169,19 @@ Deno.test("authenticated create resolves IANA and calls the owner-scoped TaskSch
 });
 
 Deno.test("a timed Event overlap requires an explicit version-bound keep choice", async () => {
+  const candidate = resolveLocalDateTimeRange({
+    timeZone: "America/Havana",
+    start: { localDateTime: "2026-11-24T09:00" },
+    end: { localDateTime: "2026-11-24T10:00" },
+  });
   const event = {
     id: EVENT_ID,
     updated_at: VERSION,
     title: "Reunión",
     event_status: "confirmed",
     temporal_kind: "fixed_instant",
-    starts_at: "2026-11-24T13:30:00.000Z",
-    ends_at: "2026-11-24T15:30:00.000Z",
+    starts_at: new Date(Date.parse(candidate.startsAt) + 30 * 60_000).toISOString(),
+    ends_at: new Date(Date.parse(candidate.endsAt) + 30 * 60_000).toISOString(),
   };
   const missing = mockContext({ events: [event] });
   const blocked = await handleRequest(request(createPayload()), missing.ctx, {
@@ -204,6 +210,11 @@ Deno.test("a timed Event overlap requires an explicit version-bound keep choice"
 });
 
 Deno.test("a hard Protected Time overlap requires its per-occurrence override decision", async () => {
+  const candidate = resolveLocalDateTimeRange({
+    timeZone: "America/Havana",
+    start: { localDateTime: "2026-11-24T09:00" },
+    end: { localDateTime: "2026-11-24T10:00" },
+  });
   const block = {
     id: BLOCK_ID,
     updated_at: VERSION,
@@ -212,8 +223,8 @@ Deno.test("a hard Protected Time overlap requires its per-occurrence override de
     protection_mode: "hard",
     pattern_kind: "one_off",
     time_zone: "America/Havana",
-    starts_at: "2026-11-24T13:30:00.000Z",
-    ends_at: "2026-11-24T15:30:00.000Z",
+    starts_at: new Date(Date.parse(candidate.startsAt) + 30 * 60_000).toISOString(),
+    ends_at: new Date(Date.parse(candidate.endsAt) + 30 * 60_000).toISOString(),
     archived_at: null,
     deleted_at: null,
   };
@@ -272,6 +283,11 @@ Deno.test("unauthenticated requests cannot inspect receipts or write TaskSchedul
 });
 
 Deno.test("a weekly protected-time rule is expanded using IANA time for TaskSchedule conflict", async () => {
+  const weeklyOccurrence = resolveLocalDateTimeRange({
+    timeZone: "America/Havana",
+    start: { localDateTime: "2026-11-24T09:30" },
+    end: { localDateTime: "2026-11-24T10:30" },
+  });
   const block = {
     id: BLOCK_ID,
     updated_at: VERSION,
@@ -294,7 +310,7 @@ Deno.test("a weekly protected-time rule is expanded using IANA time for TaskSche
     protectedTimeDecisions: [{
       blockId: BLOCK_ID,
       blockUpdatedAt: VERSION,
-      occurrenceStartsAt: "2026-11-24T13:30:00.000Z",
+      occurrenceStartsAt: weeklyOccurrence.startsAt,
       decision: "keep_flexible",
     }],
   }), "019a0000-0000-7000-8000-000000000204"), accepted.ctx, {
