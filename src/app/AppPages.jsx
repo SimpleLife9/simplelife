@@ -1,4 +1,5 @@
 import { TodayPage } from '../features/today/TodayPage.jsx';
+import { AgendaPage } from '../features/agenda/AgendaPage.jsx';
 import { InboxPage } from '../features/inbox/InboxPage.jsx';
 import { GoalsPage } from '../features/goals/GoalsPage.jsx';
 import { ProjectsPage } from '../features/projects/ProjectsPage.jsx';
@@ -18,6 +19,7 @@ export function AppPages({
 }) {
   return (
     <>
+      {activePage === 'agenda' && <AgendaPage profile={profile} refreshKey={refreshKey} runAction={runAction} busy={busy} />}
       {activePage === 'today' && <TodayPage profile={profile} refreshKey={refreshKey} runAction={runAction} busy={busy} setActivePage={setActivePage} setMorePage={setMorePage} />}
       {activePage === 'inbox' && <InboxPage profile={profile} refreshKey={refreshKey} runAction={runAction} busy={busy} setActivePage={setActivePage} setMorePage={setMorePage} />}
       {activePage === 'goals' && <GoalsPage profile={profile} refreshKey={refreshKey} runAction={runAction} busy={busy} />}
