@@ -34,6 +34,18 @@ export function normalizeExpectedEventVersion(value) {
   return value;
 }
 
+/**
+ * @typedef {ReturnType<typeof import('./event.js').createEventDraft>} NormalizedEventDraft
+ */
+
+/**
+ * @param {{
+ *   eventId: unknown,
+ *   expectedUpdatedAt: unknown,
+ *   action: string,
+ *   eventDraft?: NormalizedEventDraft | null
+ * }} input
+ */
 export function normalizeEventMutation({ eventId, expectedUpdatedAt, action, eventDraft = null }) {
   const normalizedEventId = normalizeEventMutationId(eventId);
   const normalizedVersion = normalizeExpectedEventVersion(expectedUpdatedAt);
