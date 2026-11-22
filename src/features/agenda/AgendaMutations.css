@@ -12,3 +12,22 @@
 .agenda-fixed-range{display:grid;gap:7px;padding:13px 14px;border:1px solid #e3ebe3;border-radius:11px;background:#f7faf6;color:#4c6657;font-size:.74rem}
 .agenda-fixed-range strong{font-size:.78rem;color:#355343}
 .agenda-fixed-range small{font-size:.66rem;line-height:1.5;color:#829187}
+
+
+.agenda-conflict-backdrop{z-index:70;background:rgba(18,34,27,.58)}
+.agenda-conflict-dialog{width:min(640px,100%)}
+.agenda-conflict-list{display:grid;gap:10px;max-height:min(48vh,460px);overflow:auto;padding:3px 2px 8px}
+.agenda-conflict-card{display:grid;gap:10px;padding:13px;border:1px solid #e3eae2;border-radius:12px;background:#fff}
+.agenda-conflict-card-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.agenda-conflict-card-heading>div{display:grid;gap:4px;min-width:0}
+.agenda-conflict-card-heading strong{color:#345344;font-size:.82rem;overflow-wrap:anywhere}
+.agenda-conflict-card-heading small{color:#8b998f;font-size:.65rem}
+.agenda-conflict-card>p{margin:0;color:#6c8073;font-size:.72rem;line-height:1.5}
+.agenda-conflict-note{margin:0;padding:10px 12px;border-radius:9px;background:#f5f8f4;color:#74877a;font-size:.68rem;line-height:1.5}
+.agenda-conflict-dialog .agenda-dialog-actions{display:flex;flex-wrap:wrap}
+.agenda-conflict-dialog .agenda-dialog-actions .button{flex:1 1 190px}
+.agenda-conflict-dialog .agenda-dialog-actions .agenda-secondary-button{flex:0 1 auto}
+@media(max-width:600px){
+  .agenda-conflict-dialog .agenda-dialog-actions{display:grid;grid-template-columns:1fr}
+  .agenda-conflict-dialog .agenda-dialog-actions>*{width:100%;min-width:0}
+}
