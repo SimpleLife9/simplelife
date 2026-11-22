@@ -36,7 +36,7 @@ VALUES
 ON CONFLICT (id) DO NOTHING;
 
 -- Exact serialized insert shape emitted by buildEventInsertRecord().
-CREATE FUNCTION pg_temp.agenda_idempotency_event_record(
+CREATE FUNCTION public.agenda_idempotency_test_event_record(
   p_id uuid,
   p_owner uuid,
   p_title text,
@@ -75,6 +75,13 @@ AS $function$
     'updated_at', p_created_at
   );
 $function$;
+
+ALTER FUNCTION public.agenda_idempotency_test_event_record(uuid, uuid, text, timestamptz)
+  OWNER TO postgres;
+REVOKE ALL PRIVILEGES ON FUNCTION public.agenda_idempotency_test_event_record(uuid, uuid, text, timestamptz)
+  FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.agenda_idempotency_test_event_record(uuid, uuid, text, timestamptz)
+  TO service_role;
 
 DO $test$
 DECLARE
@@ -172,7 +179,7 @@ BEGIN
     '019a0000-0000-7000-8000-000000000301',
     'event-create-v1',
     repeat('a', 64),
-    pg_temp.agenda_idempotency_event_record(
+    public.agenda_idempotency_test_event_record(
       '019a0000-0000-7000-8000-000000000401',
       '019a0000-0000-7000-8000-000000000011',
       'Idempotent Event A'
@@ -198,7 +205,7 @@ BEGIN
     '019a0000-0000-7000-8000-000000000301',
     'event-create-v1',
     repeat('a', 64),
-    pg_temp.agenda_idempotency_event_record(
+    public.agenda_idempotency_test_event_record(
       '019a0000-0000-7000-8000-000000000402',
       '019a0000-0000-7000-8000-000000000011',
       'Idempotent Event A'
@@ -219,7 +226,7 @@ BEGIN
     '019a0000-0000-7000-8000-000000000301',
     'event-create-v1',
     repeat('b', 64),
-    pg_temp.agenda_idempotency_event_record(
+    public.agenda_idempotency_test_event_record(
       '019a0000-0000-7000-8000-000000000403',
       '019a0000-0000-7000-8000-000000000011',
       'Different payload'
@@ -240,7 +247,7 @@ BEGIN
     '019a0000-0000-7000-8000-000000000301',
     'event-create-v1',
     repeat('a', 64),
-    pg_temp.agenda_idempotency_event_record(
+    public.agenda_idempotency_test_event_record(
       '019a0000-0000-7000-8000-000000000404',
       '019a0000-0000-7000-8000-000000000012',
       'Idempotent Event A'
@@ -260,7 +267,7 @@ BEGIN
     '019a0000-0000-7000-8000-000000000302',
     'event-create-v1',
     repeat('a', 64),
-    pg_temp.agenda_idempotency_event_record(
+    public.agenda_idempotency_test_event_record(
       '019a0000-0000-7000-8000-000000000405',
       '019a0000-0000-7000-8000-000000000011',
       'Idempotent Event A'
@@ -384,7 +391,7 @@ BEGIN
       '019a0000-0000-7000-8000-000000000305',
       'event-create-v1',
       repeat('f', 64),
-      pg_temp.agenda_idempotency_event_record(
+      public.agenda_idempotency_test_event_record(
         '019a0000-0000-7000-8000-000000000407',
         '019a0000-0000-7000-8000-000000000012',
         'Owner tampering attempt'
@@ -438,7 +445,7 @@ DECLARE
   v_failed boolean := false;
   v_record jsonb;
 BEGIN
-  v_record := pg_temp.agenda_idempotency_event_record(
+  v_record := public.agenda_idempotency_test_event_record(
     '019a0000-0000-7000-8000-000000000406',
     '019a0000-0000-7000-8000-000000000013',
     'Retry after forced audit failure'
@@ -507,7 +514,7 @@ BEGIN
     '019a0000-0000-7000-8000-000000000306',
     'event-create-v1',
     repeat('d', 64),
-    pg_temp.agenda_idempotency_event_record(
+    public.agenda_idempotency_test_event_record(
       '019a0000-0000-7000-8000-000000000406',
       '019a0000-0000-7000-8000-000000000013',
       'Retry after forced audit failure'
@@ -521,5 +528,8 @@ BEGIN
 END;
 $test$;
 RESET ROLE;
+
+RESET ROLE;
+DROP FUNCTION public.agenda_idempotency_test_event_record(uuid, uuid, text, timestamptz);
 
 SELECT 'AGENDA_EVENT_IDEMPOTENCY_SQL_PASS' AS result;
