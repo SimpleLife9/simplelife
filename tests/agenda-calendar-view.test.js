@@ -5,11 +5,14 @@ import {
   eventOccursOnDate,
   formatEventTime,
   getCalendarEventRange,
+  getCalendarTaskScheduleRange,
   getCalendarWindow,
   monthGridDays,
   shiftCalendarPeriod,
   sortEventsForCalendar,
+  sortTaskSchedulesForCalendar,
   startOfWeekMonday,
+  taskScheduleOccursOnDate,
 } from '../src/features/agenda/domain/calendar-view.js';
 
 test('calendar week starts Monday and shifts dates without local-machine timezone dependence', () => {
@@ -113,4 +116,43 @@ test('calendar sorting puts all-day events first, then orders timed events by da
     { id: 'early', temporal_kind: 'zoned_civil', start_local: '2026-12-02T09:00:00', end_local: '2026-12-02T10:00:00', time_zone: 'America/Havana', starts_at: '2026-12-02T14:00:00Z', ends_at: '2026-12-02T15:00:00Z' },
   ];
   assert.deepEqual(sortEventsForCalendar(events, 'America/Havana').map((event) => event.id), ['all-day', 'early', 'late']);
+});
+
+test('TaskSchedule retains its stored wall time and appears on every overlapping local date', () => {
+  const schedule = {
+    start_local: '2026-12-24T22:30:00',
+    end_local: '2026-12-25T01:15:00',
+    time_zone: 'America/New_York',
+    starts_at: '2026-12-25T03:30:00.000Z',
+    ends_at: '2026-12-25T06:15:00.000Z',
+  };
+  assert.deepEqual(getCalendarTaskScheduleRange(schedule), {
+    startDate: '2026-12-24',
+    endDateExclusive: '2026-12-26',
+    startTime: '22:30',
+    endTime: '01:15',
+    endDate: '2026-12-25',
+    timeZone: 'America/New_York',
+  });
+  assert.equal(taskScheduleOccursOnDate(schedule, '2026-12-24'), true);
+  assert.equal(taskScheduleOccursOnDate(schedule, '2026-12-25'), true);
+  assert.equal(taskScheduleOccursOnDate(schedule, '2026-12-26'), false);
+});
+
+test('TaskSchedule ordering follows resolved instants across repeated DST wall times', () => {
+  const later = {
+    id: 'later',
+    start_local: '2026-11-01T01:15:00',
+    end_local: '2026-11-01T01:45:00',
+    time_zone: 'America/New_York',
+    starts_at: '2026-11-01T06:15:00.000Z',
+    ends_at: '2026-11-01T06:45:00.000Z',
+  };
+  const earlier = {
+    ...later,
+    id: 'earlier',
+    starts_at: '2026-11-01T05:15:00.000Z',
+    ends_at: '2026-11-01T05:45:00.000Z',
+  };
+  assert.deepEqual(sortTaskSchedulesForCalendar([later, earlier]).map((item) => item.id), ['earlier', 'later']);
 });
