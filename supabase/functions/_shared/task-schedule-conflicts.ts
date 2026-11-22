@@ -7,6 +7,7 @@ import { resolveLocalDateTimeRange } from "../agenda-time-resolve/resolver.ts";
 export const DEFAULT_TASK_SCHEDULE_TIME_ZONE = "America/Havana";
 export const MAX_TASK_SCHEDULE_CONFLICT_ROWS = 500;
 const EVENT_DECISION_VERSION = "task-schedule-event-decision-v1";
+const TASK_SCHEDULE_OVERLAP_DECISION_VERSION = "task-schedule-overlap-decision-v1";
 
 type AdminClient = { from(table: string): any };
 
@@ -97,6 +98,71 @@ function normalizeEventDecisions(
   return { ok: true, decisions: Object.freeze(decisions) };
 }
 
+function normalizeTaskScheduleDecisions(
+  conflicts: readonly Record<string, unknown>[],
+  supplied: unknown,
+  now: string,
+): { ok: true; decisions: readonly Record<string, unknown>[] } | {
+  ok: false;
+  reason: "TASK_SCHEDULE_OVERLAP_DECISIONS_REQUIRED";
+} {
+  assert(Array.isArray(supplied), "taskScheduleDecisions must be an array.");
+  assert(supplied.length <= MAX_TASK_SCHEDULE_CONFLICT_ROWS,
+    "taskScheduleDecisions cannot contain more than 500 entries.");
+  const byId = new Map<string, {
+    taskScheduleId: string;
+    taskScheduleUpdatedAt: string;
+    decision: "keep_overlap";
+  }>();
+  for (const value of supplied) {
+    assert(value && typeof value === "object" && !Array.isArray(value),
+      "Each TaskSchedule conflict decision must be an object.");
+    const item = value as Record<string, unknown>;
+    const keys = ["taskScheduleId", "taskScheduleUpdatedAt", "decision"];
+    assert(Object.keys(item).length === keys.length && Object.keys(item).every((key) => keys.includes(key)),
+      "TaskSchedule conflict decision contains unsupported or missing fields.");
+    assert(typeof item.taskScheduleId === "string"
+      && /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(item.taskScheduleId)
+      && typeof item.taskScheduleUpdatedAt === "string"
+      && Number.isFinite(Date.parse(item.taskScheduleUpdatedAt))
+      && item.decision === "keep_overlap",
+    "TaskSchedule conflict decision must be a UUIDv7, an updated_at version and keep_overlap.");
+    const id = item.taskScheduleId.toLowerCase();
+    assert(!byId.has(id), "A TaskSchedule can receive only one overlap decision.");
+    byId.set(id, item as unknown as {
+      taskScheduleId: string;
+      taskScheduleUpdatedAt: string;
+      decision: "keep_overlap";
+    });
+  }
+
+  if (byId.size !== conflicts.length) {
+    return { ok: false, reason: "TASK_SCHEDULE_OVERLAP_DECISIONS_REQUIRED" };
+  }
+  const timestamp = instant(now, "now");
+  const decisions: Record<string, unknown>[] = [];
+  for (const conflict of conflicts) {
+    const id = String(conflict.taskScheduleId);
+    const decision = byId.get(id);
+    if (!decision || decision.taskScheduleUpdatedAt !== conflict.taskScheduleUpdatedAt
+      || decision.decision !== "keep_overlap") {
+      return { ok: false, reason: "TASK_SCHEDULE_OVERLAP_DECISIONS_REQUIRED" };
+    }
+    decisions.push(Object.freeze({
+      policyVersion: TASK_SCHEDULE_OVERLAP_DECISION_VERSION,
+      taskScheduleId: id,
+      taskScheduleUpdatedAt: conflict.taskScheduleUpdatedAt,
+      startsAt: conflict.startsAt,
+      endsAt: conflict.endsAt,
+      overlapStartsAt: conflict.overlapStartsAt,
+      overlapEndsAt: conflict.overlapEndsAt,
+      decision: "keep_overlap",
+      consentedAt: timestamp,
+    }));
+  }
+  return { ok: true, decisions: Object.freeze(decisions) };
+}
+
 /**
  * Read the full owner-scoped conflict set and calculate exact overlaps for a
  * TaskSchedule. The Edge handler passes the complete snapshot to the atomic
@@ -110,6 +176,7 @@ export async function assessOwnerTaskScheduleConflicts({
   taskScheduleId = null,
   suppliedEventDecisions = [],
   suppliedProtectedTimeDecisions = [],
+  suppliedTaskScheduleDecisions = [],
   now,
 }: {
   supabaseAdmin: AdminClient;
@@ -125,12 +192,14 @@ export async function assessOwnerTaskScheduleConflicts({
   snapshot: readonly Record<string, unknown>[];
   eventConflicts: readonly Record<string, unknown>[];
   protectedTimeConflicts: readonly Record<string, unknown>[];
+  taskScheduleConflicts: readonly Record<string, unknown>[];
   calendarTimeZone: string;
 } } | {
   ok: false;
   code: string;
   eventConflicts: readonly Record<string, unknown>[];
   protectedTimeConflicts: readonly Record<string, unknown>[];
+  taskScheduleConflicts: readonly Record<string, unknown>[];
 }> {
   const candidateStart = instant(startsAt, "TaskSchedule startsAt");
   const candidateEnd = instant(endsAt, "TaskSchedule endsAt");
@@ -184,7 +253,7 @@ export async function assessOwnerTaskScheduleConflicts({
 
   const scheduleResult = await supabaseAdmin
     .from("task_schedule")
-    .select("id,updated_at,starts_at,ends_at,schedule_status")
+    .select("id,updated_at,starts_at,ends_at,time_zone,schedule_status")
     .eq("owner_user_id", ownerProfileId)
     .in("schedule_status", ["proposed", "confirmed"])
     .order("id", { ascending: true })
@@ -193,6 +262,27 @@ export async function assessOwnerTaskScheduleConflicts({
   const schedules = Array.isArray(scheduleResult.data) ? scheduleResult.data : [];
   if (schedules.length > MAX_TASK_SCHEDULE_CONFLICT_ROWS) {
     throw new RangeError("The owner has more than 500 active TaskSchedules; conflict analysis cannot safely truncate the set.");
+  }
+
+  const taskScheduleConflicts: Record<string, unknown>[] = [];
+  for (const schedule of schedules) {
+    if (schedule.id === taskScheduleId) continue;
+    const scheduleStart = instant(schedule.starts_at, "Existing TaskSchedule starts_at");
+    const scheduleEnd = instant(schedule.ends_at, "Existing TaskSchedule ends_at");
+    if (Date.parse(scheduleEnd) <= Date.parse(scheduleStart)) {
+      throw new RangeError("An existing TaskSchedule has an invalid temporal interval.");
+    }
+    if (!overlap(candidateStart, candidateEnd, scheduleStart, scheduleEnd)) continue;
+    taskScheduleConflicts.push(Object.freeze({
+      taskScheduleId: schedule.id,
+      taskScheduleUpdatedAt: schedule.updated_at,
+      startsAt: scheduleStart,
+      endsAt: scheduleEnd,
+      timeZone: typeof schedule.time_zone === "string" ? schedule.time_zone : calendarTimeZone,
+      overlapStartsAt: new Date(Math.max(Date.parse(candidateStart), Date.parse(scheduleStart))).toISOString(),
+      overlapEndsAt: new Date(Math.min(Date.parse(candidateEnd), Date.parse(scheduleEnd))).toISOString(),
+      requiredDecision: "keep_overlap",
+    }));
   }
 
   const eventConflicts: Record<string, unknown>[] = [];
@@ -251,15 +341,23 @@ export async function assessOwnerTaskScheduleConflicts({
     now,
   );
   const eventDecisionResult = normalizeEventDecisions(eventConflicts, suppliedEventDecisions, now);
+  const taskScheduleDecisionResult = normalizeTaskScheduleDecisions(
+    taskScheduleConflicts,
+    suppliedTaskScheduleDecisions,
+    now,
+  );
 
-  if (!eventDecisionResult.ok || !protectedDecisionResult.ok) {
+  if (!eventDecisionResult.ok || !protectedDecisionResult.ok || !taskScheduleDecisionResult.ok) {
     return {
       ok: false,
       code: eventConflicts.length > 0 && !eventDecisionResult.ok
         ? "TASK_SCHEDULE_CONFLICTS"
-        : "PROTECTED_TIME_CONFLICTS",
+        : !protectedDecisionResult.ok
+          ? "PROTECTED_TIME_CONFLICTS"
+          : "TASK_SCHEDULE_OVERLAPS",
       eventConflicts,
       protectedTimeConflicts: protectedAssessment.conflicts,
+      taskScheduleConflicts,
     };
   }
 
@@ -282,10 +380,12 @@ export async function assessOwnerTaskScheduleConflicts({
       decisions: Object.freeze([
         ...eventDecisionResult.decisions,
         ...protectedDecisionResult.decisions,
+        ...taskScheduleDecisionResult.decisions,
       ]),
       snapshot: Object.freeze(snapshot),
       eventConflicts: Object.freeze(eventConflicts),
       protectedTimeConflicts: protectedAssessment.conflicts,
+      taskScheduleConflicts: Object.freeze(taskScheduleConflicts),
       calendarTimeZone,
     },
   };
