@@ -6,7 +6,7 @@ import {
 } from './temporal.js';
 
 const PROTECTION_MODES = Object.freeze(['hard', 'flexible']);
-const OFFSET_INSTANT_PATTERN = /^(\\d{4}-\\d{2}-\\d{2})T\\d{2}:\\d{2}(?::\\d{2}(?:\\.\\d{1,9})?)?(?:Z|[+-]\\d{2}:\\d{2})$/i;
+const OFFSET_INSTANT_PATTERN = /^(\d{4}-\d{2}-\d{2})T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})$/i;
 
 function assert(condition, message) {
   if (!condition) throw new RangeError(message);
