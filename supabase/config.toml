@@ -12,3 +12,6 @@ schema_paths = []
 # Require a valid Supabase user JWT before the function handler runs.
 [functions.agenda-time-resolve]
 verify_jwt = true
+
+[functions.agenda-event-create]
+verify_jwt = true
