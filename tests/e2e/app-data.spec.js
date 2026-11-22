@@ -606,6 +606,15 @@ async function mockSupabaseSession(page, initialData = {}) {
       const updatedAt = new Date(Date.now() + mutationRequests.length * 2).toISOString();
       if (payload.action === 'edit') {
         const event = payload.event;
+        // The real authenticated writer resolves civil time to UTC on the server.
+        // This browser mock preserves those derived instants when the civil intent
+        // is unchanged; it must not erase them merely because the browser omits
+        // server-derived startsAt/endsAt from the request.
+        const unchangedZonedCivilRange = event.temporalKind === 'zoned_civil'
+          && row.temporal_kind === 'zoned_civil'
+          && event.startLocalDateTime === row.start_local
+          && event.endLocalDateTime === row.end_local
+          && event.timeZone === row.time_zone;
         Object.assign(row, {
           title: event.title,
           description: event.description ?? null,
@@ -618,8 +627,8 @@ async function mockSupabaseSession(page, initialData = {}) {
           start_local: event.startLocalDateTime ?? null,
           end_local: event.endLocalDateTime ?? null,
           time_zone: event.timeZone ?? event.sourceTimeZone ?? null,
-          starts_at: event.startsAt ?? null,
-          ends_at: event.endsAt ?? null,
+          starts_at: event.startsAt ?? (unchangedZonedCivilRange ? row.starts_at : null),
+          ends_at: event.endsAt ?? (unchangedZonedCivilRange ? row.ends_at : null),
         });
       } else if (payload.action === 'cancel') {
         row.event_status = 'cancelled';
