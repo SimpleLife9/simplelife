@@ -52,6 +52,7 @@ async function mockSupabaseSession(page, initialData = {}) {
   const protectedTimeMutationRequests = [];
   const taskSchedules = [...(initialData.taskSchedules || [])];
   const taskScheduleMutationRequests = [];
+  const taskScheduleConflictResponses = [...(initialData.taskScheduleConflictResponses || [])];
   const protectedTimeConflicts = [...(initialData.protectedTimeConflicts || [])];
   const insertedAgendaEvents = [];
   const idempotencyRequests = [];
@@ -709,6 +710,11 @@ async function mockSupabaseSession(page, initialData = {}) {
       const payload = request.postDataJSON();
       const key = request.headers()['idempotency-key'] || '';
       taskScheduleMutationRequests.push({ key, payload });
+      const queuedConflict = taskScheduleConflictResponses.shift();
+      if (queuedConflict) {
+        await json(queuedConflict.status || 409, queuedConflict.body);
+        return;
+      }
       const now = new Date(Date.now() + taskScheduleMutationRequests.length * 3).toISOString();
       let row = payload.action === 'create'
         ? null
@@ -2868,6 +2874,72 @@ test('Agenda schedules an existing Task without changing its deadline or executi
     document: document.documentElement.scrollWidth,
   }));
   expect(dimensions.document).toBeLessThanOrEqual(dimensions.viewport + 1);
+});
+
+test('Agenda retries TaskSchedule with a fresh idempotency key after conflict snapshot changes', async ({ page }) => {
+  const today = await todayInBrowserHavana(page);
+  const tomorrow = await page.evaluate((value) => {
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
+  }, today);
+  const task = {
+    id: '019a0000-0000-7000-8000-000000000512',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    action: 'Revisar contrato',
+    description: 'Reintento tras cambio del snapshot.',
+    status: 'todo',
+    due_date: tomorrow,
+    priority: 2,
+    archived_at: null,
+    deleted_at: null,
+  };
+  const { taskSchedules, taskScheduleMutationRequests } = await mockSupabaseSession(page, {
+    tasks: [task],
+    taskScheduleConflictResponses: [{
+      status: 409,
+      body: {
+        error: 'TASK_SCHEDULE_CONFLICTS_CHANGED',
+        eventConflicts: [],
+        protectedTimeConflicts: [],
+      },
+    }],
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.getByRole('navigation', { name: 'Navegación principal' })
+    .getByRole('button', { name: /Agenda/ }).click();
+
+  await page.getByRole('button', { name: 'Tareas programadas', exact: true }).click();
+  const section = page.getByRole('region', { name: 'Reservas de tareas' });
+  await section.getByRole('button', { name: 'Programar tarea' }).click();
+  await section.getByLabel('Tarea').selectOption(task.id);
+  await section.getByLabel('Comienza').fill(tomorrow + 'T09:00');
+  await section.getByLabel('Termina').fill(tomorrow + 'T10:00');
+  await section.getByRole('button', { name: 'Crear reserva' }).click();
+
+  const conflictDialog = page.getByRole('alertdialog');
+  await expect(conflictDialog).toContainText('Los compromisos cambiaron mientras guardabas.');
+  await expect(conflictDialog).toContainText('Ninguna reserva fue creada.');
+  await conflictDialog.getByRole('button', { name: 'Volver al horario' }).click();
+  await expect(conflictDialog).toHaveCount(0);
+
+  await section.getByRole('button', { name: 'Crear reserva' }).click();
+  await expect(page.getByText('Reserva de tarea creada.')).toBeVisible();
+  expect(taskScheduleMutationRequests).toHaveLength(2);
+  expect(taskScheduleMutationRequests[0].key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  expect(taskScheduleMutationRequests[1].key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  expect(taskScheduleMutationRequests[1].key).not.toBe(taskScheduleMutationRequests[0].key);
+  expect(taskSchedules).toHaveLength(1);
+  expect(taskSchedules[0]).toMatchObject({
+    task_id: task.id,
+    schedule_status: 'proposed',
+    owner_user_id: profile.id,
+  });
+  expect(task.status).toBe('todo');
+  expect(task.due_date).toBe(tomorrow);
 });
 
 test('Agenda keeps day, week and month controls usable on a 390px mobile screen without page overflow', async ({ page }) => {
