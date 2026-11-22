@@ -429,14 +429,76 @@ $function$;
 CREATE TRIGGER agenda_test_force_audit_failure
 BEFORE INSERT ON public.audit_event
 FOR EACH ROW
-WHEN (NEW.entity_id = '019a0000-0000-7000-8000-000000000102'::uuid)
+WHEN (NEW.entity_id IN (
+  '019a0000-0000-7000-8000-000000000102'::uuid,
+  '019a0000-0000-7000-8000-000000000103'::uuid
+))
 EXECUTE FUNCTION pg_temp.agenda_force_audit_failure();
 
 SET LOCAL ROLE service_role;
 DO $test$
 DECLARE
   v_failed boolean := false;
+  v_count bigint;
+  v_record jsonb;
 BEGIN
+  -- A failed create must roll back the Event, audit append and key reservation.
+  v_record := jsonb_build_object(
+    'id', '019a0000-0000-7000-8000-000000000103',
+    'owner_user_id', '019a0000-0000-7000-8000-000000000001',
+    'created_by_user_id', '019a0000-0000-7000-8000-000000000001',
+    'updated_by_user_id', '019a0000-0000-7000-8000-000000000001',
+    'title', 'Create rollback test',
+    'description', NULL, 'location_label', NULL, 'location_kind', NULL,
+    'event_status', 'confirmed', 'temporal_kind', 'all_day',
+    'start_date', '2026-11-24', 'end_date_exclusive', '2026-11-25',
+    'start_local', NULL, 'end_local', NULL, 'time_zone', NULL,
+    'starts_at', NULL, 'ends_at', NULL,
+    'start_disambiguation', NULL, 'end_disambiguation', NULL,
+    'start_gap_strategy', NULL, 'end_gap_strategy', NULL,
+    'archived_at', NULL, 'deleted_at', NULL, 'purge_after', NULL,
+    'created_at', clock_timestamp(), 'updated_at', clock_timestamp()
+  );
+
+  BEGIN
+    PERFORM *
+    FROM public.create_calendar_event_idempotent(
+      '019a0000-0000-7000-8000-000000000001',
+      'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+      repeat('c', 64),
+      v_record
+    );
+  EXCEPTION WHEN SQLSTATE 'P0001' THEN
+    v_failed := true;
+  END;
+
+  IF NOT v_failed THEN
+    RAISE EXCEPTION 'Expected forced audit failure during Event create was not raised';
+  END IF;
+
+  SELECT count(*) INTO v_count
+  FROM public.calendar_event
+  WHERE id = '019a0000-0000-7000-8000-000000000103';
+  IF v_count <> 0 THEN
+    RAISE EXCEPTION 'Event row survived a failed transactional audit append';
+  END IF;
+
+  SELECT count(*) INTO v_count
+  FROM private.calendar_event_idempotency
+  WHERE owner_user_id = '019a0000-0000-7000-8000-000000000001'
+    AND idempotency_key = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+  IF v_count <> 0 THEN
+    RAISE EXCEPTION 'Idempotency reservation survived a failed Event transaction';
+  END IF;
+
+  SELECT count(*) INTO v_count
+  FROM public.audit_event
+  WHERE entity_id = '019a0000-0000-7000-8000-000000000103';
+  IF v_count <> 0 THEN
+    RAISE EXCEPTION 'Audit row survived a deliberately failed append';
+  END IF;
+
+  v_failed := false;
   BEGIN
     UPDATE public.calendar_event
     SET title = 'This update must roll back'
@@ -446,7 +508,7 @@ BEGIN
   END;
 
   IF NOT v_failed THEN
-    RAISE EXCEPTION 'Expected forced audit append failure was not raised';
+    RAISE EXCEPTION 'Expected forced audit append failure on update was not raised';
   END IF;
 END;
 $test$;
