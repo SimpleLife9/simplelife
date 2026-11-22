@@ -46,8 +46,8 @@ const ALLOWED_EVENT_FIELDS = new Set([
   'sourceTimeZone',
 ]);
 
-const DATE_TIME_PATTERN = /^(\\d{4}-\\d{2}-\\d{2})T(\\d{2}):(\\d{2})(?::(\\d{2})(?:\\.(\\d{1,3}))?)?$/;
-const OFFSET_INSTANT_PATTERN = /^(\\d{4}-\\d{2}-\\d{2})T\\d{2}:\\d{2}(?::\\d{2}(?:\\.\\d{1,9})?)?(?:Z|[+-]\\d{2}:\\d{2})$/i;
+const DATE_TIME_PATTERN = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/;
+const OFFSET_INSTANT_PATTERN = /^(\d{4}-\d{2}-\d{2})T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})$/i;
 
 function assert(condition, message) {
   if (!condition) throw new RangeError(message);
