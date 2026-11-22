@@ -89,6 +89,9 @@ export async function assessOwnerProtectedTimeConflicts({
     calendarTimeZone,
     resolveRange: resolveLocalDateTimeRange,
   });
+  if (suppliedDecisions !== undefined && !Array.isArray(suppliedDecisions)) {
+    throw new RangeError("PROTECTED_TIME_DECISIONS_MUST_BE_AN_ARRAY");
+  }
   const normalized = normalizeProtectedTimeDecisions(
     analyzed.conflicts,
     suppliedDecisions === undefined ? [] : suppliedDecisions,
