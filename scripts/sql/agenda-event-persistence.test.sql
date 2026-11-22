@@ -210,6 +210,47 @@ BEGIN
   IF v_audit.details::text LIKE '%Owner A all-day test%' THEN
     RAISE EXCEPTION 'Audit details must not duplicate Event content';
   END IF;
+
+  SELECT count(*) INTO v_count
+  FROM public.audit_event
+  WHERE entity_id = '019a0000-0000-7000-8000-000000000102';
+  IF v_count <> 1 THEN
+    RAISE EXCEPTION 'Owner B should have exactly one creation audit row; got %', v_count;
+  END IF;
+END;
+$test$;
+
+-- A zoned-civil row cannot bypass authoritative DST resolution metadata.
+DO $test$
+DECLARE
+  v_failed boolean := false;
+BEGIN
+  BEGIN
+    INSERT INTO public.calendar_event (
+      id, owner_user_id, created_by_user_id, updated_by_user_id,
+      title, temporal_kind, start_local, end_local, time_zone, starts_at, ends_at,
+      start_disambiguation, end_disambiguation
+    ) VALUES (
+      '019a0000-0000-7000-8000-000000000104',
+      '019a0000-0000-7000-8000-000000000001',
+      '019a0000-0000-7000-8000-000000000001',
+      '019a0000-0000-7000-8000-000000000001',
+      'Invalid zoned-civil test',
+      'zoned_civil',
+      TIMESTAMP '2026-11-23 10:00:00',
+      TIMESTAMP '2026-11-23 11:00:00',
+      'America/Havana',
+      TIMESTAMPTZ '2026-11-23 15:00:00+00',
+      TIMESTAMPTZ '2026-11-23 16:00:00+00',
+      'earlier',
+      'earlier'
+    );
+  EXCEPTION WHEN check_violation THEN
+    v_failed := true;
+  END;
+  IF NOT v_failed THEN
+    RAISE EXCEPTION 'Zoned-civil row without explicit gap strategy was accepted';
+  END IF;
 END;
 $test$;
 
