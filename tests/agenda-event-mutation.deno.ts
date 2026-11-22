@@ -37,6 +37,8 @@ function request(
 
 function mockContext({
   profileStatus = "active",
+  existing = null as Record<string, unknown> | null,
+  lookupError = null as unknown,
   rpcResult = [{
     http_status: 200,
     response_body: {
@@ -80,6 +82,27 @@ function mockContext({
     },
   };
   const supabaseAdmin = {
+    from(table: string) {
+      if (table !== "event_mutation_request") throw new Error("unexpected admin table " + table);
+      return {
+        select() {
+          return {
+            eq(_column: string, _value: string) {
+              return {
+                eq(_key: string, _value: string) {
+                  return {
+                    async maybeSingle() {
+                      calls.ledgerLookup = Number(calls.ledgerLookup ?? 0) + 1;
+                      return { data: existing, error: lookupError };
+                    },
+                  };
+                },
+              };
+            },
+          };
+        },
+      };
+    },
     async rpc(name: string, args: Record<string, unknown>) {
       calls.rpc = Number(calls.rpc) + 1;
       calls.rpcName = name;
@@ -287,4 +310,78 @@ Deno.test("inactive profiles and malformed requests fail closed before the write
   }), active.ctx);
   assertEquals(unknownField.status, 422, "unknown identity field");
   assertEquals(active.calls.rpc, 0, "invalid requests do not write");
+});
+
+
+Deno.test("completed mutation receipt replays before resolver and RPC", async () => {
+  const draft = eventDraft();
+  const mutation = normalizeEventMutation({
+    eventId: EVENT_ID,
+    expectedUpdatedAt: VERSION,
+    action: "edit",
+    eventDraft: draft,
+  });
+  const intent = await hashEventMutationIntent(mutation);
+  const existing = {
+    event_id: EVENT_ID,
+    payload_version: intent.version,
+    payload_hash: "\\x" + intent.payloadHash,
+    response_http_status: 200,
+    response_body: {
+      eventId: EVENT_ID,
+      updatedAt: VERSION,
+      eventStatus: "confirmed",
+      lifecycle: "active",
+    },
+  };
+  const { ctx, calls } = mockContext({ existing });
+  const response = await handleRequest(request({
+    eventId: EVENT_ID,
+    expectedUpdatedAt: VERSION,
+    action: "edit",
+    event: {
+      title: "Reunión actualizada",
+      description: "Detalles nuevos",
+      locationLabel: "Sala A",
+      locationKind: "physical",
+      eventStatus: "confirmed",
+      temporalKind: "all_day",
+      startDate: "2026-12-24",
+      endDateExclusive: "2026-12-26",
+    },
+  }), ctx);
+  assertEquals(response.status, 200, "preflight replay status");
+  assertEquals((await body(response)).replayed, true, "preflight replay marker");
+  assertEquals(calls.rpc, 0, "preflight replay skips mutation RPC and resolver path");
+});
+
+Deno.test("a mutation key whose stored intent differs returns 409 before writing", async () => {
+  const { ctx, calls } = mockContext({
+    existing: {
+      event_id: EVENT_ID,
+      payload_version: "event-mutation-v1",
+      payload_hash: "\\x" + "0".repeat(64),
+      response_http_status: 200,
+      response_body: { eventId: EVENT_ID },
+    },
+  });
+  const response = await handleRequest(request({
+    eventId: EVENT_ID,
+    expectedUpdatedAt: VERSION,
+    action: "cancel",
+  }), ctx);
+  assertEquals(response.status, 409, "preflight idempotency conflict");
+  assertEquals((await body(response)).error, "IDEMPOTENCY_KEY_REUSED", "preflight conflict code");
+  assertEquals(calls.rpc, 0, "conflict skips the mutation RPC");
+});
+
+Deno.test("mutation receipt lookup failure blocks the write", async () => {
+  const { ctx, calls } = mockContext({ lookupError: new Error("offline") });
+  const response = await handleRequest(request({
+    eventId: EVENT_ID,
+    expectedUpdatedAt: VERSION,
+    action: "cancel",
+  }), ctx);
+  assertEquals(response.status, 503, "ledger lookup failure");
+  assertEquals(calls.rpc, 0, "failed receipt lookup never writes");
 });
