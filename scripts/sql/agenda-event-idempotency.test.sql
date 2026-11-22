@@ -320,11 +320,19 @@ BEGIN
 END;
 $test$;
 
--- Direct authenticated/anon writes and reads are denied by explicit privileges.
+-- Browser roles cannot read or write the ledger directly.
+SET ROLE authenticated;
 DO $test$
 DECLARE
-  v_failed boolean := false;
+  v_read_failed boolean := false;
+  v_write_failed boolean := false;
 BEGIN
+  BEGIN
+    PERFORM count(*) FROM public.event_create_request;
+  EXCEPTION WHEN insufficient_privilege THEN
+    v_read_failed := true;
+  END;
+
   BEGIN
     INSERT INTO public.event_create_request (
       owner_user_id, idempotency_key, payload_version, payload_hash
@@ -335,10 +343,73 @@ BEGIN
       decode(repeat('c', 64), 'hex')
     );
   EXCEPTION WHEN insufficient_privilege THEN
+    v_write_failed := true;
+  END;
+
+  IF NOT v_read_failed OR NOT v_write_failed THEN
+    RAISE EXCEPTION 'authenticated direct ledger access must be denied';
+  END IF;
+END;
+$test$;
+RESET ROLE;
+
+SET ROLE anon;
+DO $test$
+DECLARE
+  v_failed boolean := false;
+BEGIN
+  BEGIN
+    PERFORM count(*) FROM public.event_create_request;
+  EXCEPTION WHEN insufficient_privilege THEN
     v_failed := true;
   END;
   IF NOT v_failed THEN
-    RAISE EXCEPTION 'postgres test identity direct write check was not meaningful';
+    RAISE EXCEPTION 'anon must not read the idempotency ledger';
+  END IF;
+END;
+$test$;
+RESET ROLE;
+
+-- A service-role caller cannot pair owner A's verified identity with
+-- an Event record authored for owner B; the failed claim leaves no receipt.
+SET ROLE service_role;
+DO $test$
+DECLARE
+  v_failed boolean := false;
+BEGIN
+  BEGIN
+    PERFORM *
+    FROM public.create_calendar_event_once(
+      '019a0000-0000-7000-8000-000000000011',
+      '019a0000-0000-7000-8000-000000000305',
+      'event-create-v1',
+      repeat('f', 64),
+      pg_temp.agenda_idempotency_event_record(
+        '019a0000-0000-7000-8000-000000000407',
+        '019a0000-0000-7000-8000-000000000012',
+        'Owner tampering attempt'
+      )
+    );
+  EXCEPTION WHEN SQLSTATE '22023' THEN
+    v_failed := true;
+  END;
+  IF NOT v_failed THEN
+    RAISE EXCEPTION 'The SQL routine must reject cross-owner Event record tampering';
+  END IF;
+END;
+$test$;
+RESET ROLE;
+
+DO $test$
+DECLARE
+  v_count bigint;
+BEGIN
+  SELECT count(*) INTO v_count
+  FROM public.event_create_request
+  WHERE owner_user_id = '019a0000-0000-7000-8000-000000000011'
+    AND idempotency_key = '019a0000-0000-7000-8000-000000000305';
+  IF v_count <> 0 THEN
+    RAISE EXCEPTION 'Owner mismatch must not claim an idempotency key';
   END IF;
 END;
 $test$;
