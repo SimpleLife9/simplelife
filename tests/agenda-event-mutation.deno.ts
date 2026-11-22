@@ -55,6 +55,8 @@ function mockContext({
   rpcError = null,
 }: {
   profileStatus?: string;
+  existing?: Record<string, unknown> | null;
+  lookupError?: unknown;
   rpcResult?: unknown;
   rpcError?: unknown;
 } = {}) {
