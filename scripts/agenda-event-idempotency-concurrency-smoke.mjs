@@ -37,6 +37,8 @@ function eventRecord(eventId, title) {
     purge_after: null,
     created_at: "2026-11-22T18:00:00.000Z",
     updated_at: "2026-11-22T18:00:00.000Z",
+    protected_time_decisions: [],
+    protected_time_snapshot: [],
   };
 }
 
