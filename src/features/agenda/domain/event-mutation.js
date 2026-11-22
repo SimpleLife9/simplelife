@@ -44,10 +44,10 @@ export function normalizeExpectedEventVersion(value) {
  *   expectedUpdatedAt: unknown,
  *   action: string,
  *   eventDraft?: NormalizedEventDraft | null,
- *   protectedTimeDecisions?: readonly Record<string, unknown>[]
+ *   protectedTimeDecisions?: Record<string, unknown>[]
  * }} input
  */
-export function normalizeEventMutation({ eventId, expectedUpdatedAt, action, eventDraft = null, protectedTimeDecisions = [] }) {
+export function normalizeEventMutation({ eventId, expectedUpdatedAt, action, eventDraft = null, protectedTimeDecisions = /** @type {Record<string, unknown>[]} */ ([]) }) {
   const normalizedEventId = normalizeEventMutationId(eventId);
   const normalizedVersion = normalizeExpectedEventVersion(expectedUpdatedAt);
   assert(EVENT_MUTATION_ACTIONS.includes(action), 'Unsupported Event mutation action.');
