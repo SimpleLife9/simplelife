@@ -244,7 +244,9 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
     setSelectedEvent(event);
   };
 
-  const localInputValue = (value) => String(value || '').replace(' ', 'T').slice(0, 16);
+  // Keep seconds and milliseconds from the persisted civil-time intent.
+  // datetime-local with step=0.001 accepts millisecond precision.
+  const localInputValue = (value) => String(value || '').replace(' ', 'T').slice(0, 23);
 
   const openEditComposer = (event) => {
     setEditingEvent(event);
@@ -624,8 +626,8 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
               ) : temporalKind === 'zoned_civil' ? (
                 <>
                   <div className="agenda-form-row">
-                    <label className="agenda-field"><span>Comienza</span><input type="datetime-local" value={startLocalDateTime} onChange={(event) => setStartLocalDateTime(event.target.value)} required /></label>
-                    <label className="agenda-field"><span>Termina</span><input type="datetime-local" value={endLocalDateTime} onChange={(event) => setEndLocalDateTime(event.target.value)} required /></label>
+                    <label className="agenda-field"><span>Comienza</span><input type="datetime-local" step="0.001" value={startLocalDateTime} onChange={(event) => setStartLocalDateTime(event.target.value)} required /></label>
+                    <label className="agenda-field"><span>Termina</span><input type="datetime-local" step="0.001" value={endLocalDateTime} onChange={(event) => setEndLocalDateTime(event.target.value)} required /></label>
                   </div>
                   <label className="agenda-field agenda-field-full">
                     <span>Zona horaria (IANA)</span>
