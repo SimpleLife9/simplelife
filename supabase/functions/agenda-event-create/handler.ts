@@ -72,7 +72,7 @@ function receiptResponse(data: Record<string, unknown>, replayed: boolean): Resp
   }
   return json({
     eventId: data.result_event_id,
-    createdAt: data.response_created_at,
+    createdAt: new Date(data.response_created_at).toISOString(),
     eventStatus: data.response_event_status,
     replayed,
   }, 201);
