@@ -175,3 +175,26 @@ test('rejects excessive Event windows and unbounded owner block sets instead of 
     resolveRange: utcResolver,
   }), /500 active/);
 });
+
+
+test('fails closed when the aggregate overlapping weekly occurrence count exceeds 500', () => {
+  const blocks = [1, 2].map((index) => weekly({
+    id: index === 1
+      ? '019a0000-0000-7000-8000-000000000121'
+      : '019a0000-0000-7000-8000-000000000122',
+    label: 'Daily protection ' + index,
+    weekdays: [1, 2, 3, 4, 5, 6, 7],
+    start_date: '2026-01-01',
+    end_date_exclusive: null,
+    start_time_local: '00:00:00',
+    end_time_local: '23:59:00',
+    ends_next_day: false,
+    time_zone: 'UTC',
+  }));
+  assert.throws(() => findProtectedTimeConflicts({
+    event: event('2026-01-01T00:00:00.000Z', '2027-01-01T00:00:00.000Z'),
+    protectedBlocks: blocks,
+    calendarTimeZone: 'UTC',
+    resolveRange: utcResolver,
+  }), /more than 500 overlapping occurrences/);
+});
