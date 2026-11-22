@@ -142,7 +142,6 @@ Deno.test("replays an existing receipt before resolver or RPC and returns the or
   const response = await handleRequest(request(allDayEvent()), ctx);
   assertEquals(response.status, 201, "replay status");
   assertEquals((await body(response)).replayed, true, "replay marker");
-  assertEquals((await body(request(allDayEvent()) as unknown as Response)).replayed, undefined, "unused");
   assertEquals(calls.rpc, 0, "replay must not call writer RPC");
 });
 
