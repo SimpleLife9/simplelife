@@ -1,6 +1,6 @@
 # Agenda — recurring series and occurrence contract
 
-**Status:** PRODUCT DECISIONS APPROVED — pure domain implementation in progress; persistence remains gated.  
+**Status:** PRODUCT DECISIONS APPROVED — pure domain engine v1 merged; bounded authoritative resolver batching is in implementation; persistence remains gated.  
 **Approval:** Robert approved the complete recurrence v1 proposal on 21 November 2026 (PR #71).  
 **Scope:** This contract defines the bounded v1 recurrence behavior. It does not authorize DDL, hosted migrations, RLS/grant/Auth changes, cron, production data operations, Edge Function deployment or release.
 
@@ -137,3 +137,15 @@ All owner/actor/canonical UTC/version values must be derived by trusted server c
 The domain generator and planner are pure logic. They create no database rows, migrations, RPCs, policies, grants, triggers, cron jobs, audit entries or production data.
 
 A separate explicit Human Gate remains mandatory before hosted DDL/migrations, RLS/grant/Auth/security changes, Edge Function deployment, creation of scheduled jobs, production data operations or release.
+
+
+## 12. Bounded authoritative resolver transport
+
+The `agenda-time-resolve` Edge Function supports a bounded atomic batch request for multiple timed ranges:
+
+- Request shape: `{ ranges: RangeInput[] }`; each item uses the same validated shape as one atomic Event range, including its own IANA timezone and independent start/end DST choices.
+- A batch contains 1–25 ranges. The HTTP body remains bounded at 32 KiB and is rejected before JSON parsing if it exceeds the byte ceiling.
+- Results preserve request order and include the UTC range, canonical timezone, resolution metadata, TZDB version and resolver version. One invalid range rejects the complete batch; no partial batch result is returned.
+- Every range in a batch is resolved against the same loaded, pinned TZDB release and resolver build. All-day occurrences remain date-only and are excluded from this endpoint.
+- This transport limit is separate from the recurrence planner's 90-day horizon and 500-candidate planning ceiling. A planner batch must be split into transport batches of at most 25 timed ranges.
+- The endpoint performs no database writes and does not authorize deployment. The trusted write/materialization path remains a separate gated implementation.
