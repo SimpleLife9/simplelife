@@ -232,6 +232,22 @@ Deno.test("an overlapping active TaskSchedule requires a version-bound keep choi
   assertEquals((await responseBody(blocked)).error, "TASK_SCHEDULE_OVERLAPS", "schedule-overlap code");
   assertEquals(missing.calls.rpc, 0, "no mutation without explicit schedule-overlap choice");
 
+  const disappeared = mockContext({ schedules: [] });
+  const staleResponse = await handleRequest(request(createPayload({
+    taskScheduleDecisions: [{
+      taskScheduleId: existingSchedule.id,
+      taskScheduleUpdatedAt: VERSION,
+      decision: "keep_overlap",
+    }],
+  }), "019a0000-0000-7000-8000-000000000207"), disappeared.ctx, {
+    now: () => "2026-11-22T18:10:00.000Z",
+    newTaskScheduleId: () => SCHEDULE_ID,
+  });
+  assertEquals(staleResponse.status, 409, "a disappeared conflict invalidates the old snapshot");
+  assertEquals((await responseBody(staleResponse)).error, "TASK_SCHEDULE_CONFLICTS_CHANGED",
+    "a stale overlap decision asks the user to retry with a fresh key");
+  assertEquals(disappeared.calls.rpc, 0, "stale consent cannot write");
+
   const accepted = mockContext({ schedules: [existingSchedule] });
   const response = await handleRequest(request(createPayload({
     taskScheduleDecisions: [{
