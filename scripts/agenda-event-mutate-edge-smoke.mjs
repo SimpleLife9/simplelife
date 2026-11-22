@@ -134,7 +134,7 @@ function countAudit() {
   return sqlScalar(
     "SELECT count(*) FROM public.audit_event WHERE entity_type = 'calendar_event' " +
     "AND entity_id = '" + eventId + "'::uuid AND account_user_id = '" + owner.profileId + "'::uuid " +
-    "AND actor_user_id = '" + owner.profileId + "'::uuid AND action = 'calendar_event.updated' AND result = 'success'",
+    "AND actor_user_id = '" + owner.profileId + "'::uuid AND action <> 'calendar_event.created' AND result = 'success'",
   );
 }
 function row() {
@@ -272,6 +272,17 @@ try {
   assertResult(finish.eventStatus, "finished", "finished status");
   updatedAt = finish.updatedAt;
   equal(countAudit(), "8", "finish audit row");
+
+  const actionSequence = sqlScalar(
+    "SELECT string_agg(action, ',' ORDER BY recorded_at) FROM public.audit_event " +
+    "WHERE entity_id = '" + eventId + "'::uuid AND account_user_id = '" + owner.profileId + "'::uuid",
+  );
+  equal(
+    actionSequence,
+    "calendar_event.created,calendar_event.updated,calendar_event.cancelled,calendar_event.reopened," +
+      "calendar_event.archived,calendar_event.restored,calendar_event.trashed,calendar_event.restored,calendar_event.finished",
+    "explicit Event audit action sequence",
+  );
 
   const cancelFinished = await mutation(validBearer, {
     eventId, expectedUpdatedAt: updatedAt, operation: "cancel",
