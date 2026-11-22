@@ -138,6 +138,8 @@ function createCommonRecord({ eventDraft, eventId, ownerProfileId, timestamp }) 
  *   now: string,
  *   protectedTimeDecisions?: readonly Record<string, unknown>[],
  *   protectedTimeSnapshot?: readonly { id: string; updated_at: string }[],
+ *   calendarEventSnapshot?: readonly { id: string; updated_at: string }[],
+ *   taskScheduleSnapshot?: readonly { id: string; updated_at: string }[],
  * }} input
  */
 export function buildEventInsertRecord({
@@ -147,6 +149,8 @@ export function buildEventInsertRecord({
   now,
   protectedTimeDecisions = /** @type {Record<string, unknown>[]} */ ([]),
   protectedTimeSnapshot = /** @type {{ id: string; updated_at: string }[]} */ ([]),
+  calendarEventSnapshot = /** @type {{ id: string; updated_at: string }[]} */ ([]),
+  taskScheduleSnapshot = /** @type {{ id: string; updated_at: string }[]} */ ([]),
 }) {
   const timestamp = normalizeTimestamp(now);
   const record = createCommonRecord({
@@ -171,6 +175,23 @@ export function buildEventInsertRecord({
   record.protected_time_snapshot = protectedTimeSnapshot.map((item) => ({
     id: item.id.toLowerCase(),
     updated_at: item.updated_at,
+  }));
+  for (const [label, snapshot] of [
+    ['calendarEventSnapshot', calendarEventSnapshot],
+    ['taskScheduleSnapshot', taskScheduleSnapshot],
+  ]) {
+    assert(Array.isArray(snapshot) && snapshot.length <= 500,
+      label + ' must be an array with at most 500 entries.');
+    assert(snapshot.every((item) => item && typeof item.id === 'string'
+      && UUID_V7_PATTERN.test(item.id) && typeof item.updated_at === 'string'
+      && Number.isFinite(Date.parse(item.updated_at))),
+    'Every ' + label + ' entry must contain a UUIDv7 and updated_at timestamp.');
+  }
+  record.calendar_event_snapshot = calendarEventSnapshot.map((item) => ({
+    id: item.id.toLowerCase(), updated_at: item.updated_at,
+  }));
+  record.task_schedule_snapshot = taskScheduleSnapshot.map((item) => ({
+    id: item.id.toLowerCase(), updated_at: item.updated_at,
   }));
   const temporal = eventDraft.temporal;
   assert(temporal && typeof temporal === 'object', 'A normalized Event temporal value is required.');
