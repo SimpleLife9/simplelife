@@ -112,6 +112,9 @@ jobs:
           PY
           supabase migration up
 
+      - name: Test Event persistence and append-only audit invariants in ephemeral local Postgres
+        run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/agenda-event-persistence.test.sql
+
       - name: Verify Agenda auth in the actual local Edge Runtime
         run: node scripts/agenda-edge-runtime-smoke.mjs
 
