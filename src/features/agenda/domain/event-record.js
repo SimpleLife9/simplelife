@@ -130,6 +130,16 @@ function createCommonRecord({ eventDraft, eventId, ownerProfileId, timestamp }) 
  * eventId must be generated server-side. The caller cannot supply either value
  * through the Event draft. This helper is a mapping guard, not an auth boundary.
  */
+/**
+ * @param {{
+ *   eventDraft: any,
+ *   eventId: string,
+ *   ownerProfileId: string,
+ *   now: string,
+ *   protectedTimeDecisions?: readonly Record<string, unknown>[],
+ *   protectedTimeSnapshot?: readonly { id: string; updated_at: string }[],
+ * }} input
+ */
 export function buildEventInsertRecord({
   eventDraft,
   eventId,
