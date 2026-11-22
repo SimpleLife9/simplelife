@@ -153,7 +153,7 @@ test('zoned civil Event promotes only matching authoritative atomic resolution',
 });
 
 test('zoned civil Event refuses client preview, wrong timezone, stale endpoints and mismatched instants', () => {
-  const event = zonedDraft();
+  const event = zonedDraft({ endDisambiguation: 'later' });
   assert.throws(() => applyAuthoritativeEventResolution(event, {
     ...authoritativeRange(),
     authoritative: false,
