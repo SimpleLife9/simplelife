@@ -13,9 +13,10 @@ SET search_path = pg_catalog
 AS $function$
   SELECT cardinality(p_weekdays) BETWEEN 1 AND 7
     AND p_weekdays <@ ARRAY[1, 2, 3, 4, 5, 6, 7]::smallint[]
+    AND array_position(p_weekdays, NULL::smallint) IS NULL
     AND (
       SELECT count(*) = count(DISTINCT weekday)
-      FROM unnest(p_weekdays) AS values(weekday)
+      FROM unnest(p_weekdays) AS weekday_values(weekday)
     );
 $function$;
 
@@ -81,7 +82,6 @@ CREATE TABLE public.protected_time_block (
       pattern_kind = 'one_off'
       AND start_local IS NOT NULL
       AND end_local IS NOT NULL
-      AND end_local > start_local
       AND starts_at IS NOT NULL
       AND ends_at IS NOT NULL
       AND isfinite(starts_at)
@@ -114,6 +114,7 @@ CREATE TABLE public.protected_time_block (
       AND (end_date_exclusive IS NULL OR (
         isfinite(end_date_exclusive) AND end_date_exclusive > start_date
       ))
+      AND weekdays IS NOT NULL
       AND public.is_valid_protected_weekday_set(weekdays)
       AND start_time_local IS NOT NULL
       AND end_time_local IS NOT NULL
@@ -421,7 +422,7 @@ BEGIN
         USING ERRCODE = '40001';
     END IF;
 
-    IF v_existing.block_id IS DISTINCT FROM p_block_id
+    IF (v_existing.block_id IS DISTINCT FROM p_block_id AND p_mutation <> 'create')
        OR v_existing.payload_version IS DISTINCT FROM p_payload_version
        OR v_existing.payload_hash IS DISTINCT FROM v_payload_hash THEN
       RETURN QUERY SELECT 409, jsonb_build_object('error', 'IDEMPOTENCY_KEY_REUSED'), false;
