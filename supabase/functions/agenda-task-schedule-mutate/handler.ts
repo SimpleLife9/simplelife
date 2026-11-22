@@ -177,6 +177,7 @@ export async function handleRequest(
           error: assessment.code,
           eventConflicts: assessment.eventConflicts,
           protectedTimeConflicts: assessment.protectedTimeConflicts,
+          taskScheduleConflicts: assessment.taskScheduleConflicts,
         }, 409);
       }
 
