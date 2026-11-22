@@ -1375,6 +1375,7 @@ test('primary navigation preserves page destinations in the authenticated shell'
 
   const destinations = [
     { label: 'Hoy', heading: 'Hoy' },
+    { label: 'Agenda', heading: 'Agenda' },
     { label: 'Inbox', heading: 'Inbox' },
     { label: 'Objetivos', heading: 'Objetivos' },
     { label: 'Proyectos', heading: 'Proyectos' },
@@ -2413,4 +2414,109 @@ test('List creation opens in a top-level dialog and saves from the dialog', asyn
     purpose: 'Comprobar la creación en ventana flotante.',
     status: 'active',
   });
+});
+
+
+test('Agenda navigates day, week and month views and creates a confirmed all-day Event through the authenticated Edge writer', async ({ page }) => {
+  const today = await todayInBrowserHavana(page);
+  const tomorrow = await page.evaluate((value) => {
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
+  }, today);
+  const seedEvents = [{
+    id: '0190f47a-7b2c-7abc-8def-0123456789bf',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    updated_by_user_id: profile.id,
+    title: 'Día de familia',
+    description: null,
+    location_label: null,
+    location_kind: null,
+    event_status: 'confirmed',
+    temporal_kind: 'all_day',
+    start_date: today,
+    end_date_exclusive: tomorrow,
+    archived_at: null,
+    deleted_at: null,
+    created_at: '2026-11-22T17:00:00.000Z',
+    updated_at: '2026-11-22T17:00:00.000Z',
+  }];
+  const { calendarEvents, insertedAgendaEvents, idempotencyRequests } = await mockSupabaseSession(page, {
+    calendarEvents: seedEvents,
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+
+  const sideNavigation = page.getByRole('navigation', { name: 'Navegación principal' });
+  await sideNavigation.getByRole('button', { name: /Agenda/ }).click();
+  await expect(page.locator('.page-heading h1')).toHaveText('Agenda');
+  await expect(page.getByText('Día de familia')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Día', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Agenda diaria' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Día de familia/ })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Mes', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Agenda mensual' })).toBeVisible();
+  await expect(page.getByText('Día de familia')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Nuevo evento' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Crear evento' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel('Nombre del evento').fill('Mi compromiso nuevo');
+  await dialog.getByLabel('Descripción (opcional)').fill('Evento creado desde Agenda.');
+  await dialog.getByLabel('Desde').fill(today);
+  await dialog.getByLabel('Hasta (incluido)').fill(today);
+  await dialog.getByRole('button', { name: 'Guardar evento' }).click();
+
+  await expect(page.getByText('Evento guardado en Agenda.')).toBeVisible();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByText('Mi compromiso nuevo')).toBeVisible();
+  expect(insertedAgendaEvents).toHaveLength(1);
+  expect(calendarEvents).toHaveLength(2);
+  expect(insertedAgendaEvents[0]).toMatchObject({
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    updated_by_user_id: profile.id,
+    title: 'Mi compromiso nuevo',
+    event_status: 'confirmed',
+    temporal_kind: 'all_day',
+    start_date: today,
+    end_date_exclusive: tomorrow,
+  });
+  expect(idempotencyRequests).toHaveLength(1);
+  expect(idempotencyRequests[0].key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  expect(idempotencyRequests[0].event).toMatchObject({
+    title: 'Mi compromiso nuevo',
+    temporalKind: 'all_day',
+    startDate: today,
+    endDateExclusive: tomorrow,
+  });
+});
+
+test('Agenda keeps day, week and month controls usable on a 390px mobile screen without page overflow', async ({ page }) => {
+  await mockSupabaseSession(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+
+  const mobileNavigation = page.getByRole('navigation', { name: 'Navegación móvil' });
+  await mobileNavigation.getByRole('button', { name: /Agenda/ }).click();
+  await expect(page.locator('.page-heading h1')).toHaveText('Agenda');
+  for (const view of ['Día', 'Semana', 'Mes']) {
+    const control = page.getByRole('button', { name: view, exact: true });
+    await expect(control).toBeVisible();
+    await control.click();
+    await expect(control).toHaveAttribute('aria-pressed', 'true');
+  }
+  const dimensions = await page.evaluate(() => ({
+    viewport: document.documentElement.clientWidth,
+    document: document.documentElement.scrollWidth,
+  }));
+  expect(dimensions.document).toBeLessThanOrEqual(dimensions.viewport + 1);
+  await expect(page.getByRole('button', { name: 'Nuevo evento' })).toBeVisible();
 });
