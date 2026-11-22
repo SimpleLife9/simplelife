@@ -53,12 +53,23 @@ function mockContext({
     replayed: false,
   }],
   rpcError = null,
+  protectedBlocks = [] as Record<string, unknown>[],
+  currentEvent = {
+    temporal_kind: "all_day",
+    start_date: "2026-12-24",
+    end_date_exclusive: "2026-12-26",
+    starts_at: null,
+    ends_at: null,
+    protected_time_decisions: [],
+  } as Record<string, unknown>,
 }: {
   profileStatus?: string;
   existing?: Record<string, unknown> | null;
   lookupError?: unknown;
   rpcResult?: unknown;
   rpcError?: unknown;
+  protectedBlocks?: Record<string, unknown>[];
+  currentEvent?: Record<string, unknown>;
 } = {}) {
   const calls: Record<string, unknown> = { profileLookup: 0, rpc: 0, rpcName: null, rpcArgs: null };
   const supabase = {
@@ -85,25 +96,54 @@ function mockContext({
   };
   const supabaseAdmin = {
     from(table: string) {
-      if (table !== "event_mutation_request") throw new Error("unexpected admin table " + table);
-      return {
-        select() {
-          return {
-            eq(_column: string, _value: string) {
-              return {
-                eq(_key: string, _value: string) {
-                  return {
-                    async maybeSingle() {
-                      calls.ledgerLookup = Number(calls.ledgerLookup ?? 0) + 1;
-                      return { data: existing, error: lookupError };
-                    },
-                  };
-                },
-              };
-            },
-          };
-        },
-      };
+      if (table === "event_mutation_request") {
+        return {
+          select() {
+            return {
+              eq(_column: string, _value: string) {
+                return {
+                  eq(_key: string, _value: string) {
+                    return {
+                      async maybeSingle() {
+                        calls.ledgerLookup = Number(calls.ledgerLookup ?? 0) + 1;
+                        return { data: existing, error: lookupError };
+                      },
+                    };
+                  },
+                };
+              },
+            };
+          },
+        };
+      }
+      if (table === "calendar_event") {
+        const query: any = {
+          select() { return this; },
+          eq() { return this; },
+          async maybeSingle() { return { data: currentEvent, error: null }; },
+        };
+        return query;
+      }
+      if (table === "user_preference") {
+        return {
+          select() {
+            return {
+              eq() { return { async maybeSingle() { return { data: { time_zone: "America/Havana" }, error: null }; } }; },
+            };
+          },
+        };
+      }
+      if (table === "protected_time_block") {
+        const query: any = {
+          select() { return this; },
+          eq() { return this; },
+          is() { return this; },
+          order() { return this; },
+          async limit() { return { data: protectedBlocks, error: null }; },
+        };
+        return query;
+      }
+      throw new Error("unexpected admin table " + table);
     },
     async rpc(name: string, args: Record<string, unknown>) {
       calls.rpc = Number(calls.rpc) + 1;
@@ -147,6 +187,7 @@ Deno.test("Event mutation normalizes UUIDv7 and preserves PostgreSQL microsecond
     expectedUpdatedAt: VERSION,
     action: "cancel",
     eventDraft: null,
+    protectedTimeDecisions: [],
   }, "normalized cancel mutation");
 });
 
@@ -217,8 +258,10 @@ Deno.test("authenticated edit invokes only the atomic owner-scoped mutation RPC 
   assertEquals(args.p_mutation, "edit", "mutation kind");
   assertEquals(args.p_idempotency_key, KEY, "UUIDv7 key");
   const patch = args.p_event_patch as Record<string, unknown>;
-  assertEquals(Object.keys(patch).length, 16, "only the editable Event fields are sent");
+  assertEquals(Object.keys(patch).length, 18, "editable Event fields plus decisions and transient snapshot");
   assertEquals(patch.title, "Reunión actualizada", "title patch");
+  assertEquals(patch.protected_time_decisions, [], "no overlap decisions needed");
+  assertEquals(patch.protected_time_snapshot, [], "empty owner snapshot supplied");
   assertEquals(patch.owner_user_id, undefined, "no owner identity in patch");
 });
 
