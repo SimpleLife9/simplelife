@@ -412,26 +412,38 @@ $test$;
 
 -- The append-only audit preserves the exact version-bound consent, not just its count.
 SET LOCAL ROLE service_role;
+UPDATE public.task_schedule
+SET conflict_decisions = '[{
+  "policyVersion": "task-schedule-overlap-decision-v1",
+  "taskScheduleId": "019a0000-0000-7000-8000-000000000102",
+  "taskScheduleUpdatedAt": "2026-11-24T14:59:00.000Z",
+  "startsAt": "2026-11-24T14:30:00.000Z",
+  "endsAt": "2026-11-24T15:30:00.000Z",
+  "overlapStartsAt": "2026-11-24T14:30:00.000Z",
+  "overlapEndsAt": "2026-11-24T15:00:00.000Z",
+  "decision": "keep_overlap",
+  "consentedAt": "2026-11-22T18:10:00.000Z"
+}]'::jsonb
+WHERE id = '019a0000-0000-7000-8000-000000000101'
+  AND owner_user_id = '019a0000-0000-7000-8000-000000000001';
+RESET ROLE;
+
+-- Read the protected audit evidence as postgres, not service_role.
 DO $test$
 DECLARE
-  v_decisions jsonb := jsonb_build_array(jsonb_build_object(
-    'policyVersion', 'task-schedule-overlap-decision-v1',
-    'taskScheduleId', '019a0000-0000-7000-8000-000000000102',
-    'taskScheduleUpdatedAt', '2026-11-24T14:59:00.000Z',
-    'startsAt', '2026-11-24T14:30:00.000Z',
-    'endsAt', '2026-11-24T15:30:00.000Z',
-    'overlapStartsAt', '2026-11-24T14:30:00.000Z',
-    'overlapEndsAt', '2026-11-24T15:00:00.000Z',
-    'decision', 'keep_overlap',
-    'consentedAt', '2026-11-22T18:10:00.000Z'
-  ));
+  v_decisions jsonb := '[{
+    "policyVersion": "task-schedule-overlap-decision-v1",
+    "taskScheduleId": "019a0000-0000-7000-8000-000000000102",
+    "taskScheduleUpdatedAt": "2026-11-24T14:59:00.000Z",
+    "startsAt": "2026-11-24T14:30:00.000Z",
+    "endsAt": "2026-11-24T15:30:00.000Z",
+    "overlapStartsAt": "2026-11-24T14:30:00.000Z",
+    "overlapEndsAt": "2026-11-24T15:00:00.000Z",
+    "decision": "keep_overlap",
+    "consentedAt": "2026-11-22T18:10:00.000Z"
+  }]'::jsonb;
   v_details jsonb;
 BEGIN
-  UPDATE public.task_schedule
-  SET conflict_decisions = v_decisions
-  WHERE id = '019a0000-0000-7000-8000-000000000101'
-    AND owner_user_id = '019a0000-0000-7000-8000-000000000001';
-
   SELECT details INTO v_details
   FROM public.audit_event
   WHERE entity_type = 'task_schedule'
@@ -446,7 +458,6 @@ BEGIN
   END IF;
 END;
 $test$;
-RESET ROLE;
 
 -- Authenticated reads are owner-scoped; direct browser writes are not granted.
 SET LOCAL ROLE authenticated;
