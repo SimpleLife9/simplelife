@@ -42,17 +42,19 @@ function formatRange(schedule, timeZone) {
 }
 
 function toConflictKey(item, kind) {
-  return kind === 'event'
-    ? 'event:' + item.eventId
-    : 'protected:' + item.blockId + ':' + item.occurrenceStartsAt;
+  if (kind === 'event') return 'event:' + item.eventId;
+  if (kind === 'schedule') return 'schedule:' + item.taskScheduleId;
+  return 'protected:' + item.blockId + ':' + item.occurrenceStartsAt;
 }
 
 function ConflictDialog({ conflict, choices, setChoices, onSave, onClose, busy }) {
   const events = conflict.eventConflicts || [];
   const protectedBlocks = conflict.protectedTimeConflicts || [];
+  const schedules = conflict.taskScheduleConflicts || [];
   const allChoicesReady = events.every((item) => choices[toConflictKey(item, 'event')] === 'keep_overlap')
-    && protectedBlocks.every((item) => choices[toConflictKey(item, 'protected')] === item.requiredDecision);
-  const hasConflicts = events.length + protectedBlocks.length > 0;
+    && protectedBlocks.every((item) => choices[toConflictKey(item, 'protected')] === item.requiredDecision)
+    && schedules.every((item) => choices[toConflictKey(item, 'schedule')] === item.requiredDecision);
+  const hasConflicts = events.length + protectedBlocks.length + schedules.length > 0;
 
   return (
     <div className="agenda-dialog-backdrop task-schedule-conflict-backdrop" role="presentation">
@@ -90,6 +92,26 @@ function ConflictDialog({ conflict, choices, setChoices, onSave, onClose, busy }
                   >
                     <option value="">Selecciona una decisión</option>
                     <option value="keep_overlap">Mantener ambos compromisos</option>
+                  </select>
+                </label>
+              </article>
+            ))}
+            {schedules.map((item) => (
+              <article className="task-schedule-conflict-item" key={toConflictKey(item, 'schedule')}>
+                <div>
+                  <strong>Otra reserva de tarea</strong>
+                  <small>{formatRange({ starts_at: item.startsAt, ends_at: item.endsAt }, item.timeZone || DEFAULT_TIME_ZONE)}</small>
+                  <span>Reserva activa · se conservará sin moverla</span>
+                </div>
+                <label className="agenda-field">
+                  <span>Tu decisión</span>
+                  <select
+                    value={choices[toConflictKey(item, 'schedule')] || ''}
+                    onChange={(event) => setChoices((current) => ({ ...current, [toConflictKey(item, 'schedule')]: event.target.value }))}
+                    disabled={busy}
+                  >
+                    <option value="">Selecciona una decisión</option>
+                    <option value="keep_overlap">Mantener ambas reservas</option>
                   </select>
                 </label>
               </article>
@@ -277,6 +299,7 @@ export function TaskSchedulePage({ profile, refreshKey, runAction, busy }) {
         if (response && (
           response.error === 'TASK_SCHEDULE_CONFLICTS'
           || response.error === 'PROTECTED_TIME_CONFLICTS'
+          || response.error === 'TASK_SCHEDULE_OVERLAPS'
           || response.error === 'TASK_SCHEDULE_CONFLICTS_CHANGED'
         )) {
           if (response.error === 'TASK_SCHEDULE_CONFLICTS_CHANGED') {
@@ -331,7 +354,12 @@ export function TaskSchedulePage({ profile, refreshKey, runAction, busy }) {
       occurrenceStartsAt: item.occurrenceStartsAt,
       decision: conflictChoices['protected:' + item.blockId + ':' + item.occurrenceStartsAt],
     }));
-    const decisions = { eventDecisions, protectedTimeDecisions };
+    const taskScheduleDecisions = (conflictPrompt.taskScheduleConflicts || []).map((item) => ({
+      taskScheduleId: item.taskScheduleId,
+      taskScheduleUpdatedAt: item.taskScheduleUpdatedAt,
+      decision: conflictChoices['schedule:' + item.taskScheduleId],
+    }));
+    const decisions = { eventDecisions, protectedTimeDecisions, taskScheduleDecisions };
     setConflictPrompt(null);
     void sendMutation(editingSchedule ? 'edit' : 'create', editingSchedule, decisions);
   };
