@@ -131,10 +131,10 @@ export function getCalendarEventRange(event, viewerTimeZone) {
     throw new RangeError('Unsupported Event temporal kind: ' + String(event.temporal_kind));
   }
 
-  const startsAt = Date.parse(start.date + 'T' + start.time + ':00Z');
-  const endsAt = Date.parse(end.date + 'T' + end.time + ':00Z');
+  const startsAt = Date.parse(event.starts_at);
+  const endsAt = Date.parse(event.ends_at);
   assert(Number.isFinite(startsAt) && Number.isFinite(endsAt) && endsAt > startsAt,
-    'Timed Event must have a positive range.');
+    'Timed Event must have a positive resolved UTC range.');
   const endExclusive = endDateExclusive(end);
   assert(endExclusive > start.date, 'Timed Event end must follow its start date.');
 
