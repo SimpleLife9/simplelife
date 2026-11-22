@@ -130,7 +130,7 @@ export async function handleRequest(
     return json({ error: "PROTECTED_TIME_BODY_HAS_UNSUPPORTED_FIELDS" }, 422);
   }
 
-  let blockId: string;
+  let blockId = "";
   let expectedUpdatedAt: string | null = null;
   let blockDraft: ReturnType<typeof normalizeProtectedTimeBlock> | null = null;
   try {
@@ -166,6 +166,8 @@ export async function handleRequest(
       catch { return json({ error: "SERVER_BLOCK_ID_INVALID" }, 500); }
     }
   }
+
+  if (!blockId) return json({ error: "SERVER_BLOCK_ID_INVALID" }, 500);
 
   let intent;
   try {
