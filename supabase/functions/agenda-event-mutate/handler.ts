@@ -37,6 +37,8 @@ const EDIT_FIELDS = [
   "start_gap_strategy",
   "end_gap_strategy",
   "protected_time_decisions",
+  "calendar_event_snapshot",
+  "task_schedule_snapshot",
 ] as const;
 
 type RpcClient = {
@@ -271,6 +273,7 @@ export async function handleRequest(
         event: candidateRecord,
         suppliedDecisions: decisionInputs,
         now,
+        excludeEventId: mutation.eventId,
       });
 
       // When only Event details change, preserve the original consent timestamp
@@ -298,6 +301,7 @@ export async function handleRequest(
           event: candidateRecord,
           suppliedDecisions: decisionInputs,
           now,
+          excludeEventId: mutation.eventId,
         });
       }
 
@@ -321,7 +325,9 @@ export async function handleRequest(
         ownerProfileId: profile.profileId,
         now,
         protectedTimeDecisions: [...decisionsToPersist],
-        protectedTimeSnapshot: [...conflictAssessment.assessment.snapshot],
+        protectedTimeSnapshot: [...conflictAssessment.assessment.snapshot.protectedTime],
+        calendarEventSnapshot: [...conflictAssessment.assessment.snapshot.calendarEvents],
+        taskScheduleSnapshot: [...conflictAssessment.assessment.snapshot.taskSchedules],
       });
       eventPatch = toEventPatch(record as unknown as Record<string, unknown>);
     }
