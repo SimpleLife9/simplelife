@@ -4,7 +4,6 @@ import {
   createEventDraft,
 } from "../../../src/features/agenda/domain/event.js";
 import { buildEventInsertRecord } from "../../../src/features/agenda/domain/event-record.js";
-import { uuidv7 } from "../../../src/lib/uuidv7.js";
 import {
   resolveActiveEventProfile,
   type EventAuthenticatedContext,
