@@ -333,7 +333,8 @@ export function planRecurrenceMaterializationBatch({
     rangeStart: startDate,
     rangeEnd: endDate,
     afterDate,
-    maxOccurrences: batchSize + 1,
+    // A single series can contribute at most one slot per calendar day: 90 days < 500.
+    maxOccurrences: MATERIALIZATION_BATCH_LIMIT,
   });
   const hasMore = expanded.length > batchSize;
   const occurrences = Object.freeze(expanded.slice(0, batchSize));
