@@ -14,6 +14,13 @@ import {
   type EventAuthenticatedContext,
 } from "../_shared/agenda-event-profile.ts";
 import { resolveLocalDateTimeRange, TzdbVersionError } from "../agenda-time-resolve/resolver.ts";
+import { normalizeProtectedTimeConflictDecisions } from "../../../src/features/agenda/domain/protected-time.js";
+import {
+  assessEventProtectedTimeConflicts,
+  buildProtectedTimeSnapshot,
+  decisionsMatchConflicts,
+  MAX_PROTECTED_TIME_BLOCKS,
+} from "../_shared/agenda-protected-time-conflicts.ts";
 
 export const MAX_REQUEST_BYTES = 32 * 1024;
 const JSON_HEADERS = {
@@ -78,6 +85,58 @@ function receiptResponse(data: Record<string, unknown>, replayed: boolean): Resp
   }, 201);
 }
 
+
+type ProtectedTimeState = {
+  blocks: Array<Record<string, unknown>>;
+  snapshot: Array<{ id: string; updatedAt: string }>;
+  viewerTimeZone: string;
+};
+
+async function readProtectedTimeState(
+  ctx: Context,
+  ownerProfileId: string,
+): Promise<ProtectedTimeState> {
+  const { data, error } = await ctx.supabaseAdmin
+    .from("protected_time_block")
+    .select("id,label,category,protection_mode,pattern_kind,time_zone,starts_at,ends_at,start_date,end_date_exclusive,weekdays,start_time_local,end_time_local,ends_next_day,updated_at")
+    .eq("owner_user_id", ownerProfileId)
+    .is("archived_at", null)
+    .is("deleted_at", null)
+    .order("id", { ascending: true })
+    .limit(MAX_PROTECTED_TIME_BLOCKS + 1);
+  if (error) throw new Error("PROTECTED_TIME_LOOKUP_FAILED");
+  if (!Array.isArray(data) || data.length > MAX_PROTECTED_TIME_BLOCKS) {
+    throw new Error("PROTECTED_TIME_BLOCK_LIMIT_EXCEEDED");
+  }
+
+  const preference = await ctx.supabaseAdmin
+    .from("user_preference")
+    .select("time_zone")
+    .eq("user_id", ownerProfileId)
+    .maybeSingle();
+  if (preference.error) throw new Error("PROTECTED_TIME_TIMEZONE_LOOKUP_FAILED");
+  const viewerTimeZone = typeof preference.data?.time_zone === "string"
+    ? preference.data.time_zone
+    : "America/Havana";
+
+  return {
+    blocks: data,
+    snapshot: buildProtectedTimeSnapshot(data as never),
+    viewerTimeZone,
+  };
+}
+
+function assessCurrentProtectedTime(
+  eventRecord: Record<string, unknown>,
+  state: ProtectedTimeState,
+) {
+  return assessEventProtectedTimeConflicts({
+    event: eventRecord as never,
+    protectedBlocks: state.blocks as never,
+    viewerTimeZone: state.viewerTimeZone,
+  }) as Array<Record<string, unknown>>;
+}
+
 /**
  * Authenticated, owner-scoped Event Create endpoint.
  *
@@ -115,14 +174,19 @@ export async function handleRequest(
 
   let body: unknown;
   try { body = JSON.parse(raw); } catch { return json({ error: "VALID_JSON_REQUIRED" }, 400); }
-  if (!body || typeof body !== "object" || Array.isArray(body)
-    || Object.keys(body).length !== 1 || !("event" in body)) {
-    return json({ error: "BODY_MUST_CONTAIN_ONLY_EVENT" }, 422);
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return json({ error: "BODY_MUST_BE_AN_OBJECT" }, 422);
+  }
+  const input = body as Record<string, unknown>;
+  const allowedKeys = ["event", "conflictDecisions"];
+  if (!("event" in input) || Object.keys(input).some((key) => !allowedKeys.includes(key))) {
+    return json({ error: "BODY_HAS_UNSUPPORTED_FIELDS" }, 422);
   }
 
   try {
-    const eventDraft = createEventDraft((body as { event: unknown }).event);
-    const intent = await hashEventCreateIntent(eventDraft);
+    const eventDraft = createEventDraft(input.event);
+    const conflictDecisions = normalizeProtectedTimeConflictDecisions(input.conflictDecisions ?? []);
+    const intent = await hashEventCreateIntent(eventDraft, globalThis.crypto, conflictDecisions);
 
     // Fast replay path: no IANA resolution, new Event ID or mutable resolver
     // metadata is needed once the original committed receipt exists.
@@ -159,24 +223,67 @@ export async function handleRequest(
       ownerProfileId: profile.profileId,
       now,
     });
-    const result = await ctx.supabaseAdmin.rpc("create_calendar_event_once", {
+    let protectedTimeState: ProtectedTimeState;
+    let conflicts: Array<Record<string, unknown>>;
+    try {
+      protectedTimeState = await readProtectedTimeState(ctx, profile.profileId);
+      conflicts = assessCurrentProtectedTime(eventRecord as unknown as Record<string, unknown>, protectedTimeState);
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "PROTECTED_TIME_LOOKUP_FAILED";
+      return json({ error: code }, code === "PROTECTED_TIME_BLOCK_LIMIT_EXCEEDED" ? 503 : 503);
+    }
+
+    if (conflicts.length > 0 && conflictDecisions.length === 0) {
+      return json({ error: "PROTECTED_TIME_CONFLICTS", conflicts }, 409);
+    }
+    if (!decisionsMatchConflicts(
+      conflictDecisions as unknown as Array<Record<string, unknown>>,
+      conflicts,
+    )) {
+      return json({
+        error: "PROTECTED_TIME_CONFLICTS_CHANGED",
+        conflicts,
+      }, 409);
+    }
+
+    const result = await ctx.supabaseAdmin.rpc("create_calendar_event_with_protected_time_once", {
       p_owner_user_id: profile.profileId,
       p_idempotency_key: idempotencyKey,
       p_payload_version: intent.version,
       p_payload_hash_hex: intent.payloadHash,
       p_event_record: eventRecord,
+      p_protected_time_snapshot: protectedTimeState.snapshot,
+      p_conflict_decisions: conflictDecisions,
     });
     if (result.error) return json({ error: "EVENT_CREATE_FAILED" }, 503);
     const row = Array.isArray(result.data) ? result.data[0] : result.data;
     if (!row || typeof row !== "object") return json({ error: "EVENT_CREATE_RESULT_INVALID" }, 503);
     const outcome = row as Record<string, unknown>;
-    if (outcome.http_status === 409) return json(outcome.response_body ?? { error: "IDEMPOTENCY_KEY_REUSED" }, 409);
+    if (outcome.http_status === 409) {
+      const responseBody = (outcome.response_body ?? { error: "IDEMPOTENCY_KEY_REUSED" }) as Record<string, unknown>;
+      if (responseBody.error === "PROTECTED_TIME_STATE_CHANGED") {
+        try {
+          const refreshed = await readProtectedTimeState(ctx, profile.profileId);
+          const refreshedConflicts = assessCurrentProtectedTime(eventRecord as unknown as Record<string, unknown>, refreshed);
+          return json({
+            error: refreshedConflicts.length > 0 ? "PROTECTED_TIME_CONFLICTS_CHANGED" : "PROTECTED_TIME_STATE_CHANGED",
+            conflicts: refreshedConflicts,
+          }, 409);
+        } catch {
+          return json({ error: "PROTECTED_TIME_STATE_CHANGED", conflicts: [] }, 409);
+        }
+      }
+      return json(responseBody, 409);
+    }
     if (outcome.http_status !== 201 || !outcome.response_body || typeof outcome.response_body !== "object") {
       return json({ error: "EVENT_CREATE_RESULT_INVALID" }, 503);
     }
     return json({ ...(outcome.response_body as Record<string, unknown>), replayed: outcome.replayed === true }, 201);
   } catch (error) {
     if (error instanceof TzdbVersionError) return json({ error: "TIMEZONE_RULES_UNAVAILABLE" }, 503);
+    if (error instanceof Error && error.message.startsWith("PROTECTED_TIME_")) {
+      return json({ error: error.message }, 503);
+    }
     if (error instanceof TypeError || error instanceof RangeError) {
       return json({ error: error.message }, 422);
     }
