@@ -1,4 +1,4 @@
-import { EXPECTED_TZDB_VERSION, getTzdbVersion, resolveLocalDateTime, resolveLocalDateTimeRange } from "../supabase/functions/agenda-time-resolve/resolver.ts";
+import { EXPECTED_TZDB_VERSION, getTzdbVersion, MAX_RANGE_BATCH_ITEMS, resolveLocalDateTime, resolveLocalDateTimeRange, resolveLocalDateTimeRanges } from "../supabase/functions/agenda-time-resolve/resolver.ts";
 
 function equal<T>(actual:T, expected:T, label:string):void {
   if (actual !== expected) throw new Error(label + ": expected " + String(expected) + ", received " + String(actual));
@@ -102,4 +102,47 @@ Deno.test("range rejects endpoints whose resolved UTC end is not after start",()
 Deno.test("range rejects missing endpoints and unsupported nested fields",()=>{
   throws(()=>resolveLocalDateTimeRange({timeZone:"America/Havana",start:{localDateTime:"2026-11-02T10:00"}}),"missing end");
   throws(()=>resolveLocalDateTimeRange({timeZone:"America/Havana",start:{localDateTime:"2026-11-02T10:00",offset:"-04:00"},end:{localDateTime:"2026-11-02T11:00"}}),"unsupported endpoint field");
+});
+
+
+Deno.test("bounded range batch resolves multiple zones under one pinned TZDB release", () => {
+  const batch = resolveLocalDateTimeRanges({
+    ranges: [
+      {
+        timeZone: "America/Havana",
+        start: { localDateTime: "2026-10-30T09:00" },
+        end: { localDateTime: "2026-10-30T10:00" },
+      },
+      {
+        timeZone: "America/New_York",
+        start: { localDateTime: "2026-11-02T09:00" },
+        end: { localDateTime: "2026-11-02T10:30" },
+      },
+    ],
+  });
+  equal(batch.count, 2, "batch count");
+  equal(batch.results[0].startsAt, "2026-10-30T13:00:00.000Z", "first start");
+  equal(batch.results[0].endsAt, "2026-10-30T14:00:00.000Z", "first end");
+  equal(batch.results[1].startsAt, "2026-11-02T14:00:00.000Z", "second start");
+  equal(batch.results[1].endsAt, "2026-11-02T15:30:00.000Z", "second end");
+  equal(batch.rulesVersion, EXPECTED_TZDB_VERSION, "batch TZDB version");
+  equal(batch.resolverVersion, batch.results[0].resolverVersion, "batch resolver version");
+  equal(batch.results[0].rulesVersion, batch.results[1].rulesVersion, "all result rules versions");
+  equal(batch.authoritative, true, "batch authoritative marker");
+});
+
+Deno.test("range batch rejects empty, oversized, malformed and partially invalid batches", () => {
+  throws(() => resolveLocalDateTimeRanges({ ranges: [] }), "empty batch");
+  throws(() => resolveLocalDateTimeRanges({ ranges: Array.from({ length: MAX_RANGE_BATCH_ITEMS + 1 }, () => ({
+    timeZone: "America/Havana",
+    start: { localDateTime: "2026-11-02T09:00" },
+    end: { localDateTime: "2026-11-02T10:00" },
+  })) }), "oversized batch");
+  throws(() => resolveLocalDateTimeRanges({ ranges: [{}] }), "invalid range entry");
+  throws(() => resolveLocalDateTimeRanges({ ranges: [{
+    timeZone: "America/Havana",
+    start: { localDateTime: "2026-11-02T09:00" },
+    end: { localDateTime: "2026-11-02T09:00" },
+  }] }), "one invalid range rejects the full batch");
+  throws(() => resolveLocalDateTimeRanges({ ranges: [], extra: true }), "unsupported batch field");
 });

@@ -1,6 +1,6 @@
-import { resolveLocalDateTime, resolveLocalDateTimeRange, TzdbVersionError } from "./resolver.ts";
+import { resolveLocalDateTime, resolveLocalDateTimeRange, resolveLocalDateTimeRanges, TzdbVersionError } from "./resolver.ts";
 
-export const MAX_REQUEST_BYTES = 4096;
+export const MAX_REQUEST_BYTES = 32 * 1024;
 
 const headers = {
   "access-control-allow-origin": "*",
@@ -84,11 +84,17 @@ export async function handleRequest(request: Request): Promise<Response> {
   }
 
   try {
-    const isRange = !!body
-      && typeof body === "object"
-      && !Array.isArray(body)
-      && ("start" in body || "end" in body);
-    return response(isRange ? resolveLocalDateTimeRange(body) : resolveLocalDateTime(body), 200);
+    const objectBody = !!body && typeof body === "object" && !Array.isArray(body)
+      ? body as Record<string, unknown>
+      : null;
+    const isBatch = objectBody !== null && "ranges" in objectBody;
+    const isRange = objectBody !== null && ("start" in objectBody || "end" in objectBody);
+    const resolved = isBatch
+      ? resolveLocalDateTimeRanges(objectBody)
+      : isRange
+      ? resolveLocalDateTimeRange(objectBody)
+      : resolveLocalDateTime(body);
+    return response(resolved, 200);
   } catch (error) {
     if (error instanceof TzdbVersionError) {
       return response({ error: "Timezone rules are unavailable or outdated." }, 503);

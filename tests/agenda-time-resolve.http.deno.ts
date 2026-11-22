@@ -150,3 +150,79 @@ Deno.test("HTTP rejects a range whose selected fold endpoints reverse the UTC in
   equal(response.status, 422, "reversed fold range status");
   equal((await json(response)).error, "Resolved Event end must be after its start.", "reversed range error");
 });
+
+
+Deno.test("HTTP resolves a bounded batch of ranges in request order", async () => {
+  const response = await handleRequest(new Request(URL, {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({
+      ranges: [
+        {
+          timeZone: "America/Havana",
+          start: { localDateTime: "2026-10-30T09:00" },
+          end: { localDateTime: "2026-10-30T10:00" },
+        },
+        {
+          timeZone: "America/New_York",
+          start: { localDateTime: "2026-11-02T09:00" },
+          end: { localDateTime: "2026-11-02T10:30" },
+        },
+      ],
+    }),
+  }));
+  equal(response.status, 200, "batch success status");
+  const result = await json(response);
+  equal(result.count, 2, "batch count");
+  equal(result.rulesVersion, "2026f", "batch TZDB version");
+  equal(result.authoritative, true, "batch authoritative marker");
+  const results = result.results as Record<string, unknown>[];
+  equal(results.length, 2, "batch result count");
+  equal(results[0].startsAt, "2026-10-30T13:00:00.000Z", "first range start");
+  equal(results[0].endsAt, "2026-10-30T14:00:00.000Z", "first range end");
+  equal(results[1].startsAt, "2026-11-02T14:00:00.000Z", "second range start");
+  equal(results[1].endsAt, "2026-11-02T15:30:00.000Z", "second range end");
+});
+
+Deno.test("HTTP rejects empty, oversized and partially invalid range batches", async () => {
+  const baseRange = {
+    timeZone: "America/Havana",
+    start: { localDateTime: "2026-10-30T09:00" },
+    end: { localDateTime: "2026-10-30T10:00" },
+  };
+  for (const [ranges, label] of [
+    [[], "empty"],
+    [Array.from({ length: 26 }, () => baseRange), "oversized"],
+    [[baseRange, { ...baseRange, end: { localDateTime: "2026-10-30T09:00" } }], "partially invalid"],
+  ] as const) {
+    const response = await handleRequest(new Request(URL, {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ ranges }),
+    }));
+    equal(response.status, 422, label + " batch status");
+    const body = await json(response);
+    equal(typeof body.error, "string", label + " batch error");
+  }
+});
+
+
+Deno.test("HTTP accepts the maximum 25-range batch within the larger bounded body limit", async () => {
+  const range = {
+    timeZone: "America/Havana",
+    start: { localDateTime: "2026-10-30T09:00", disambiguation: "earlier", gapStrategy: "next-valid" },
+    end: { localDateTime: "2026-10-30T10:00", disambiguation: "earlier", gapStrategy: "next-valid" },
+  };
+  const body = JSON.stringify({ ranges: Array.from({ length: 25 }, () => range) });
+  const byteLength = new TextEncoder().encode(body).byteLength;
+  if (byteLength <= 4096) throw new Error("test batch should exceed the previous 4 KiB request limit.");
+  if (byteLength > MAX_REQUEST_BYTES) throw new Error("test batch must stay under MAX_REQUEST_BYTES.");
+  const response = await handleRequest(new Request(URL, {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body,
+  }));
+  equal(response.status, 200, "maximum batch status");
+  const result = await json(response);
+  equal(result.count, 25, "maximum batch count");
+});
