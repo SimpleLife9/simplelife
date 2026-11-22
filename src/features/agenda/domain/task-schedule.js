@@ -203,7 +203,8 @@ export function buildTaskScheduleResolutionRequest(mutation) {
 /** Build the exact 14-field DB patch from a matching authoritative IANA resolution. */
 export function buildTaskSchedulePatch({
   mutation, resolution, scheduleStatus = 'proposed',
-  conflictDecisions = [], conflictSnapshot = [],
+  conflictDecisions = /** @type {Array<Record<string, unknown>>} */ ([]),
+  conflictSnapshot = /** @type {Array<Record<string, unknown>>} */ ([]),
 }) {
   assert(mutation?.schedule && mutation.action === 'create' || mutation?.schedule && mutation.action === 'edit',
     'TaskSchedule create or edit intent is required.');
