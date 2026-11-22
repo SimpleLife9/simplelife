@@ -5,6 +5,7 @@ export const EVENT_MUTATION_ACTIONS = Object.freeze([
   'edit',
   'cancel',
   'reopen',
+  'finish',
   'archive',
   'restore',
   'trash',
