@@ -264,8 +264,8 @@ export function normalizeProtectedTimeBlock(input) {
   if (patternKind === 'one_off') {
     draft.startLocalDateTime = assertProtectedLocalDateTime(input.startLocalDateTime, 'startLocalDateTime');
     draft.endLocalDateTime = assertProtectedLocalDateTime(input.endLocalDateTime, 'endLocalDateTime');
-    assert(draft.endLocalDateTime > draft.startLocalDateTime,
-      'A one-off Protected Time end must be after its start in local wall time.');
+    // The authoritative IANA resolver decides instant ordering; equal or reversed
+    // wall times can still describe a valid interval across a DST fold.
     draft.startDisambiguation = input.startDisambiguation ?? 'earlier';
     draft.endDisambiguation = input.endDisambiguation ?? 'earlier';
     assert(['earlier', 'later', 'reject'].includes(draft.startDisambiguation),
@@ -424,7 +424,7 @@ export async function hashProtectedTimeMutationIntent({
   const canonicalPayload = JSON.stringify({
     version: PROTECTED_TIME_MUTATION_INTENT_VERSION,
     action,
-    blockId: normalizedId,
+    blockId: action === 'create' ? null : normalizedId,
     expectedUpdatedAt: normalizedVersion,
     blockDraft,
   });
