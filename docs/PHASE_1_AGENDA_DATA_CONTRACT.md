@@ -290,3 +290,14 @@ Direct user-created Events default to `confirmed`; `preparing` and `proposed` re
 Technical input bounds in this domain slice: title 200 characters, description 5,000, location label 500. They are validation safeguards for this implementation, not database constraints or a change to product behavior.
 
 This module is pure domain code. It makes no network calls, generates no IDs/owner/actor fields, creates no audit records, writes no rows and does not alter task data. No schema, migration, RLS/grants/Auth, secrets, cron, Edge Function deployment or public release is part of this slice.
+
+
+## Protected-time conflict assessment — PR #76 preparation (22 November 2026)
+
+The pure module `src/features/agenda/domain/protected-time.js` assesses a proposed commitment against a protected block without writing data or changing either source record.
+
+- Timed ranges compare canonical UTC instants by reusing `intervalsOverlap` and its half-open `[start,end)` semantics. Adjacent commitments do not conflict.
+- All-day ranges compare validated date-only keys with an inclusive start and exclusive end. They never become UTC-midnight instants.
+- Hard-protected overlap blocks the proposed action until the user explicitly overrides it. Flexible-protected overlap requires an explicit keep-or-reschedule choice. Both remain protected from automatic scheduling; an explicit choice authorizes only the reviewed overlap, not general automatic consumption of the block.
+- Mixed timed/all-day comparisons fail closed. They require an explicit common calendar basis and trusted timezone conversion; the domain helper does not infer a viewer timezone or use client runtime rules to silently compare unlike temporal models.
+- The assessment is immutable and side-effect free. It does not persist user choice, create protected blocks, schedule Tasks, expose UI, or implement ARIA automation.
