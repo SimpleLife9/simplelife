@@ -409,6 +409,10 @@ export function buildProtectedTimeBlockPatch(draft, resolution) {
   });
 }
 
+/**
+ * @param {{ action: string, blockId: string, expectedUpdatedAt?: string | null, blockDraft?: object | null }} input
+ * @param {Crypto} [cryptoProvider]
+ */
 export async function hashProtectedTimeMutationIntent({
   action,
   blockId,
