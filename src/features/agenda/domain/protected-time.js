@@ -1,13 +1,25 @@
 import {
   createAllDayRange,
   intervalsOverlap,
+  parseCalendarDate,
   validateTimedRange,
 } from './temporal.js';
 
 const PROTECTION_MODES = Object.freeze(['hard', 'flexible']);
+const OFFSET_INSTANT_PATTERN = /^(\\d{4}-\\d{2}-\\d{2})T\\d{2}:\\d{2}(?::\\d{2}(?:\\.\\d{1,9})?)?(?:Z|[+-]\\d{2}:\\d{2})$/i;
 
 function assert(condition, message) {
   if (!condition) throw new RangeError(message);
+}
+
+function normalizeInstant(value, label) {
+  assert(typeof value === 'string', label + ' must include an explicit UTC offset or Z.');
+  const match = OFFSET_INSTANT_PATTERN.exec(value);
+  assert(match, label + ' must include an explicit UTC offset or Z.');
+  parseCalendarDate(match[1]);
+  const epoch = Date.parse(value);
+  assert(Number.isFinite(epoch), label + ' must be a valid instant.');
+  return new Date(epoch).toISOString();
 }
 
 function normalizeRange(value, label) {
@@ -18,7 +30,9 @@ function normalizeRange(value, label) {
     label + ' temporalKind must be timed or all_day.');
 
   if (value.temporalKind === 'timed') {
-    const range = validateTimedRange(value.startsAt, value.endsAt);
+    const startsAt = normalizeInstant(value.startsAt, label + '.startsAt');
+    const endsAt = normalizeInstant(value.endsAt, label + '.endsAt');
+    const range = validateTimedRange(startsAt, endsAt);
     return Object.freeze({
       temporalKind: 'timed',
       startsAt: range.startsAt,
