@@ -130,6 +130,19 @@ BEGIN
     RAISE EXCEPTION 'Protected Time create replay failed: %, %, %', v_status, v_response, v_replayed;
   END IF;
 
+  -- A concurrent retry may generate a different provisional block UUID.
+  -- Identical create intent must replay the winning row instead of returning 409.
+  SELECT http_status, response_body, replayed
+    INTO v_status, v_response, v_replayed
+  FROM public.mutate_protected_time_block_once(
+    v_owner_a, '019a0000-0000-7000-8000-000000000119', v_key_create,
+    'protected-time-mutation-v1', v_hash_create,
+    NULL, 'create', v_patch, '2026-11-22T18:01:30Z'
+  );
+  IF v_status <> 201 OR NOT v_replayed OR v_response->>'blockId' <> v_block_a::text THEN
+    RAISE EXCEPTION 'Racing Protected Time create must replay the winning block id: %, %, %', v_status, v_response, v_replayed;
+  END IF;
+
   -- Same owner/key with a different canonical payload is a conflict.
   SELECT http_status INTO v_status
   FROM public.mutate_protected_time_block_once(
