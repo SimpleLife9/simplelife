@@ -250,20 +250,6 @@ BEGIN
   END IF;
 
   SELECT count(*) INTO v_count
-  FROM public.audit_event
-  WHERE entity_type = 'protected_time_block'
-    AND entity_id = v_block_a
-    AND account_user_id = v_owner_a;
-  IF v_count <> 5 THEN RAISE EXCEPTION 'Owner A needs exactly five audit rows, got %', v_count; END IF;
-
-  SELECT count(*) INTO v_count
-  FROM public.audit_event
-  WHERE entity_type = 'protected_time_block'
-    AND entity_id = v_block_b
-    AND account_user_id = v_owner_b;
-  IF v_count <> 1 THEN RAISE EXCEPTION 'Owner B needs one audit row, got %', v_count; END IF;
-
-  SELECT count(*) INTO v_count
   FROM public.protected_time_block_mutation_request
   WHERE owner_user_id = v_owner_a;
   IF v_count <> 6 THEN RAISE EXCEPTION 'Owner A needs six receipts, got %', v_count; END IF;
@@ -283,6 +269,29 @@ END;
 $test$;
 
 RESET ROLE;
+
+-- Inspect append-only audit evidence with the database owner, not service_role.
+-- The SECURITY DEFINER trigger writes audit_event; the mutation role intentionally
+-- has no direct read privilege on the audit stream.
+DO $audit_assertions$
+DECLARE
+  v_count bigint;
+BEGIN
+  SELECT count(*) INTO v_count
+  FROM public.audit_event
+  WHERE entity_type = 'protected_time_block'
+    AND entity_id = '019a0000-0000-7000-8000-000000000111'::uuid
+    AND account_user_id = '019a0000-0000-7000-8000-000000000011'::uuid;
+  IF v_count <> 5 THEN RAISE EXCEPTION 'Owner A needs exactly five audit rows, got %', v_count; END IF;
+
+  SELECT count(*) INTO v_count
+  FROM public.audit_event
+  WHERE entity_type = 'protected_time_block'
+    AND entity_id = '019a0000-0000-7000-8000-000000000112'::uuid
+    AND account_user_id = '019a0000-0000-7000-8000-000000000012'::uuid;
+  IF v_count <> 1 THEN RAISE EXCEPTION 'Owner B needs one audit row, got %', v_count; END IF;
+END;
+$audit_assertions$;
 
 -- Exercise the actual authenticated RLS policy, not merely the table ACL.
 SET LOCAL ROLE authenticated;
