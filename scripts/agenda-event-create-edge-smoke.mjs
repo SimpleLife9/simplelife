@@ -64,6 +64,27 @@ run("docker", [
 const idempotencyKey = sqlScalar("SELECT private.uuidv7()");
 assertUuid(idempotencyKey, UUID_V7_PATTERN, "Event idempotency key");
 
+const protectedBlockId = sqlScalar("SELECT private.uuidv7()");
+assertUuid(protectedBlockId, UUID_V7_PATTERN, "Protected Time block id");
+const protectedBlockSql =
+  "INSERT INTO public.protected_time_block (" +
+  "id, owner_user_id, created_by_user_id, updated_by_user_id, label, category, " +
+  "protection_mode, pattern_kind, time_zone, start_local, end_local, starts_at, ends_at, " +
+  "start_disambiguation, end_disambiguation, start_gap_strategy, end_gap_strategy, resolver_metadata" +
+  ") VALUES (" +
+  "'" + protectedBlockId + "'::uuid, '" + profileId + "'::uuid, '" + profileId + "'::uuid, '" + profileId + "'::uuid, " +
+  "'CI hard protected sleep', 'health', 'hard', 'one_off', 'America/Havana', " +
+  "TIMESTAMP '2026-12-24 01:00:00', TIMESTAMP '2026-12-24 02:00:00', " +
+  "TIMESTAMPTZ '2026-12-24 06:00:00+00', TIMESTAMPTZ '2026-12-24 07:00:00+00', " +
+  "'earlier', 'earlier', 'next-valid', 'next-valid', " +
+  "jsonb_build_object('rulesSource','iana-tzdb','rulesVersion','2026f'," +
+  "'resolverVersion','agenda-iana-resolver-v1','authoritative',true))";
+run("docker", [
+  "exec", "-i", "supabase_db_simplelife",
+  "psql", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "postgres",
+  "-c", protectedBlockSql,
+]);
+
 const login = await fetch(base + "/auth/v1/token?grant_type=password", {
   method: "POST",
   headers: { apikey: publishable, "content-type": "application/json" },
@@ -85,16 +106,19 @@ server.stderr.on("data", capture);
 let exitCode = null;
 server.on("exit", (code) => { exitCode = code; });
 
-async function invoke(token, key, event, method = "POST") {
+async function invoke(token, key, event, protectedTimeDecisions = undefined) {
   return await fetch(url, {
-    method,
+    method: "POST",
     headers: {
       apikey: publishable,
       authorization: "Bearer " + token,
       "content-type": "application/json",
       "idempotency-key": key,
     },
-    ...(method === "POST" ? { body: JSON.stringify({ event }) } : {}),
+    body: JSON.stringify({
+      event,
+      ...(protectedTimeDecisions === undefined ? {} : { protectedTimeDecisions }),
+    }),
     signal: AbortSignal.timeout(20000),
   });
 }
@@ -130,28 +154,57 @@ try {
   const malformed = await invoke("not.a.valid.jwt", idempotencyKey, event);
   equal(malformed.status, 401, "malformed JWT");
 
-  const firstResponse = await invoke(session.access_token, idempotencyKey, event);
+  // A hard overlap must return conflicts before the idempotency receipt is claimed.
+  const blockedResponse = await invoke(session.access_token, idempotencyKey, event);
+  const blockedPayload = parseJson(await blockedResponse.text(), "Protected Time conflict");
+  equal(blockedResponse.status, 409, "hard Protected Time overlap");
+  equal(blockedPayload.error, "PROTECTED_TIME_CONFLICTS", "hard conflict code");
+  equal(blockedPayload.conflicts.length, 1, "one hard Protected Time conflict");
+  equal(blockedPayload.conflicts[0].blockId, protectedBlockId, "server-derived conflict block");
+  equal(blockedPayload.conflicts[0].requiredDecision, "override_hard", "hard override required");
+  equal(sqlScalar(
+    "SELECT count(*) FROM public.event_create_request WHERE owner_user_id = '" + profileId + "'::uuid " +
+    "AND idempotency_key = '" + idempotencyKey + "'::uuid",
+  ), "0", "blocked Event create must not claim a receipt");
+
+  const conflict = blockedPayload.conflicts[0];
+  const decisions = [{
+    blockId: conflict.blockId,
+    blockUpdatedAt: conflict.blockUpdatedAt,
+    occurrenceStartsAt: conflict.occurrenceStartsAt,
+    decision: "override_hard",
+  }];
+  const firstResponse = await invoke(session.access_token, idempotencyKey, event, decisions);
   const firstText = await firstResponse.text();
-  equal(firstResponse.status, 201, "authenticated Event create");
-  const first = parseJson(firstText, "first Event create");
+  equal(firstResponse.status, 201, "Event create after explicit hard override");
+  const first = parseJson(firstText, "first authorized Event create");
   assertUuid(first.eventId, UUID_V7_PATTERN, "created Event id");
   equal(first.eventStatus, "confirmed", "initial Event status");
   equal(first.replayed, false, "first request replay marker");
 
-  // The identical request must replay the original receipt and preserve its ID.
-  const replayResponse = await invoke(session.access_token, idempotencyKey, event);
+  // Same owner/key/intent must replay the exact original accepted decision.
+  const replayResponse = await invoke(session.access_token, idempotencyKey, event, decisions);
   const replayText = await replayResponse.text();
-  equal(replayResponse.status, 201, "identical retry");
+  equal(replayResponse.status, 201, "identical authorized retry");
   const replay = parseJson(replayText, "Event create replay");
   equal(replay.eventId, first.eventId, "replayed Event id");
   equal(replay.replayed, true, "replay marker");
 
-  // The same owner/key with a different canonical intent must conflict.
+  // Changing the decision under the same key is a different create intent.
+  const changedDecisionResponse = await invoke(session.access_token, idempotencyKey, event, [{
+    ...decisions[0],
+    decision: "keep_flexible",
+  }]);
+  const changedDecision = parseJson(await changedDecisionResponse.text(), "changed conflict decision");
+  equal(changedDecisionResponse.status, 409, "same key with changed Protected Time choice");
+  equal(changedDecision.error, "IDEMPOTENCY_KEY_REUSED", "changed decision conflict code");
+
+  // The same owner/key with a changed Event intent must also conflict.
   const changedEvent = { ...event, title: "CI authenticated Event create changed" };
-  const conflictResponse = await invoke(session.access_token, idempotencyKey, changedEvent);
+  const conflictResponse = await invoke(session.access_token, idempotencyKey, changedEvent, decisions);
   const conflictText = await conflictResponse.text();
-  equal(conflictResponse.status, 409, "same key with different intent");
-  equal(parseJson(conflictText, "idempotency conflict").error, "IDEMPOTENCY_KEY_REUSED", "conflict code");
+  equal(conflictResponse.status, 409, "same key with different Event intent");
+  equal(parseJson(conflictText, "idempotency conflict").error, "IDEMPOTENCY_KEY_REUSED", "Event intent conflict code");
 
   // Query the disposable database directly to verify owner/actor, Event,
   // append-only audit row and one ledger receipt. The stack is destroyed by
@@ -178,6 +231,22 @@ try {
   );
   equal(auditCount, "1", "append-only audit row count");
 
+  const decisionsCount = sqlScalar(
+    "SELECT jsonb_array_length(protected_time_decisions) FROM public.calendar_event " +
+    "WHERE id = '" + first.eventId + "'::uuid",
+  );
+  equal(decisionsCount, "1", "persisted Protected Time consent count");
+
+  const consentAuditCount = sqlScalar(
+    "SELECT count(*) FROM public.audit_event WHERE entity_type = 'calendar_event' " +
+    "AND entity_id = '" + first.eventId + "'::uuid AND account_user_id = '" + profileId + "'::uuid " +
+    "AND actor_user_id = '" + profileId + "'::uuid " +
+    "AND action = 'calendar_event.protected_time_decisions_recorded' " +
+    "AND details ->> 'decision_version' = 'protected-time-decision-v1' " +
+    "AND jsonb_array_length(details -> 'decisions') = 1",
+  );
+  equal(consentAuditCount, "1", "append-only Protected Time decision audit row count");
+
   const receiptCount = sqlScalar(
     "SELECT count(*) FROM public.event_create_request WHERE owner_user_id = '" + profileId + "'::uuid " +
     "AND idempotency_key = '" + idempotencyKey + "'::uuid AND result_event_id = '" + first.eventId + "'::uuid",
@@ -192,11 +261,12 @@ try {
 
   console.log("PASS: Event Create rejects publishable keys and malformed JWTs.");
   console.log("PASS: Auth-issued JWT resolves a disposable active SimpleLife profile.");
-  console.log("PASS: authenticated Edge Runtime creates a real all-day Event (HTTP 201).");
-  console.log("PASS: owner/creator/updater are derived from the verified profile.");
-  console.log("PASS: PostgreSQL append trigger wrote exactly one owner/actor audit row.");
-  console.log("PASS: identical request replays the original receipt without another Event/audit.");
-  console.log("PASS: same idempotency key with changed intent returns HTTP 409 without a duplicate.");
+  console.log("PASS: a hard Protected Time overlap returns HTTP 409 before claiming an idempotency receipt.");
+  console.log("PASS: user-authorized Event create succeeds with the same UUIDv7 idempotency key.");
+  console.log("PASS: Protected Time consent is stored on the Event and appended to owner/actor audit.");
+  console.log("PASS: identical authorized retry replays the original Event and consent receipt.");
+  console.log("PASS: changing the consent decision under the same key returns HTTP 409.");
+  console.log("PASS: changing Event intent under the same key returns HTTP 409 without a duplicate.");
   console.log("PASS: exactly one owner-scoped idempotency receipt was committed.");
 } finally {
   server.kill("SIGTERM");
