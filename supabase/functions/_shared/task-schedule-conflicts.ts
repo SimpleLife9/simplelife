@@ -186,6 +186,7 @@ export async function assessOwnerTaskScheduleConflicts({
   taskScheduleId?: string | null;
   suppliedEventDecisions?: unknown;
   suppliedProtectedTimeDecisions?: unknown;
+  suppliedTaskScheduleDecisions?: unknown;
   now: string;
 }): Promise<{ ok: true; assessment: {
   decisions: readonly Record<string, unknown>[];
