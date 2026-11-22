@@ -2959,6 +2959,7 @@ test('Agenda crea, edita, archiva, restaura y envía a papelera bloques semanale
   });
   expect(protectedTimeMutationRequests[0].payload.action).toBe('create');
   expect(protectedTimeMutationRequests[0].key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  const initialUpdatedAt = protectedTimeBlocks[0].updated_at;
 
   let card = page.locator('.protected-time-card').filter({ hasText: 'Entrenamiento matutino' });
   await card.getByRole('button', { name: 'Editar' }).click();
@@ -2970,7 +2971,7 @@ test('Agenda crea, edita, archiva, restaura y envía a papelera bloques semanale
   expect(protectedTimeMutationRequests[1].payload).toMatchObject({
     action: 'edit',
     blockId: protectedTimeBlocks[0].id,
-    expectedUpdatedAt: '2026-11-22T18:00:00.000Z',
+    expectedUpdatedAt: initialUpdatedAt,
     block: { label: 'Entrenamiento actualizado', patternKind: 'weekly' },
   });
 
