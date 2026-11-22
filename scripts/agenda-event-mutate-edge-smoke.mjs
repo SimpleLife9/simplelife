@@ -255,6 +255,20 @@ try {
     "restore trashed Event",
   );
   equal(restoreTrash.lifecycle, "active", "trashed Event restored lifecycle");
+  version = versionFor(eventId);
+
+  const finish = await assertSuccess(
+    await invokeMutation(ownerA.accessToken, "finish", version, newKey()),
+    "finish Event",
+  );
+  equal(finish.eventStatus, "finished", "finished functional status");
+  version = versionFor(eventId);
+
+  await assertConflict(
+    await invokeMutation(ownerA.accessToken, "cancel", version, newKey()),
+    "finished Event cannot be cancelled",
+    "EVENT_CANNOT_BE_CANCELLED",
+  );
 
   const beforeCrossOwner = queryEvent(eventId);
   const crossOwner = await invokeMutation(ownerB.accessToken, "cancel", versionFor(eventId), newKey());
@@ -262,17 +276,17 @@ try {
   equal(queryEvent(eventId), beforeCrossOwner, "cross-owner mutation cannot change the Event");
 
   const finalRow = queryEvent(eventId);
-  if (!finalRow.startsWith("Mutation smoke edited|confirmed|all_day|NULL|NULL|NULL|" + ownerA.profileId)) {
+  if (!finalRow.startsWith("Mutation smoke edited|finished|all_day|NULL|NULL|NULL|" + ownerA.profileId)) {
     fail("Event final row did not match the expected active state: " + finalRow);
   }
   const auditCount = sqlScalar(
     "SELECT count(*) FROM public.audit_event WHERE entity_type = 'calendar_event' AND entity_id = '" + eventId + "'::uuid",
   );
-  equal(auditCount, "8", "creation plus seven audited Event mutations");
+  equal(auditCount, "9", "creation plus eight audited Event mutations");
   const receiptCountA = sqlScalar(
     "SELECT count(*) FROM public.event_mutation_request WHERE owner_user_id = '" + ownerA.profileId + "'::uuid",
   );
-  equal(receiptCountA, "8", "owner A mutation receipts including the stale conflict");
+  equal(receiptCountA, "10", "owner A mutation receipts including stale and terminal-state conflicts");
   const receiptCountB = sqlScalar(
     "SELECT count(*) FROM public.event_mutation_request WHERE owner_user_id = '" + ownerB.profileId + "'::uuid",
   );
@@ -283,11 +297,12 @@ try {
   console.log("PASS: edit replay returns the original receipt without a duplicate audit row.");
   console.log("PASS: reusing the mutation key with changed intent returns HTTP 409.");
   console.log("PASS: stale updated_at returns HTTP 409 and never overwrites newer data.");
-  console.log("PASS: cancel and reopen update functional status without changing Event identity.");
+  console.log("PASS: cancel, reopen and finish update functional status without changing Event identity.");
+  console.log("PASS: finished Events cannot be cancelled and rejected transitions append no audit.");
   console.log("PASS: archive and restore operate independently from functional status.");
   console.log("PASS: trash creates a recoverable 30-day logical tombstone; restore does not physically delete.");
   console.log("PASS: a second authenticated owner receives 404 and cannot mutate the first owner's Event.");
-  console.log("PASS: exactly one audit row exists for Event create and each of seven meaningful updates.");
+  console.log("PASS: exactly one audit row exists for Event create and each of eight meaningful updates.");
   console.log("PASS: mutation receipts remain isolated by owner.");
 } finally {
   server.kill("SIGTERM");
