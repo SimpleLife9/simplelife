@@ -164,16 +164,40 @@ export function normalizeTaskScheduleMutation({
     : normalizeTaskScheduleExpectedVersion(expectedUpdatedAt);
   assert((action === 'create' || action === 'edit') === Boolean(scheduleDraft),
     'Only TaskSchedule create/edit accepts a schedule draft.');
+  const normalizedDraft = scheduleDraft == null ? null : normalizeTaskScheduleDraft(scheduleDraft);
   assert(Array.isArray(conflictDecisions) && conflictDecisions.length <= 500,
     'conflictDecisions must be an array with at most 500 entries.');
   assert(action === 'confirm' || action === 'edit' || conflictDecisions.length === 0,
     'Only TaskSchedule confirmation/edit may include conflict decisions.');
+  const normalizedDecisions = conflictDecisions.map((item) => {
+    assert(item && typeof item === 'object' && !Array.isArray(item),
+      'Every Agenda conflict decision must be an object.');
+    const allowed = ['blockId','blockUpdatedAt','occurrenceStartsAt','decision'];
+    assert(Object.keys(item).length === allowed.length && Object.keys(item).every((key) => allowed.includes(key)),
+      'Agenda conflict decision contains unsupported or missing fields.');
+    assert(typeof item.blockId === 'string' && UUID_V7_PATTERN.test(item.blockId),
+      'Conflict resource id must be a UUIDv7.');
+    assert(typeof item.blockUpdatedAt === 'string' && OFFSET_INSTANT_PATTERN.test(item.blockUpdatedAt)
+      && Number.isFinite(Date.parse(item.blockUpdatedAt)),
+      'Conflict resource version must be an explicit-offset timestamp.');
+    assert(typeof item.occurrenceStartsAt === 'string' && OFFSET_INSTANT_PATTERN.test(item.occurrenceStartsAt)
+      && Number.isFinite(Date.parse(item.occurrenceStartsAt)),
+      'Conflict occurrence start must be an explicit-offset timestamp.');
+    assert(['override_hard','keep_flexible','keep_overlap'].includes(item.decision),
+      'Agenda conflict decision is unsupported.');
+    return Object.freeze({
+      blockId: item.blockId.toLowerCase(),
+      blockUpdatedAt: item.blockUpdatedAt,
+      occurrenceStartsAt: new Date(Date.parse(item.occurrenceStartsAt)).toISOString(),
+      decision: item.decision,
+    });
+  });
   return Object.freeze({
     action,
     taskScheduleId: normalizedId,
     expectedUpdatedAt: normalizedVersion,
-    scheduleDraft,
-    conflictDecisions: Object.freeze(conflictDecisions.map((item) => Object.freeze({ ...item }))),
+    scheduleDraft: normalizedDraft,
+    conflictDecisions: Object.freeze(normalizedDecisions),
   });
 }
 
