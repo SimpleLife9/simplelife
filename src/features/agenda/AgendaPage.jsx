@@ -139,9 +139,12 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
   const [timeZone, setTimeZone] = useState(DEFAULT_TIME_ZONE);
   const [timeZoneNotice, setTimeZoneNotice] = useState('');
   const [view, setView] = useState('week');
+  const [lifecycleView, setLifecycleView] = useState('active');
   const [selectedDate, setSelectedDate] = useState(null);
   const [showComposer, setShowComposer] = useState(false);
+  const [editingEvent, setEditingEvent] = useState(null);
   const [selectedEvent, setSelectedEvent] = useState(null);
+  const [confirmAction, setConfirmAction] = useState(null);
   const [pendingKey, setPendingKey] = useState(null);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -153,6 +156,8 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
   const [startLocalDateTime, setStartLocalDateTime] = useState('');
   const [endLocalDateTime, setEndLocalDateTime] = useState('');
   const [eventTimeZone, setEventTimeZone] = useState(DEFAULT_TIME_ZONE);
+  const [fixedStartsAt, setFixedStartsAt] = useState('');
+  const [fixedEndsAt, setFixedEndsAt] = useState('');
 
   useEffect(() => {
     let alive = true;
@@ -190,12 +195,15 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
       try {
         // RLS restricts this SELECT to the profile associated with auth.uid().
         // There is intentionally no browser write path for calendar_event.
-        const { data, error } = await supabase
-          .from('calendar_event')
-          .select('*')
-          .is('archived_at', null)
-          .is('deleted_at', null)
-          .order('created_at', { ascending: false });
+        let query = supabase.from('calendar_event').select('*');
+        if (lifecycleView === 'active') {
+          query = query.is('archived_at', null).is('deleted_at', null);
+        } else if (lifecycleView === 'archived') {
+          query = query.not('archived_at', 'is', null).is('deleted_at', null);
+        } else {
+          query = query.not('deleted_at', 'is', null);
+        }
+        const { data, error } = await query.order('created_at', { ascending: false });
         if (error) throw error;
         if (alive) setEvents(data || []);
       } catch (error) {
@@ -206,12 +214,13 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
     }
     void loadEvents();
     return () => { alive = false; };
-  }, [profile?.id, refreshKey]);
+  }, [profile?.id, refreshKey, lifecycleView]);
 
   const today = todayInZone(timeZone);
   const activeDate = selectedDate || today;
   const orderedEvents = useMemo(() => sortEventsForCalendar(events, timeZone), [events, timeZone]);
   const openComposer = () => {
+    setEditingEvent(null);
     setTitle('');
     setDescription('');
     setLocationLabel('');
@@ -222,13 +231,47 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
     setStartLocalDateTime(activeDate + 'T09:00');
     setEndLocalDateTime(activeDate + 'T10:00');
     setEventTimeZone(timeZone);
+    setFixedStartsAt('');
+    setFixedEndsAt('');
     setPendingKey(null);
+    setShowComposer(true);
+  };
+
+  const openEventDetail = (event) => {
+    setPendingKey(null);
+    setConfirmAction(null);
+    setSelectedEvent(event);
+  };
+
+  const localInputValue = (value) => String(value || '').replace(' ', 'T').slice(0, 16);
+
+  const openEditComposer = (event) => {
+    setEditingEvent(event);
+    setTitle(event.title || '');
+    setDescription(event.description || '');
+    setLocationLabel(event.location_label || '');
+    setLocationKind(event.location_kind || '');
+    setTemporalKind(event.temporal_kind);
+    if (event.temporal_kind === 'all_day') {
+      setStartDate(event.start_date);
+      setEndDate(addCalendarDays(event.end_date_exclusive, -1));
+    } else if (event.temporal_kind === 'zoned_civil') {
+      setStartLocalDateTime(localInputValue(event.start_local));
+      setEndLocalDateTime(localInputValue(event.end_local));
+    } else {
+      setFixedStartsAt(event.starts_at);
+      setFixedEndsAt(event.ends_at);
+    }
+    setEventTimeZone(event.time_zone || timeZone);
+    setPendingKey(null);
+    setSelectedEvent(null);
     setShowComposer(true);
   };
 
   const closeComposer = () => {
     if (busy) return;
     setShowComposer(false);
+    setEditingEvent(null);
     setPendingKey(null);
   };
 
@@ -244,7 +287,7 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
           description,
           locationLabel,
           locationKind: locationKind || null,
-          eventStatus: 'confirmed',
+          eventStatus: editingEvent?.event_status || 'confirmed',
           temporalKind: 'all_day',
           startDate,
           endDateExclusive: addCalendarDays(endDate, 1),
@@ -255,7 +298,7 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
           description,
           locationLabel,
           locationKind: locationKind || null,
-          eventStatus: 'confirmed',
+          eventStatus: editingEvent?.event_status || 'confirmed',
           temporalKind: 'zoned_civil',
           timeZone: eventTimeZone,
           startLocalDateTime,
@@ -267,10 +310,20 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
         };
       }
       const draft = createEventDraft(draftInput);
-      const { data, error } = await supabase.functions.invoke('agenda-event-create', {
-        body: { event: buildEventRequest(draft) },
-        headers: { 'Idempotency-Key': key },
-      });
+      const { data, error } = editingEvent
+        ? await supabase.functions.invoke('agenda-event-mutate', {
+          body: {
+            eventId: editingEvent.id,
+            expectedUpdatedAt: editingEvent.updated_at,
+            action: 'edit',
+            event: buildEventRequest(draft),
+          },
+          headers: { 'Idempotency-Key': key },
+        })
+        : await supabase.functions.invoke('agenda-event-create', {
+          body: { event: buildEventRequest(draft) },
+          headers: { 'Idempotency-Key': key },
+        });
       if (error) {
         let message = error.message || 'No se pudo guardar el evento.';
         try {
@@ -280,13 +333,62 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
         throw new Error(message);
       }
       if (!data?.eventId) throw new Error('El servidor no devolvió el identificador del evento.');
-    }, 'Evento guardado en Agenda.');
+    }, editingEvent ? 'Cambios guardados.' : 'Evento guardado en Agenda.');
 
     if (success) {
       setShowComposer(false);
+      setEditingEvent(null);
+      setSelectedEvent(null);
       setPendingKey(null);
     }
   };
+
+  const mutateSelectedEvent = async (action) => {
+    if (!selectedEvent) return;
+    const key = pendingKey || uuidv7();
+    setPendingKey(key);
+    const target = selectedEvent;
+    const messages = {
+      cancel: 'Evento cancelado.',
+      reopen: 'Evento reabierto.',
+      finish: 'Evento finalizado.',
+      archive: 'Evento archivado.',
+      restore: lifecycleView === 'trash' ? 'Evento restaurado.' : 'Evento restaurado.',
+      trash: 'Evento movido a la papelera.',
+    };
+    const success = await runAction(async () => {
+      const { data, error } = await supabase.functions.invoke('agenda-event-mutate', {
+        body: {
+          eventId: target.id,
+          expectedUpdatedAt: target.updated_at,
+          action,
+        },
+        headers: { 'Idempotency-Key': key },
+      });
+      if (error) {
+        let message = error.message || 'No se pudo actualizar el evento.';
+        try {
+          const response = error.context instanceof Response ? await error.context.clone().json() : null;
+          if (response?.error) message = response.error;
+        } catch { /* keep SDK error message */ }
+        throw new Error(message);
+      }
+      if (!data?.eventId) throw new Error('El servidor no confirmó el cambio del evento.');
+    }, messages[action] || 'Evento actualizado.');
+    if (success) {
+      setSelectedEvent(null);
+      setConfirmAction(null);
+      setPendingKey(null);
+    }
+  };
+
+  const lifecycleLabel = (event) => event.deleted_at
+    ? 'En papelera'
+    : event.archived_at ? 'Archivado' : 'Activo';
+
+  const canEditEvent = (event) => !event.archived_at && !event.deleted_at
+    && !['cancelled', 'finished'].includes(event.event_status);
+
 
   const eventsForDate = (dateKey) => orderedEvents.filter((event) => eventOccursOnDate(event, dateKey, timeZone));
   const allDayEvents = eventsForDate(activeDate).filter((event) => event.temporal_kind === 'all_day');
