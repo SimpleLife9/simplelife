@@ -125,7 +125,11 @@ export async function handleRequest(
 
   try {
     const eventDraft = createEventDraft(input.event);
-    const intent = await hashEventCreateIntent(eventDraft);
+    const intent = await hashEventCreateIntent(
+      eventDraft,
+      undefined,
+      input.protectedTimeDecisions ?? [],
+    );
 
     // Fast replay path: no IANA resolution, new Event ID or mutable resolver
     // metadata is needed once the original committed receipt exists.
