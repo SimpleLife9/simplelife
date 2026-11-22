@@ -164,6 +164,25 @@ BEGIN
     RAISE EXCEPTION 'Concurrent create retry must replay the winning schedule identity';
   END IF;
 
+  -- A new active reservation changes the owner snapshot. An empty/stale
+  -- snapshot must be rejected after the shared advisory lock is acquired.
+  SELECT * INTO v_result
+  FROM public.mutate_task_schedule_once(
+    '019a0000-0000-7000-8000-000000000001',
+    '019a0000-0000-7000-8000-000000000104',
+    '019a0000-0000-7000-8000-000000000210',
+    'task-schedule-mutation-v1',
+    repeat('9', 64),
+    NULL,
+    'create',
+    v_patch,
+    clock_timestamp()
+  );
+  IF v_result.http_status <> 409
+     OR v_result.response_body->>'error' <> 'TASK_SCHEDULE_CONFLICTS_CHANGED' THEN
+    RAISE EXCEPTION 'A stale conflict snapshot must return TASK_SCHEDULE_CONFLICTS_CHANGED';
+  END IF;
+
   SELECT updated_at INTO v_updated_at
   FROM public.task_schedule
   WHERE id = '019a0000-0000-7000-8000-000000000101'
