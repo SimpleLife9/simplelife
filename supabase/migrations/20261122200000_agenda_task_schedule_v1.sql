@@ -351,7 +351,7 @@ BEGIN
         USING ERRCODE = '40001';
     END IF;
 
-    IF v_existing.task_schedule_id IS DISTINCT FROM p_task_schedule_id
+    IF (v_existing.task_schedule_id IS DISTINCT FROM p_task_schedule_id AND p_mutation <> 'create')
        OR v_existing.payload_version IS DISTINCT FROM p_payload_version
        OR v_existing.payload_hash IS DISTINCT FROM v_payload_hash THEN
       RETURN QUERY SELECT 409, jsonb_build_object('error', 'IDEMPOTENCY_KEY_REUSED'), false;
