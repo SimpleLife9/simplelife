@@ -48,6 +48,8 @@ async function mockSupabaseSession(page, initialData = {}) {
   const insertedTasks = [];
   const updatedTasks = [];
   const calendarEvents = [...(initialData.calendarEvents || [])];
+  const protectedTimeBlocks = [...(initialData.protectedTimeBlocks || [])];
+  const protectedTimeMutationRequests = [];
   const insertedAgendaEvents = [];
   const idempotencyRequests = [];
   const mutationRequests = [];
@@ -188,6 +190,22 @@ async function mockSupabaseSession(page, initialData = {}) {
 
     if (url.pathname === '/rest/v1/user_preference' && method === 'GET') {
       await json(200, preference);
+      return;
+    }
+
+    if (url.pathname === '/rest/v1/protected_time_block' && method === 'GET') {
+      const archivedFilter = url.searchParams.get('archived_at') || '';
+      const deletedFilter = url.searchParams.get('deleted_at') || '';
+      const rows = protectedTimeBlocks.filter((row) => {
+        const archivedMatch = archivedFilter === 'not.is.null'
+          ? row.archived_at != null
+          : archivedFilter === 'is.null' ? row.archived_at == null : true;
+        const deletedMatch = deletedFilter === 'not.is.null'
+          ? row.deleted_at != null
+          : deletedFilter === 'is.null' ? row.deleted_at == null : true;
+        return archivedMatch && deletedMatch;
+      });
+      await json(200, rows);
       return;
     }
 
@@ -590,6 +608,93 @@ async function mockSupabaseSession(page, initialData = {}) {
       return;
     }
 
+    if (url.pathname === '/functions/v1/agenda-protected-time-mutate' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const key = request.headers()['idempotency-key'] || '';
+      protectedTimeMutationRequests.push({ key, payload });
+      const now = new Date(Date.now() + protectedTimeMutationRequests.length * 3).toISOString();
+      let row = payload.action === 'create'
+        ? null
+        : protectedTimeBlocks.find((item) => item.id === payload.blockId && item.owner_user_id === profile.id);
+      if (payload.action !== 'create' && !row) {
+        await json(404, { error: 'PROTECTED_TIME_BLOCK_NOT_FOUND' });
+        return;
+      }
+      if (payload.action === 'create') {
+        const block = payload.block;
+        row = {
+          id: '0190f47a-7b2c-7abc-8def-0123456789d1',
+          owner_user_id: profile.id,
+          created_by_user_id: profile.id,
+          updated_by_user_id: profile.id,
+          label: block.label,
+          category: block.category ?? null,
+          protection_mode: block.protectionMode,
+          pattern_kind: block.patternKind,
+          time_zone: block.timeZone,
+          start_local: block.startLocalDateTime ?? null,
+          end_local: block.endLocalDateTime ?? null,
+          starts_at: block.patternKind === 'one_off' ? '2026-11-23T14:00:00.000Z' : null,
+          ends_at: block.patternKind === 'one_off' ? '2026-11-23T15:00:00.000Z' : null,
+          start_disambiguation: block.startDisambiguation ?? null,
+          end_disambiguation: block.endDisambiguation ?? null,
+          start_gap_strategy: block.patternKind === 'one_off' ? 'next-valid' : null,
+          end_gap_strategy: block.patternKind === 'one_off' ? 'next-valid' : null,
+          start_date: block.startDate ?? null,
+          end_date_exclusive: block.endDateExclusive ?? null,
+          weekdays: block.weekdays ?? null,
+          start_time_local: block.startLocalTime ?? null,
+          end_time_local: block.endLocalTime ?? null,
+          ends_next_day: block.endsNextDay ?? null,
+          resolver_metadata: { rulesSource: 'iana-tzdb', rulesVersion: '2026f', resolverVersion: 'agenda-iana-resolver-v1', authoritative: true },
+          archived_at: null,
+          deleted_at: null,
+          created_at: now,
+          updated_at: now,
+        };
+        protectedTimeBlocks.unshift(row);
+      } else {
+        if (row.updated_at !== payload.expectedUpdatedAt) {
+          await json(409, { error: 'PROTECTED_TIME_VERSION_CONFLICT' });
+          return;
+        }
+        if (payload.action === 'edit') {
+          const block = payload.block;
+          Object.assign(row, {
+            label: block.label,
+            category: block.category ?? null,
+            protection_mode: block.protectionMode,
+            pattern_kind: block.patternKind,
+            time_zone: block.timeZone,
+            start_local: block.startLocalDateTime ?? null,
+            end_local: block.endLocalDateTime ?? null,
+            start_disambiguation: block.startDisambiguation ?? null,
+            end_disambiguation: block.endDisambiguation ?? null,
+            start_date: block.startDate ?? null,
+            end_date_exclusive: block.endDateExclusive ?? null,
+            weekdays: block.weekdays ?? null,
+            start_time_local: block.startLocalTime ?? null,
+            end_time_local: block.endLocalTime ?? null,
+            ends_next_day: block.endsNextDay ?? null,
+          });
+        } else if (payload.action === 'archive') {
+          row.archived_at = now;
+        } else if (payload.action === 'restore') {
+          row.archived_at = null;
+          row.deleted_at = null;
+        } else if (payload.action === 'delete') {
+          row.archived_at = null;
+          row.deleted_at = now;
+        }
+        row.updated_at = now;
+        row.updated_by_user_id = profile.id;
+      }
+      await json(payload.action === 'create' ? 201 : 200, {
+        blockId: row.id, updatedAt: row.updated_at, lifecycle: row.deleted_at ? 'trash' : row.archived_at ? 'archived' : 'active', replayed: false,
+      });
+      return;
+    }
+
     if (url.pathname === '/functions/v1/agenda-event-mutate' && method === 'POST') {
       const payload = request.postDataJSON();
       const key = request.headers()['idempotency-key'] || '';
@@ -705,7 +810,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     await json(404, { message: `Unexpected mocked Supabase request: ${method} ${url.pathname}` });
   });
 
-  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
+  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, protectedTimeBlocks, protectedTimeMutationRequests, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
 }
 
 test('mock-authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
@@ -2809,4 +2914,144 @@ test('Agenda editing preserves the original zoned-civil seconds and milliseconds
     starts_at: timedEvent.starts_at,
     ends_at: timedEvent.ends_at,
   });
+});
+
+
+test('Agenda crea, edita, archiva, restaura y envía a papelera bloques semanales por el writer autenticado', async ({ page }) => {
+  const { protectedTimeBlocks, protectedTimeMutationRequests } = await mockSupabaseSession(page);
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.getByRole('navigation', { name: 'Navegación principal' })
+    .getByRole('button', { name: /Agenda/ }).click();
+  await page.getByRole('button', { name: 'Tiempo protegido', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Tiempo protegido' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Nuevo bloque' }).click();
+  const createDialog = page.getByRole('dialog', { name: 'Proteger tiempo' });
+  await createDialog.getByLabel('Nombre del bloque').fill('Entrenamiento matutino');
+  await createDialog.getByLabel('Categoría (opcional)').fill('Salud');
+  await createDialog.getByLabel('Protección').selectOption('flexible');
+  await createDialog.getByLabel('Patrón').selectOption('weekly');
+  await createDialog.getByLabel('Hora de inicio').fill('07:00');
+  await createDialog.getByLabel('Hora de fin').fill('08:15');
+  await createDialog.getByLabel('Termina al día siguiente').uncheck();
+  await createDialog.getByRole('button', { name: 'Guardar bloque' }).click();
+
+  await expect(page.getByText('Tiempo protegido guardado.')).toBeVisible();
+  await expect(createDialog).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Entrenamiento matutino' })).toBeVisible();
+  expect(protectedTimeBlocks).toHaveLength(1);
+  expect(protectedTimeBlocks[0]).toMatchObject({
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    updated_by_user_id: profile.id,
+    label: 'Entrenamiento matutino',
+    category: 'Salud',
+    protection_mode: 'flexible',
+    pattern_kind: 'weekly',
+    time_zone: 'America/Havana',
+    weekdays: [1, 2, 3, 4, 5],
+    start_time_local: '07:00',
+    end_time_local: '08:15',
+    ends_next_day: false,
+  });
+  expect(protectedTimeMutationRequests[0].payload.action).toBe('create');
+  expect(protectedTimeMutationRequests[0].key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  const initialUpdatedAt = protectedTimeBlocks[0].updated_at;
+
+  let card = page.locator('.protected-time-card').filter({ hasText: 'Entrenamiento matutino' });
+  await card.getByRole('button', { name: 'Editar' }).click();
+  const editDialog = page.getByRole('dialog', { name: 'Editar tiempo protegido' });
+  await editDialog.getByLabel('Nombre del bloque').fill('Entrenamiento actualizado');
+  await editDialog.getByRole('button', { name: 'Guardar cambios' }).click();
+  await expect(page.getByText('Tiempo protegido actualizado.')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Entrenamiento actualizado' })).toBeVisible();
+  expect(protectedTimeMutationRequests[1].payload).toMatchObject({
+    action: 'edit',
+    blockId: protectedTimeBlocks[0].id,
+    expectedUpdatedAt: initialUpdatedAt,
+    block: { label: 'Entrenamiento actualizado', patternKind: 'weekly' },
+  });
+
+  card = page.locator('.protected-time-card').filter({ hasText: 'Entrenamiento actualizado' });
+  await card.getByRole('button', { name: 'Archivar' }).click();
+  const archiveDialog = page.getByRole('alertdialog', { name: 'Archivar bloque' });
+  await archiveDialog.getByRole('button', { name: 'Archivar', exact: true }).click();
+  await expect(page.getByText('Bloque archivado.')).toBeVisible();
+  expect(protectedTimeBlocks[0].archived_at).not.toBeNull();
+
+  const lifecycle = page.getByRole('navigation', { name: 'Estado de los bloques protegidos' });
+  await lifecycle.getByRole('button', { name: 'Archivados' }).click();
+  card = page.locator('.protected-time-card').filter({ hasText: 'Entrenamiento actualizado' });
+  await card.getByRole('button', { name: 'Restaurar' }).click();
+  await expect(page.getByText('Bloque restaurado.')).toBeVisible();
+  expect(protectedTimeBlocks[0].archived_at).toBeNull();
+
+  await lifecycle.getByRole('button', { name: 'Activos' }).click();
+  card = page.locator('.protected-time-card').filter({ hasText: 'Entrenamiento actualizado' });
+  await card.getByRole('button', { name: 'Papelera' }).click();
+  const deleteDialog = page.getByRole('alertdialog', { name: 'Enviar a papelera' });
+  await deleteDialog.getByRole('button', { name: 'Mover a papelera' }).click();
+  await expect(page.getByText('Bloque enviado a la papelera.')).toBeVisible();
+  expect(protectedTimeBlocks[0].deleted_at).not.toBeNull();
+
+  await lifecycle.getByRole('button', { name: 'Papelera' }).click();
+  card = page.locator('.protected-time-card').filter({ hasText: 'Entrenamiento actualizado' });
+  await card.getByRole('button', { name: 'Restaurar' }).click();
+  await expect(page.getByText('Bloque restaurado.')).toBeVisible();
+  expect(protectedTimeBlocks[0].deleted_at).toBeNull();
+
+  expect(protectedTimeMutationRequests.map((item) => item.payload.action)).toEqual([
+    'create', 'edit', 'archive', 'restore', 'delete', 'restore',
+  ]);
+  expect(new Set(protectedTimeMutationRequests.map((item) => item.key)).size).toBe(protectedTimeMutationRequests.length);
+});
+
+test('Tiempo protegido funciona en móvil a 390px sin desbordar el documento', async ({ page }) => {
+  const today = await todayInBrowserHavana(page);
+  await mockSupabaseSession(page, {
+    protectedTimeBlocks: [{
+      id: '0190f47a-7b2c-7abc-8def-0123456789d2',
+      owner_user_id: profile.id,
+      created_by_user_id: profile.id,
+      updated_by_user_id: profile.id,
+      label: 'Descanso nocturno',
+      category: 'Salud',
+      protection_mode: 'hard',
+      pattern_kind: 'weekly',
+      time_zone: 'America/Havana',
+      start_local: null,
+      end_local: null,
+      starts_at: null,
+      ends_at: null,
+      start_date: today,
+      end_date_exclusive: null,
+      weekdays: [1, 2, 3, 4, 5, 6, 7],
+      start_time_local: '22:00:00',
+      end_time_local: '06:30:00',
+      ends_next_day: true,
+      resolver_metadata: { rulesSource: 'iana-tzdb', rulesVersion: '2026f', resolverVersion: 'agenda-iana-resolver-v1', authoritative: true },
+      archived_at: null,
+      deleted_at: null,
+      created_at: '2026-11-22T18:00:00.000Z',
+      updated_at: '2026-11-22T18:00:00.000Z',
+    }],
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.getByRole('navigation', { name: 'Navegación móvil' })
+    .getByRole('button', { name: /Agenda/ }).click();
+  await page.getByRole('button', { name: 'Tiempo protegido', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Descanso nocturno' })).toBeVisible();
+  const dimensions = await page.evaluate(() => ({
+    viewport: document.documentElement.clientWidth,
+    document: document.documentElement.scrollWidth,
+  }));
+  expect(dimensions.document).toBeLessThanOrEqual(dimensions.viewport + 1);
+  await expect(page.getByRole('button', { name: 'Nuevo bloque' })).toBeVisible();
 });
