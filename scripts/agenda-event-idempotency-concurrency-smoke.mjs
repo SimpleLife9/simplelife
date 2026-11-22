@@ -43,7 +43,7 @@ function eventRecord(eventId, title) {
 function resultQuery(key, payloadHash, record) {
   const json = JSON.stringify(record).replaceAll("'", "''");
   return [
-    "SELECT r.http_status::text || '|' || r.response_body::text || '|' || r.replayed::text",
+    "SELECT r.http_status::text || '|' || r.response_body::text || '|' || CASE WHEN r.replayed THEN 'true' ELSE 'false' END",
     "FROM public.create_calendar_event_once(",
     "'" + OWNER_ID + "'::uuid,",
     "'" + key + "'::uuid,",
