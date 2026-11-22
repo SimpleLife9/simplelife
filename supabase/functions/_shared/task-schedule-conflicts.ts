@@ -355,7 +355,10 @@ export async function assessOwnerTaskScheduleConflicts({
         ? "TASK_SCHEDULE_CONFLICTS"
         : !protectedDecisionResult.ok
           ? "PROTECTED_TIME_CONFLICTS"
-          : "TASK_SCHEDULE_OVERLAPS",
+          : !taskScheduleDecisionResult.ok && taskScheduleConflicts.length === 0
+            && Array.isArray(suppliedTaskScheduleDecisions) && suppliedTaskScheduleDecisions.length > 0
+            ? "TASK_SCHEDULE_CONFLICTS_CHANGED"
+            : "TASK_SCHEDULE_OVERLAPS",
       eventConflicts,
       protectedTimeConflicts: protectedAssessment.conflicts,
       taskScheduleConflicts,
