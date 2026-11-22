@@ -2915,3 +2915,142 @@ test('Agenda editing preserves the original zoned-civil seconds and milliseconds
     ends_at: timedEvent.ends_at,
   });
 });
+
+
+test('Agenda crea, edita, archiva, restaura y envía a papelera bloques semanales por el writer autenticado', async ({ page }) => {
+  const { protectedTimeBlocks, protectedTimeMutationRequests } = await mockSupabaseSession(page);
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.getByRole('navigation', { name: 'Navegación principal' })
+    .getByRole('button', { name: /Agenda/ }).click();
+  await page.getByRole('button', { name: 'Tiempo protegido', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Tiempo protegido' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Nuevo bloque' }).click();
+  const createDialog = page.getByRole('dialog', { name: 'Proteger tiempo' });
+  await createDialog.getByLabel('Nombre del bloque').fill('Entrenamiento matutino');
+  await createDialog.getByLabel('Categoría (opcional)').fill('Salud');
+  await createDialog.getByLabel('Protección').selectOption('flexible');
+  await createDialog.getByLabel('Patrón').selectOption('weekly');
+  await createDialog.getByLabel('Hora de inicio').fill('07:00');
+  await createDialog.getByLabel('Hora de fin').fill('08:15');
+  await createDialog.getByLabel('Termina al día siguiente').uncheck();
+  await createDialog.getByRole('button', { name: 'Guardar bloque' }).click();
+
+  await expect(page.getByText('Tiempo protegido guardado.')).toBeVisible();
+  await expect(createDialog).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Entrenamiento matutino' })).toBeVisible();
+  expect(protectedTimeBlocks).toHaveLength(1);
+  expect(protectedTimeBlocks[0]).toMatchObject({
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    updated_by_user_id: profile.id,
+    label: 'Entrenamiento matutino',
+    category: 'Salud',
+    protection_mode: 'flexible',
+    pattern_kind: 'weekly',
+    time_zone: 'America/Havana',
+    weekdays: [1, 2, 3, 4, 5],
+    start_time_local: '07:00',
+    end_time_local: '08:15',
+    ends_next_day: false,
+  });
+  expect(protectedTimeMutationRequests[0].payload.action).toBe('create');
+  expect(protectedTimeMutationRequests[0].key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+
+  let card = page.locator('.protected-time-card').filter({ hasText: 'Entrenamiento matutino' });
+  await card.getByRole('button', { name: 'Editar' }).click();
+  const editDialog = page.getByRole('dialog', { name: 'Editar tiempo protegido' });
+  await editDialog.getByLabel('Nombre del bloque').fill('Entrenamiento actualizado');
+  await editDialog.getByRole('button', { name: 'Guardar cambios' }).click();
+  await expect(page.getByText('Tiempo protegido actualizado.')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Entrenamiento actualizado' })).toBeVisible();
+  expect(protectedTimeMutationRequests[1].payload).toMatchObject({
+    action: 'edit',
+    blockId: protectedTimeBlocks[0].id,
+    expectedUpdatedAt: '2026-11-22T18:00:00.000Z',
+    block: { label: 'Entrenamiento actualizado', patternKind: 'weekly' },
+  });
+
+  card = page.locator('.protected-time-card').filter({ hasText: 'Entrenamiento actualizado' });
+  await card.getByRole('button', { name: 'Archivar' }).click();
+  const archiveDialog = page.getByRole('alertdialog', { name: 'Archivar bloque' });
+  await archiveDialog.getByRole('button', { name: 'Archivar', exact: true }).click();
+  await expect(page.getByText('Bloque archivado.')).toBeVisible();
+  expect(protectedTimeBlocks[0].archived_at).not.toBeNull();
+
+  const lifecycle = page.getByRole('navigation', { name: 'Estado de los bloques protegidos' });
+  await lifecycle.getByRole('button', { name: 'Archivados' }).click();
+  card = page.locator('.protected-time-card').filter({ hasText: 'Entrenamiento actualizado' });
+  await card.getByRole('button', { name: 'Restaurar' }).click();
+  await expect(page.getByText('Bloque restaurado.')).toBeVisible();
+  expect(protectedTimeBlocks[0].archived_at).toBeNull();
+
+  await lifecycle.getByRole('button', { name: 'Activos' }).click();
+  card = page.locator('.protected-time-card').filter({ hasText: 'Entrenamiento actualizado' });
+  await card.getByRole('button', { name: 'Papelera' }).click();
+  const deleteDialog = page.getByRole('alertdialog', { name: 'Enviar a papelera' });
+  await deleteDialog.getByRole('button', { name: 'Mover a papelera' }).click();
+  await expect(page.getByText('Bloque enviado a la papelera.')).toBeVisible();
+  expect(protectedTimeBlocks[0].deleted_at).not.toBeNull();
+
+  await lifecycle.getByRole('button', { name: 'Papelera' }).click();
+  card = page.locator('.protected-time-card').filter({ hasText: 'Entrenamiento actualizado' });
+  await card.getByRole('button', { name: 'Restaurar' }).click();
+  await expect(page.getByText('Bloque restaurado.')).toBeVisible();
+  expect(protectedTimeBlocks[0].deleted_at).toBeNull();
+
+  expect(protectedTimeMutationRequests.map((item) => item.payload.action)).toEqual([
+    'create', 'edit', 'archive', 'restore', 'delete', 'restore',
+  ]);
+  expect(new Set(protectedTimeMutationRequests.map((item) => item.key)).size).toBe(protectedTimeMutationRequests.length);
+});
+
+test('Tiempo protegido funciona en móvil a 390px sin desbordar el documento', async ({ page }) => {
+  const today = await todayInBrowserHavana(page);
+  await mockSupabaseSession(page, {
+    protectedTimeBlocks: [{
+      id: '0190f47a-7b2c-7abc-8def-0123456789d2',
+      owner_user_id: profile.id,
+      created_by_user_id: profile.id,
+      updated_by_user_id: profile.id,
+      label: 'Descanso nocturno',
+      category: 'Salud',
+      protection_mode: 'hard',
+      pattern_kind: 'weekly',
+      time_zone: 'America/Havana',
+      start_local: null,
+      end_local: null,
+      starts_at: null,
+      ends_at: null,
+      start_date: today,
+      end_date_exclusive: null,
+      weekdays: [1, 2, 3, 4, 5, 6, 7],
+      start_time_local: '22:00:00',
+      end_time_local: '06:30:00',
+      ends_next_day: true,
+      resolver_metadata: { rulesSource: 'iana-tzdb', rulesVersion: '2026f', resolverVersion: 'agenda-iana-resolver-v1', authoritative: true },
+      archived_at: null,
+      deleted_at: null,
+      created_at: '2026-11-22T18:00:00.000Z',
+      updated_at: '2026-11-22T18:00:00.000Z',
+    }],
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.getByRole('navigation', { name: 'Navegación móvil' })
+    .getByRole('button', { name: /Agenda/ }).click();
+  await page.getByRole('button', { name: 'Tiempo protegido', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Descanso nocturno' })).toBeVisible();
+  const dimensions = await page.evaluate(() => ({
+    viewport: document.documentElement.clientWidth,
+    document: document.documentElement.scrollWidth,
+  }));
+  expect(dimensions.document).toBeLessThanOrEqual(dimensions.viewport + 1);
+  await expect(page.getByRole('button', { name: 'Nuevo bloque' })).toBeVisible();
+});
