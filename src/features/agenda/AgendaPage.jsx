@@ -14,7 +14,7 @@ import {
   startOfWeekMonday,
 } from './domain/calendar-view.js';
 import { createEventDraft } from './domain/event.js';
-import { formatInstantInTimeZone } from './domain/temporal.js';
+import { formatInstantInTimeZone, isSupportedTimeZone } from './domain/temporal.js';
 import './AgendaPage.css';
 
 const DEFAULT_TIME_ZONE = 'America/Havana';
@@ -52,7 +52,8 @@ function getPeriodTitle(view, dateKey) {
     return formatDate(first, { day: 'numeric', month: 'short' })
       + ' — ' + formatDate(last, { day: 'numeric', month: 'short', year: 'numeric' });
   }
-  return formatDate(dateKey.slice(0, 7) + '-01', { month: 'long', year: 'numeric' });
+  return new Intl.DateTimeFormat('es', { month: 'long', year: 'numeric', timeZone: 'UTC' })
+    .format(dateAtUtcNoon(dateKey.slice(0, 7) + '-01'));
 }
 
 function statusLabel(status) {
@@ -168,6 +169,10 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
         return;
       }
       if (data?.time_zone) {
+        if (!isSupportedTimeZone(data.time_zone)) {
+          setTimeZoneNotice('Tu preferencia de zona horaria no es válida; se usa America/Havana.');
+          return;
+        }
         setTimeZone(data.time_zone);
         setEventTimeZone(data.time_zone);
       }
@@ -206,12 +211,6 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
   const today = todayInZone(timeZone);
   const activeDate = selectedDate || today;
   const orderedEvents = useMemo(() => sortEventsForCalendar(events, timeZone), [events, timeZone]);
-  const window = useMemo(() => getCalendarWindow(view, activeDate), [view, activeDate]);
-  const visibleEvents = useMemo(() => orderedEvents.filter((event) => {
-    const range = getCalendarEventRange(event, timeZone);
-    return range.startDate < window.endDateExclusive && range.endDateExclusive > window.startDate;
-  }), [orderedEvents, timeZone, window]);
-
   const openComposer = () => {
     setTitle('');
     setDescription('');
@@ -262,7 +261,7 @@ export function AgendaPage({ profile, refreshKey, runAction, busy }) {
           startLocalDateTime,
           endLocalDateTime,
           startDisambiguation: 'earlier',
-          endDisambiguation: 'later',
+          endDisambiguation: 'earlier',
           startGapStrategy: 'next-valid',
           endGapStrategy: 'next-valid',
         };
