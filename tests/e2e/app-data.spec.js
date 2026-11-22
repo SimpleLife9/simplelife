@@ -302,6 +302,7 @@ async function mockSupabaseSession(page, initialData = {}) {
 
     if (url.pathname === '/rest/v1/task' && method === 'GET') {
       const idFilter = url.searchParams.get('id') || '';
+      const includedIds = idFilter.startsWith('in.(') ? idFilter.slice(4, -1).split(',') : [];
       const statusFilter = url.searchParams.get('status') || '';
       const archivedFilter = url.searchParams.get('archived_at') || '';
       const deletedFilter = url.searchParams.get('deleted_at') || '';
@@ -313,7 +314,7 @@ async function mockSupabaseSession(page, initialData = {}) {
         ? statusFilter.slice(4, -1).split(',')
         : [];
       const rows = taskRows.filter((task) => !task.deleted_at
-        && (!idFilter || idFilter === 'eq.' + task.id)
+        && (!idFilter || idFilter === 'eq.' + task.id || includedIds.includes(task.id))
         && (!deletedFilter || deletedFilter !== 'is.null' || task.deleted_at == null)
         && (!archivedFilter || (archivedFilter === 'is.null' && task.archived_at == null) || (archivedFilter === 'not.is.null' && task.archived_at != null))
         && (!statusEquals || task.status === statusEquals)
@@ -2744,8 +2745,35 @@ test('Agenda navigates day, week and month views and creates a confirmed all-day
     created_at: '2026-11-22T17:00:00.000Z',
     updated_at: '2026-11-22T17:00:00.000Z',
   }];
+  const scheduledTask = {
+    id: '019a0000-0000-7000-8000-000000000521',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    action: 'Preparar informe semanal',
+    description: 'Reserva visible en el calendario.',
+    status: 'todo',
+    due_date: tomorrow,
+    priority: 2,
+    archived_at: null,
+    deleted_at: null,
+  };
+  const seedTaskSchedule = {
+    id: '019a0000-0000-7000-8000-000000000522',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    updated_by_user_id: profile.id,
+    task_id: scheduledTask.id,
+    schedule_status: 'confirmed',
+    start_local: today + 'T10:00:00',
+    end_local: today + 'T11:00:00',
+    time_zone: 'America/Havana',
+    starts_at: today + 'T15:00:00.000Z',
+    ends_at: today + 'T16:00:00.000Z',
+  };
   const { calendarEvents, insertedAgendaEvents, idempotencyRequests } = await mockSupabaseSession(page, {
     calendarEvents: seedEvents,
+    tasks: [scheduledTask],
+    taskSchedules: [seedTaskSchedule],
   });
   await page.goto('/');
   await page.getByLabel('Correo electrónico').fill(authUser.email);
@@ -2756,14 +2784,17 @@ test('Agenda navigates day, week and month views and creates a confirmed all-day
   await sideNavigation.getByRole('button', { name: /Agenda/ }).click();
   await expect(page.locator('.page-heading h1')).toHaveText('Agenda');
   await expect(page.getByText('Día de familia')).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Tarea reservada: Preparar informe semanal' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Día', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Agenda diaria' })).toBeVisible();
   await expect(page.getByRole('button', { name: /Día de familia/ })).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Tarea reservada: Preparar informe semanal' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Mes', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Agenda mensual' })).toBeVisible();
   await expect(page.getByText('Día de familia')).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Tarea reservada: Preparar informe semanal' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Nuevo evento' }).click();
   const dialog = page.getByRole('dialog', { name: 'Crear evento' });
