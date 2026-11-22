@@ -1,4 +1,5 @@
 import { handleRequest } from "../supabase/functions/agenda-protected-time-mutate/handler.ts";
+import { resolveLocalDateTimeRange } from "../supabase/functions/agenda-time-resolve/resolver.ts";
 import type { EventAuthenticatedContext } from "../supabase/functions/_shared/agenda-event-profile.ts";
 import {
   buildProtectedTimeBlockPatch,
@@ -304,4 +305,17 @@ Deno.test("an inactive profile cannot write Protected Time", async () => {
   assertEquals(response.status, 401, "unauthenticated status");
   assertEquals(calls.ledgerLookup, 0, "no ledger access");
   assertEquals(calls.rpc, 0, "no write");
+});
+
+Deno.test("allows an explicit one-hour interval across the repeated DST wall-clock time", () => {
+  const draft = normalizeProtectedTimeBlock(oneOff({
+    timeZone: "America/New_York",
+    startLocalDateTime: "2026-11-01T01:30",
+    endLocalDateTime: "2026-11-01T01:30",
+    startDisambiguation: "earlier",
+    endDisambiguation: "later",
+  }));
+  const resolved = resolveLocalDateTimeRange(buildProtectedTimeResolutionRequest(draft));
+  assert(Date.parse(resolved.endsAt) > Date.parse(resolved.startsAt), "resolved fold interval must have positive duration");
+  assertEquals(resolved.start.offset === resolved.end.offset, false, "DST fold endpoints use the two distinct offsets");
 });
