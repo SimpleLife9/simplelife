@@ -174,7 +174,7 @@ Deno.test("a timed Event overlap requires an explicit version-bound keep choice"
     title: "Reunión",
     event_status: "confirmed",
     temporal_kind: "fixed_instant",
-    starts_at: "2026-11-24T14:30:00.000Z",
+    starts_at: "2026-11-24T13:30:00.000Z",
     ends_at: "2026-11-24T15:30:00.000Z",
   };
   const missing = mockContext({ events: [event] });
@@ -212,7 +212,7 @@ Deno.test("a hard Protected Time overlap requires its per-occurrence override de
     protection_mode: "hard",
     pattern_kind: "one_off",
     time_zone: "America/Havana",
-    starts_at: "2026-11-24T14:30:00.000Z",
+    starts_at: "2026-11-24T13:30:00.000Z",
     ends_at: "2026-11-24T15:30:00.000Z",
     archived_at: null,
     deleted_at: null,
@@ -294,7 +294,7 @@ Deno.test("a weekly protected-time rule is expanded using IANA time for TaskSche
     protectedTimeDecisions: [{
       blockId: BLOCK_ID,
       blockUpdatedAt: VERSION,
-      occurrenceStartsAt: "2026-11-24T14:30:00.000Z",
+      occurrenceStartsAt: "2026-11-24T13:30:00.000Z",
       decision: "keep_flexible",
     }],
   }), "019a0000-0000-7000-8000-000000000204"), accepted.ctx, {
