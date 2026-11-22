@@ -174,3 +174,30 @@ test('only explicit overlap choices and known Protected Time decisions are accep
     protectedTimeDecisions: [{ blockId: SCHEDULE_ID, blockUpdatedAt: VERSION, occurrenceStartsAt: VERSION, decision: 'ignore' }],
   })));
 });
+
+test('TaskSchedule overlap consent is strict, version-bound and part of the idempotency intent', async () => {
+  const decision = {
+    taskScheduleId: '019a0000-0000-7000-8000-000000000106',
+    taskScheduleUpdatedAt: VERSION,
+    decision: 'keep_overlap',
+  };
+  const withoutConsent = normalizeTaskScheduleMutation(createInput());
+  const withConsent = normalizeTaskScheduleMutation(createInput({
+    taskScheduleDecisions: [decision],
+  }));
+  assert.equal(withConsent.taskScheduleDecisions.length, 1);
+  assert.equal(withConsent.taskScheduleDecisions[0].decision, 'keep_overlap');
+  assert.notEqual(
+    (await hashTaskScheduleMutationIntent(withoutConsent)).payloadHash,
+    (await hashTaskScheduleMutationIntent(withConsent)).payloadHash,
+  );
+  assert.throws(() => normalizeTaskScheduleMutation(createInput({
+    taskScheduleDecisions: [{ ...decision, decision: 'silently_move' }],
+  })));
+  assert.throws(() => normalizeTaskScheduleMutation(createInput({
+    taskScheduleDecisions: [{ ...decision, taskScheduleUpdatedAt: 'not-a-version' }],
+  })));
+  assert.throws(() => normalizeTaskScheduleMutation(createInput({
+    taskScheduleDecisions: [decision, decision],
+  })));
+});
