@@ -31,12 +31,20 @@ function resolverResponse(batch) {
     endsAt: '2026-10-30T14:00:00.000Z',
     start: {
       requestedLocalDateTime: range.start.localDateTime,
-      resolvedLocalDateTime: range.start.localDateTime + ':00.000',
+      resolvedLocalDateTime: range.start.localDateTime,
+      timeZone: range.timeZone,
+      instant: '2026-10-30T13:00:00.000Z',
+      rulesVersion: '2026f',
+      resolverVersion: 'agenda-iana-resolver-v1',
       resolution: 'exact',
     },
     end: {
       requestedLocalDateTime: range.end.localDateTime,
-      resolvedLocalDateTime: range.end.localDateTime + ':00.000',
+      resolvedLocalDateTime: range.end.localDateTime,
+      timeZone: range.timeZone,
+      instant: '2026-10-30T14:00:00.000Z',
+      rulesVersion: '2026f',
+      resolverVersion: 'agenda-iana-resolver-v1',
       resolution: 'exact',
     },
     rulesSource: 'iana-tzdb',
@@ -58,7 +66,7 @@ test('the resolver adapter splits timed occurrences into ordered batches of at m
   const occurrences = Array.from({ length: 53 }, (_, index) => timedOccurrence(index));
   const endByOccurrenceKey = Object.fromEntries(occurrences.map((item) => [
     item.occurrenceKey,
-    '2026-10-30T10:00',
+    `${item.actualLocalDate}T10:00`,
   ]));
   const plan = planOccurrenceResolutionBatches({ occurrences, endByOccurrenceKey });
 
@@ -85,7 +93,7 @@ test('all-day occurrences remain date-only and never enter a resolver batch', ()
   const timed = timedOccurrence(0);
   const plan = planOccurrenceResolutionBatches({
     occurrences: [allDay, timed],
-    endByOccurrenceKey: { [timed.occurrenceKey]: '2026-10-30T10:00' },
+    endByOccurrenceKey: { [timed.occurrenceKey]: `${timed.actualLocalDate}T10:00` },
   });
 
   assert.equal(plan.allDayOccurrences.length, 1);
@@ -145,7 +153,7 @@ test('end local date-time is required explicitly; duration is not silently conve
 
 test('planner rejects duplicate keys, unused end endpoints and batch limits above 25', () => {
   const occurrence = timedOccurrence(0);
-  const end = { [occurrence.occurrenceKey]: '2026-10-30T10:00' };
+  const end = { [occurrence.occurrenceKey]: `${occurrence.actualLocalDate}T10:00` };
   assert.throws(() => planOccurrenceResolutionBatches({
     occurrences: [occurrence, occurrence],
     endByOccurrenceKey: end,
@@ -165,7 +173,7 @@ test('joining attaches authoritative UTC and TZDB metadata to stable occurrence 
   const occurrences = [timedOccurrence(0), timedOccurrence(1)];
   const plan = planOccurrenceResolutionBatches({
     occurrences,
-    endByOccurrenceKey: Object.fromEntries(occurrences.map((item) => [item.occurrenceKey, '2026-10-30T10:00'])),
+    endByOccurrenceKey: Object.fromEntries(occurrences.map((item) => [item.occurrenceKey, `${item.actualLocalDate}T10:00`])),
   });
   const joined = joinOccurrenceResolutionBatch(plan.batches[0], resolverResponse(plan.batches[0]));
 
