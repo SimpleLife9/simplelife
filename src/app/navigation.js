@@ -1,5 +1,6 @@
 export const NAV = [
   { id: 'today', label: 'Hoy', icon: '☀️' },
+  { id: 'agenda', label: 'Agenda', icon: '◷' },
   { id: 'inbox', label: 'Inbox', icon: '↳' },
   { id: 'goals', label: 'Objetivos', icon: '◎' },
   { id: 'projects', label: 'Proyectos', icon: '▤' },
@@ -9,8 +10,10 @@ export const NAV = [
 export function getPageTitle(activePage, morePage) {
   return activePage === 'today'
     ? 'Hoy'
-    : activePage === 'inbox'
-      ? 'Inbox'
+    : activePage === 'agenda'
+      ? 'Agenda'
+      : activePage === 'inbox'
+        ? 'Inbox'
       : activePage === 'goals'
         ? 'Objetivos'
         : activePage === 'projects'
@@ -19,6 +22,7 @@ export function getPageTitle(activePage, morePage) {
 }
 
 export function getPageDescription(activePage, morePage) {
+  if (activePage === 'agenda') return 'Tus compromisos, tu tiempo y tu día en un solo lugar.';
   if (activePage === 'inbox') return 'Captura primero. Organiza después.';
   if (activePage === 'goals') return 'Conecta lo que quieres con la vida que estás construyendo.';
   if (activePage === 'projects') return 'Resultados concretos, organizados en proyectos.';
