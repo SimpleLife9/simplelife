@@ -47,7 +47,7 @@ const ALLOWED_EVENT_FIELDS = new Set([
 ]);
 
 const DATE_TIME_PATTERN = /^(\\d{4}-\\d{2}-\\d{2})T(\\d{2}):(\\d{2})(?::(\\d{2})(?:\\.(\\d{1,3}))?)?$/;
-const OFFSET_INSTANT_PATTERN = /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2}(?:\\.\\d{1,9})?)?(?:Z|[+-]\\d{2}:\\d{2})$/i;
+const OFFSET_INSTANT_PATTERN = /^(\\d{4}-\\d{2}-\\d{2})T\\d{2}:\\d{2}(?::\\d{2}(?:\\.\\d{1,9})?)?(?:Z|[+-]\\d{2}:\\d{2})$/i;
 
 function assert(condition, message) {
   if (!condition) throw new RangeError(message);
@@ -76,8 +76,10 @@ function normalizeLocalDateTime(value, label) {
 }
 
 function normalizeInstant(value, label) {
-  assert(typeof value === 'string' && OFFSET_INSTANT_PATTERN.test(value),
-    label + ' must be an ISO date-time with an explicit UTC offset or Z.');
+  assert(typeof value === 'string', label + ' must be an ISO date-time with an explicit UTC offset or Z.');
+  const match = OFFSET_INSTANT_PATTERN.exec(value);
+  assert(match, label + ' must be an ISO date-time with an explicit UTC offset or Z.');
+  parseCalendarDate(match[1]);
   const epoch = Date.parse(value);
   assert(Number.isFinite(epoch), label + ' must be a valid instant.');
   return new Date(epoch).toISOString();
@@ -264,6 +266,15 @@ export function applyAuthoritativeEventResolution(eventDraft, response) {
       label + ' endpoint TZDB version does not match the range.');
     assert(endpoint.resolverVersion === response.resolverVersion,
       label + ' endpoint resolver version does not match the range.');
+    const requestedDisambiguation = temporal[label + 'Disambiguation'];
+    if (endpoint.resolution === 'ambiguous-first') {
+      assert(requestedDisambiguation === 'earlier',
+        label + ' endpoint ignored the requested later fold choice.');
+    }
+    if (endpoint.resolution === 'ambiguous-later') {
+      assert(requestedDisambiguation === 'later',
+        label + ' endpoint ignored the requested earlier fold choice.');
+    }
   }
 
   assert(response.start.instant === response.startsAt && response.end.instant === response.endsAt,
