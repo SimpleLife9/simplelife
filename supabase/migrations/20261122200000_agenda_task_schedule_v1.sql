@@ -367,10 +367,54 @@ BEGIN
     RETURN;
   END IF;
 
-  -- Share the owner lock used by Event and Protected Time commits. A later
-  -- conflict-aware writer can compare its complete Event/Protected Time
-  -- snapshot under this same lock before the reservation is committed.
+  -- The owner advisory lock serializes this commit with Event, Protected Time
+  -- and TaskSchedule writers. Compare the complete owner snapshot only after
+  -- acquiring it, closing the read/analyze/commit time-of-check race.
   PERFORM pg_advisory_xact_lock(hashtextextended(p_owner_user_id::text, 8102026));
+
+  IF p_mutation IN ('create', 'edit') AND EXISTS (
+    WITH actual AS (
+      SELECT 'calendar_event'::text AS resource_type, id, updated_at
+      FROM public.calendar_event
+      WHERE owner_user_id = p_owner_user_id
+        AND archived_at IS NULL
+        AND deleted_at IS NULL
+        AND event_status IN ('preparing', 'proposed', 'confirmed')
+      UNION ALL
+      SELECT 'protected_time_block'::text AS resource_type, id, updated_at
+      FROM public.protected_time_block
+      WHERE owner_user_id = p_owner_user_id
+        AND archived_at IS NULL
+        AND deleted_at IS NULL
+      UNION ALL
+      SELECT 'task_schedule'::text AS resource_type, id, updated_at
+      FROM public.task_schedule
+      WHERE owner_user_id = p_owner_user_id
+        AND schedule_status IN ('proposed', 'confirmed')
+    ),
+    supplied AS (
+      SELECT resource_type, id, updated_at
+      FROM jsonb_to_recordset(p_schedule_patch->'conflict_snapshot')
+        AS snapshot(resource_type text, id uuid, updated_at timestamptz)
+    )
+    SELECT 1
+    FROM actual
+    FULL OUTER JOIN supplied USING (resource_type, id)
+    WHERE actual.id IS NULL
+       OR supplied.id IS NULL
+       OR actual.updated_at IS DISTINCT FROM supplied.updated_at
+  ) THEN
+    v_status := 409;
+    v_response := jsonb_build_object('error', 'TASK_SCHEDULE_CONFLICTS_CHANGED');
+    UPDATE public.task_schedule_mutation_request
+    SET response_http_status = v_status,
+        response_body = v_response,
+        completed_at = p_now
+    WHERE owner_user_id = p_owner_user_id
+      AND idempotency_key = p_idempotency_key;
+    RETURN QUERY SELECT v_status, v_response, false;
+    RETURN;
+  END IF;
 
   IF p_mutation = 'create' THEN
     v_next := jsonb_populate_record(NULL::public.task_schedule, p_schedule_patch);
