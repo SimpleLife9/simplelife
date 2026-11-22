@@ -147,6 +147,29 @@ function noLifecycleWrite(row: EventRow): boolean {
   return row.archived_at == null && row.deleted_at == null;
 }
 
+function operationAlreadySatisfied(
+  row: EventRow,
+  input: ReturnType<typeof validateBody>,
+  patch: Record<string, unknown>,
+): boolean {
+  switch (input.operation) {
+    case "update":
+      return matchesPatch(row, patch);
+    case "cancel":
+      return row.event_status === "cancelled";
+    case "reopen":
+      return row.event_status === "confirmed";
+    case "finish":
+      return row.event_status === "finished";
+    case "archive":
+      return row.archived_at != null && row.deleted_at == null;
+    case "restore":
+      return row.archived_at == null && row.deleted_at == null && row.purge_after == null;
+    case "trash":
+      return row.deleted_at != null && row.archived_at == null;
+  }
+}
+
 function buildEditableDraft(input: unknown) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new TypeError("EVENT_BODY_REQUIRED");
@@ -341,7 +364,7 @@ export async function handleRequest(
     // otherwise expose the optimistic-concurrency conflict.
     const latest = await findOwnedEvent(ctx.supabaseAdmin, input.eventId, profile.profileId);
     if (latest.error) return json({ error: "EVENT_LOOKUP_FAILED" }, 503);
-    if (latest.row && matchesPatch(latest.row, patch)) {
+    if (latest.row && operationAlreadySatisfied(latest.row, input, patch)) {
       return json(publicResult(latest.row, true), 200);
     }
     return json({ error: "EVENT_CHANGED_RELOAD_AND_RETRY" }, 409);
