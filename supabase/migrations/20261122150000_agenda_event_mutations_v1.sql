@@ -52,6 +52,29 @@ GRANT SELECT, INSERT, UPDATE ON TABLE public.event_mutation_request TO service_r
 COMMENT ON TABLE public.event_mutation_request IS
   'Server-only idempotency receipts for owner-scoped Event edit/status/lifecycle mutations. No browser/API-user grants.';
 
+-- Event updated_at is a compare-and-swap version, not merely a display time.
+-- A transaction-stable now() can give multiple mutations in one transaction
+-- the same version. Use a monotonic wall-clock value for Event rows only.
+CREATE OR REPLACE FUNCTION private.touch_calendar_event_updated_at()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog
+AS $function$
+BEGIN
+  NEW.updated_at := GREATEST(clock_timestamp(), OLD.updated_at + interval '1 microsecond');
+  RETURN NEW;
+END;
+$function$;
+
+ALTER FUNCTION private.touch_calendar_event_updated_at() OWNER TO postgres;
+REVOKE ALL PRIVILEGES ON FUNCTION private.touch_calendar_event_updated_at()
+  FROM PUBLIC, anon, authenticated, service_role;
+
+DROP TRIGGER IF EXISTS calendar_event_touch_updated_at ON public.calendar_event;
+CREATE TRIGGER calendar_event_touch_updated_at
+  BEFORE UPDATE ON public.calendar_event
+  FOR EACH ROW EXECUTE FUNCTION private.touch_calendar_event_updated_at();
+
 CREATE OR REPLACE FUNCTION public.mutate_calendar_event_once(
   p_owner_user_id uuid,
   p_event_id uuid,
@@ -113,7 +136,7 @@ BEGIN
   END IF;
   v_payload_hash := decode(p_payload_hash_hex, 'hex');
 
-  IF p_mutation NOT IN ('edit', 'cancel', 'reopen', 'archive', 'restore', 'trash') THEN
+  IF p_mutation IS NULL OR p_mutation NOT IN ('edit', 'cancel', 'reopen', 'archive', 'restore', 'trash') THEN
     RAISE EXCEPTION 'Unsupported Event mutation'
       USING ERRCODE = '22023';
   END IF;
