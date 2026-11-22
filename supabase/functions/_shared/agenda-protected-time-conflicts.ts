@@ -104,19 +104,6 @@ function resolveWeeklyOccurrence(block: ProtectedTimeRow, occurrenceDate: string
   return timedCandidate(resolution.startsAt, resolution.endsAt);
 }
 
-function addConflict(map: Map<string, Record<string, unknown>>, block: ProtectedTimeRow, candidate: ReturnType<typeof timedCandidate>) {
-  const assessment = assessProtectedTimeConflict({
-    candidate,
-    protectedBlock: {
-      temporalKind: "timed",
-      startsAt: candidate.startsAt,
-      endsAt: candidate.endsAt,
-      protectionMode: block.protection_mode,
-    },
-  });
-  return assessment;
-}
-
 /**
  * Re-evaluates an Event interval against every active owner-scoped Protected
  * Time block using the pinned IANA resolver. Weekly rules remain civil-time
