@@ -13,6 +13,8 @@ export const EVENT_STATUSES = Object.freeze([
   'finished',
 ]);
 
+export const EVENT_CREATABLE_STATUSES = Object.freeze(['preparing', 'proposed', 'confirmed']);
+
 export const EVENT_LOCATION_KINDS = Object.freeze([
   'physical',
   'online',
@@ -121,11 +123,9 @@ export function createEventDraft(input) {
   const locationKind = input.locationKind ?? null;
   assert(locationKind == null || EVENT_LOCATION_KINDS.includes(locationKind),
     'locationKind must be physical, online or other.');
-  assert(locationKind == null || locationLabel,
-    'locationLabel is required when locationKind is supplied.');
-
   const eventStatus = input.eventStatus ?? 'confirmed';
-  assert(EVENT_STATUSES.includes(eventStatus), 'eventStatus is not a supported Event status.');
+  assert(EVENT_CREATABLE_STATUSES.includes(eventStatus),
+    'New Events may be preparing, proposed or confirmed; cancelled/finished are transitions, not creation states.');
   const temporalKind = input.temporalKind;
   assert(['all_day', 'zoned_civil', 'fixed_instant'].includes(temporalKind),
     'temporalKind must be all_day, zoned_civil or fixed_instant.');
