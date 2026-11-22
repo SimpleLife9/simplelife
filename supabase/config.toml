@@ -15,3 +15,6 @@ verify_jwt = true
 
 [functions.agenda-event-create]
 verify_jwt = true
+
+[functions.agenda-event-mutate]
+verify_jwt = true

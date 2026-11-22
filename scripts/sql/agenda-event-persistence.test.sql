@@ -467,4 +467,68 @@ END;
 $test$;
 RESET ROLE;
 
+
+-- Accepted Event status and lifecycle transitions have explicit audit actions.
+-- These checks run after owner-isolation assertions so they cannot weaken those tests.
+SET LOCAL ROLE service_role;
+
+UPDATE public.calendar_event
+SET event_status = 'cancelled'
+WHERE id = '019a0000-0000-7000-8000-000000000101';
+
+UPDATE public.calendar_event
+SET event_status = 'confirmed'
+WHERE id = '019a0000-0000-7000-8000-000000000101';
+
+UPDATE public.calendar_event
+SET event_status = 'finished'
+WHERE id = '019a0000-0000-7000-8000-000000000101';
+
+UPDATE public.calendar_event
+SET archived_at = clock_timestamp()
+WHERE id = '019a0000-0000-7000-8000-000000000101';
+
+UPDATE public.calendar_event
+SET archived_at = NULL
+WHERE id = '019a0000-0000-7000-8000-000000000101';
+
+WITH stamp AS (SELECT clock_timestamp() AS value)
+UPDATE public.calendar_event AS event
+SET deleted_at = stamp.value,
+    purge_after = stamp.value + interval '30 days'
+FROM stamp
+WHERE event.id = '019a0000-0000-7000-8000-000000000101';
+
+UPDATE public.calendar_event
+SET deleted_at = NULL,
+    purge_after = NULL
+WHERE id = '019a0000-0000-7000-8000-000000000101';
+
+RESET ROLE;
+
+DO $test$
+DECLARE
+  v_actions text[];
+BEGIN
+  SELECT array_agg(action ORDER BY recorded_at)
+  INTO v_actions
+  FROM public.audit_event
+  WHERE entity_id = '019a0000-0000-7000-8000-000000000101';
+
+  IF v_actions IS DISTINCT FROM ARRAY[
+    'calendar_event.created',
+    'calendar_event.updated',
+    'calendar_event.cancelled',
+    'calendar_event.reopened',
+    'calendar_event.finished',
+    'calendar_event.archived',
+    'calendar_event.restored',
+    'calendar_event.trashed',
+    'calendar_event.restored'
+  ]::text[] THEN
+    RAISE EXCEPTION 'Event audit action sequence is incorrect: %', v_actions;
+  END IF;
+END;
+$test$;
+
 ROLLBACK;
