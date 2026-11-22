@@ -157,6 +157,7 @@ export function findProtectedTimeConflicts({
   new Intl.DateTimeFormat('en', { timeZone: calendarTimeZone }).format(new Date());
   const candidate = resolveCandidateWindow(event, calendarTimeZone, resolveRange);
   const conflicts = [];
+  let totalOverlappingOccurrences = 0;
 
   for (const block of protectedBlocks) {
     if (block.archived_at != null || block.deleted_at != null) continue;
@@ -175,6 +176,10 @@ export function findProtectedTimeConflicts({
         },
       });
       if (!assessment.overlapping) continue;
+      totalOverlappingOccurrences += 1;
+      if (totalOverlappingOccurrences > MAX_PROTECTED_CONFLICT_OCCURRENCES) {
+        throw new RangeError('Protected Time produced more than 500 overlapping occurrences across the owner set.');
+      }
       const overlapStart = new Date(Math.max(Date.parse(candidate.startsAt), Date.parse(occurrence.startsAt))).toISOString();
       const overlapEnd = new Date(Math.min(Date.parse(candidate.endsAt), Date.parse(occurrence.endsAt))).toISOString();
       conflicts.push(Object.freeze({
