@@ -311,6 +311,9 @@ Deno.test("refuses to mutate another owner's Event or an inactive account", asyn
 
 Deno.test("validates request method, fields, body size and Event status boundaries", async () => {
   const { ctx, capture } = makeContext();
+  const preflight = await handleRequest(new Request("https://local.test", { method: "OPTIONS" }), ctx);
+  assertEquals(preflight.status, 204, "browser CORS preflight");
+  assertEquals(preflight.headers.get("access-control-allow-methods"), "PATCH, OPTIONS", "CORS methods");
   const wrongMethod = await handleRequest(new Request("https://local.test", { method: "GET" }), ctx);
   assertEquals(wrongMethod.status, 405, "method");
   const unknownField = await handleRequest(request({
