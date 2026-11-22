@@ -73,6 +73,7 @@ DECLARE
   v_receipt_count bigint;
   v_event_status text;
   v_lifecycle text;
+  v_actions text[];
   v_title text;
   v_purge_after timestamptz;
   v_patch jsonb := jsonb_build_object(
@@ -288,6 +289,26 @@ BEGIN
   WHERE entity_type = 'calendar_event' AND entity_id = v_event_a;
   IF v_audit_count <> 9 THEN
     RAISE EXCEPTION 'Expected create + eight meaningful updates audit rows; got %', v_audit_count;
+  END IF;
+
+  SELECT array_agg(action ORDER BY recorded_at)
+    INTO v_actions
+  FROM public.audit_event
+  WHERE entity_type = 'calendar_event'
+    AND entity_id = v_event_a
+    AND account_user_id = v_owner_a;
+  IF v_actions IS DISTINCT FROM ARRAY[
+    'calendar_event.created',
+    'calendar_event.updated',
+    'calendar_event.cancelled',
+    'calendar_event.reopened',
+    'calendar_event.finished',
+    'calendar_event.archived',
+    'calendar_event.restored',
+    'calendar_event.trashed',
+    'calendar_event.restored'
+  ]::text[] THEN
+    RAISE EXCEPTION 'Explicit Event audit action sequence is incorrect: %', v_actions;
   END IF;
 
   SELECT count(*) INTO v_receipt_count
