@@ -148,6 +148,8 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [confirmAction, setConfirmAction] = useState(null);
   const [pendingKey, setPendingKey] = useState(null);
+  const [protectedTimeConflicts, setProtectedTimeConflicts] = useState(null);
+  const [protectedTimeAcknowledgements, setProtectedTimeAcknowledgements] = useState({});
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [locationLabel, setLocationLabel] = useState('');
@@ -222,6 +224,8 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
   const activeDate = selectedDate || today;
   const orderedEvents = useMemo(() => sortEventsForCalendar(events, timeZone), [events, timeZone]);
   const openComposer = () => {
+    setProtectedTimeConflicts(null);
+    setProtectedTimeAcknowledgements({});
     setEditingEvent(null);
     setTitle('');
     setDescription('');
@@ -250,6 +254,8 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
   const localInputValue = (value) => String(value || '').replace(' ', 'T').slice(0, 23);
 
   const openEditComposer = (event) => {
+    setProtectedTimeConflicts(null);
+    setProtectedTimeAcknowledgements({});
     setEditingEvent(event);
     setTitle(event.title || '');
     setDescription(event.description || '');
@@ -277,10 +283,14 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
     setShowComposer(false);
     setEditingEvent(null);
     setPendingKey(null);
+    setProtectedTimeConflicts(null);
+    setProtectedTimeAcknowledgements({});
   };
 
-  const submitEvent = async (event) => {
-    event.preventDefault();
+  const submitEvent = async (event, conflictDecisions = []) => {
+    event?.preventDefault?.();
+    setProtectedTimeConflicts(null);
+    setProtectedTimeAcknowledgements({});
     const key = pendingKey || uuidv7();
     setPendingKey(key);
     const success = await runAction(async () => {
@@ -336,19 +346,38 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
             expectedUpdatedAt: editingEvent.updated_at,
             action: 'edit',
             event: buildEventRequest(draft),
+            conflictDecisions,
           },
           headers: { 'Idempotency-Key': key },
         })
         : await supabase.functions.invoke('agenda-event-create', {
-          body: { event: buildEventRequest(draft) },
+          body: { event: buildEventRequest(draft), conflictDecisions },
           headers: { 'Idempotency-Key': key },
         });
       if (error) {
         let message = error.message || 'No se pudo guardar el evento.';
+        let responseBody = null;
         try {
-          const response = error.context instanceof Response ? await error.context.clone().json() : null;
-          if (response?.error) message = response.error;
+          responseBody = error.context instanceof Response ? await error.context.clone().json() : null;
+          if (responseBody?.error) message = responseBody.error;
         } catch { /* keep SDK error message */ }
+        if (responseBody && [
+          'PROTECTED_TIME_CONFLICTS',
+          'PROTECTED_TIME_CONFLICTS_CHANGED',
+        ].includes(responseBody.error)) {
+          const currentConflicts = Array.isArray(responseBody.conflicts) ? responseBody.conflicts : [];
+          if (currentConflicts.length > 0) {
+            setProtectedTimeConflicts(currentConflicts);
+            setProtectedTimeAcknowledgements({});
+            throw new Error('Revisa y autoriza cada cruce con tiempo protegido antes de guardar.');
+          }
+          setProtectedTimeConflicts(null);
+          throw new Error('Los bloques protegidos cambiaron. Vuelve a guardar para revisar el horario actualizado.');
+        }
+        if (responseBody?.error === 'PROTECTED_TIME_STATE_CHANGED') {
+          setProtectedTimeConflicts(null);
+          throw new Error('El tiempo protegido cambió mientras guardabas. Vuelve a intentarlo para revisar el estado actual.');
+        }
         throw new Error(message);
       }
       if (!data?.eventId) throw new Error('El servidor no devolvió el identificador del evento.');
@@ -359,7 +388,22 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
       setEditingEvent(null);
       setSelectedEvent(null);
       setPendingKey(null);
+      setProtectedTimeConflicts(null);
+      setProtectedTimeAcknowledgements({});
     }
+  };
+
+  const confirmProtectedTimeConflicts = () => {
+    if (!Array.isArray(protectedTimeConflicts) || protectedTimeConflicts.length === 0) return;
+    const fullyAcknowledged = protectedTimeConflicts.every((conflict) => protectedTimeAcknowledgements[conflict.blockId] === true);
+    if (!fullyAcknowledged || busy) return;
+    const decisions = protectedTimeConflicts.map((conflict) => ({
+      blockId: conflict.blockId,
+      blockUpdatedAt: conflict.blockUpdatedAt,
+      protectionMode: conflict.protectionMode,
+      decision: conflict.protectionMode === 'hard' ? 'override' : 'keep',
+    }));
+    void submitEvent(null, decisions);
   };
 
   const mutateSelectedEvent = async (action) => {
@@ -668,6 +712,82 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
                 <button type="submit" className="button button-primary" disabled={busy || !title.trim()}>{busy ? 'Guardando…' : editingEvent ? 'Guardar cambios' : 'Guardar evento'}</button>
               </footer>
             </form>
+          </section>
+        </div>
+      )}
+
+
+      {protectedTimeConflicts && showComposer && (
+        <div className="agenda-dialog-backdrop agenda-protected-time-conflict-backdrop" role="presentation">
+          <section className="agenda-dialog agenda-protected-time-conflict-dialog" role="alertdialog" aria-modal="true" aria-labelledby="protected-time-conflict-title">
+            <header className="agenda-dialog-header">
+              <div>
+                <span className="agenda-section-kicker">REVISIÓN DE AGENDA</span>
+                <h2 id="protected-time-conflict-title">Este horario coincide con tiempo protegido</h2>
+              </div>
+            </header>
+            <p className="agenda-confirm-copy">
+              No se moverá ni modificará ningún otro compromiso. Revisa cada cruce y confirma una decisión sólo para este evento.
+            </p>
+            <div className="agenda-protected-time-conflict-list">
+              {protectedTimeConflicts.map((conflict) => (
+                <article className="agenda-protected-time-conflict-item" key={conflict.blockId}>
+                  <div className="agenda-protected-time-conflict-heading">
+                    <div>
+                      <strong>{conflict.label}</strong>
+                      <span>{conflict.category || 'Personal'} · {conflict.patternKind === 'weekly' ? 'Regla semanal' : 'Bloque puntual'} · {conflict.timeZone}</span>
+                    </div>
+                    <span className={'protected-time-mode ' + (conflict.protectionMode === 'hard' ? 'is-hard' : 'is-flexible')}>
+                      {conflict.protectionMode === 'hard' ? 'Rígida' : 'Flexible'}
+                    </span>
+                  </div>
+                  {(conflict.occurrences || []).map((occurrence, index) => (
+                    <p className="agenda-protected-time-occurrence" key={occurrence.startsAt + ':' + index}>
+                      {formatInstantInTimeZone(occurrence.startsAt, conflict.timeZone)}
+                      {' — '}
+                      {formatInstantInTimeZone(occurrence.endsAt, conflict.timeZone)}
+                    </p>
+                  ))}
+                  <label className="agenda-protected-time-acknowledgement">
+                    <input
+                      type="checkbox"
+                      checked={protectedTimeAcknowledgements[conflict.blockId] === true}
+                      onChange={(event) => setProtectedTimeAcknowledgements((current) => ({
+                        ...current,
+                        [conflict.blockId]: event.target.checked,
+                      }))}
+                    />
+                    <span>
+                      {conflict.protectionMode === 'hard'
+                        ? 'Autorizo una excepción rígida para este evento. La reserva protegida seguirá intacta.'
+                        : 'Confirmo mantener el cruce flexible para este evento. La reserva protegida seguirá intacta.'}
+                    </span>
+                  </label>
+                </article>
+              ))}
+            </div>
+            <footer className="agenda-dialog-actions">
+              <button
+                type="button"
+                className="agenda-secondary-button"
+                onClick={() => {
+                  setProtectedTimeConflicts(null);
+                  setProtectedTimeAcknowledgements({});
+                  setPendingKey(null);
+                }}
+                disabled={busy}
+              >
+                Volver y ajustar horario
+              </button>
+              <button
+                type="button"
+                className="button button-primary"
+                onClick={confirmProtectedTimeConflicts}
+                disabled={busy || !protectedTimeConflicts.every((conflict) => protectedTimeAcknowledgements[conflict.blockId] === true)}
+              >
+                {busy ? 'Guardando…' : 'Confirmar y guardar'}
+              </button>
+            </footer>
           </section>
         </div>
       )}
