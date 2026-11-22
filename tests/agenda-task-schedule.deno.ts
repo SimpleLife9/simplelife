@@ -209,6 +209,53 @@ Deno.test("a timed Event overlap requires an explicit version-bound keep choice"
   assertEquals((patch.conflict_snapshot as unknown[]).length, 1, "Event version added to snapshot");
 });
 
+Deno.test("an overlapping active TaskSchedule requires a version-bound keep choice", async () => {
+  const candidate = resolveLocalDateTimeRange({
+    timeZone: "America/Havana",
+    start: { localDateTime: "2026-11-24T09:00" },
+    end: { localDateTime: "2026-11-24T10:00" },
+  });
+  const existingSchedule = {
+    id: "019a0000-0000-7000-8000-000000000106",
+    updated_at: VERSION,
+    schedule_status: "confirmed",
+    time_zone: "America/Havana",
+    starts_at: new Date(Date.parse(candidate.startsAt) + 30 * 60_000).toISOString(),
+    ends_at: new Date(Date.parse(candidate.endsAt) + 30 * 60_000).toISOString(),
+  };
+  const missing = mockContext({ schedules: [existingSchedule] });
+  const blocked = await handleRequest(request(createPayload()), missing.ctx, {
+    now: () => "2026-11-22T18:10:00.000Z",
+    newTaskScheduleId: () => SCHEDULE_ID,
+  });
+  assertEquals(blocked.status, 409, "missing schedule-overlap choice status");
+  assertEquals((await responseBody(blocked)).error, "TASK_SCHEDULE_OVERLAPS", "schedule-overlap code");
+  assertEquals(missing.calls.rpc, 0, "no mutation without explicit schedule-overlap choice");
+
+  const accepted = mockContext({ schedules: [existingSchedule] });
+  const response = await handleRequest(request(createPayload({
+    taskScheduleDecisions: [{
+      taskScheduleId: existingSchedule.id,
+      taskScheduleUpdatedAt: VERSION,
+      decision: "keep_overlap",
+    }],
+  }), "019a0000-0000-7000-8000-000000000205"), accepted.ctx, {
+    now: () => "2026-11-22T18:10:00.000Z",
+    newTaskScheduleId: () => SCHEDULE_ID,
+  });
+  assertEquals(response.status, 201, "explicit overlap consent accepted");
+  const patch = (accepted.calls.rpcArgs as Record<string, unknown>).p_schedule_patch as Record<string, unknown>;
+  const decisions = patch.conflict_decisions as Record<string, unknown>[];
+  assertEquals(decisions.length, 1, "versioned schedule overlap consent persisted");
+  assertEquals(decisions[0].policyVersion, "task-schedule-overlap-decision-v1", "overlap decision policy version");
+  assertEquals(decisions[0].taskScheduleId, existingSchedule.id, "consent bound to existing TaskSchedule");
+  assertEquals(decisions[0].taskScheduleUpdatedAt, VERSION, "consent bound to updated_at");
+  const snapshot = patch.conflict_snapshot as Record<string, unknown>[];
+  assertEquals(snapshot.some((item) => item.resource_type === "task_schedule"
+    && item.id === existingSchedule.id && item.updated_at === VERSION), true,
+  "existing TaskSchedule retained in the atomic conflict snapshot");
+});
+
 Deno.test("a hard Protected Time overlap requires its per-occurrence override decision", async () => {
   const candidate = resolveLocalDateTimeRange({
     timeZone: "America/Havana",
