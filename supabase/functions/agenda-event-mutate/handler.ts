@@ -12,6 +12,13 @@ import {
   type EventAuthenticatedContext,
 } from "../_shared/agenda-event-profile.ts";
 import { resolveLocalDateTimeRange, TzdbVersionError } from "../agenda-time-resolve/resolver.ts";
+import { normalizeProtectedTimeConflictDecisions } from "../../../src/features/agenda/domain/protected-time.js";
+import {
+  assessEventProtectedTimeConflicts,
+  buildProtectedTimeSnapshot,
+  decisionsMatchConflicts,
+  MAX_PROTECTED_TIME_BLOCKS,
+} from "../_shared/agenda-protected-time-conflicts.ts";
 
 export const MAX_REQUEST_BYTES = 32 * 1024;
 const JSON_HEADERS = {
@@ -88,6 +95,58 @@ function toEventPatch(record: Record<string, unknown>): Record<string, unknown> 
   return patch;
 }
 
+
+type ProtectedTimeState = {
+  blocks: Array<Record<string, unknown>>;
+  snapshot: Array<{ id: string; updatedAt: string }>;
+  viewerTimeZone: string;
+};
+
+async function readProtectedTimeState(
+  ctx: Context,
+  ownerProfileId: string,
+): Promise<ProtectedTimeState> {
+  const { data, error } = await ctx.supabaseAdmin
+    .from("protected_time_block")
+    .select("id,label,category,protection_mode,pattern_kind,time_zone,starts_at,ends_at,start_date,end_date_exclusive,weekdays,start_time_local,end_time_local,ends_next_day,updated_at")
+    .eq("owner_user_id", ownerProfileId)
+    .is("archived_at", null)
+    .is("deleted_at", null)
+    .order("id", { ascending: true })
+    .limit(MAX_PROTECTED_TIME_BLOCKS + 1);
+  if (error) throw new Error("PROTECTED_TIME_LOOKUP_FAILED");
+  if (!Array.isArray(data) || data.length > MAX_PROTECTED_TIME_BLOCKS) {
+    throw new Error("PROTECTED_TIME_BLOCK_LIMIT_EXCEEDED");
+  }
+
+  const preference = await ctx.supabaseAdmin
+    .from("user_preference")
+    .select("time_zone")
+    .eq("user_id", ownerProfileId)
+    .maybeSingle();
+  if (preference.error) throw new Error("PROTECTED_TIME_TIMEZONE_LOOKUP_FAILED");
+  const viewerTimeZone = typeof preference.data?.time_zone === "string"
+    ? preference.data.time_zone
+    : "America/Havana";
+
+  return {
+    blocks: data,
+    snapshot: buildProtectedTimeSnapshot(data as never),
+    viewerTimeZone,
+  };
+}
+
+function assessCurrentProtectedTime(
+  eventRecord: Record<string, unknown>,
+  state: ProtectedTimeState,
+) {
+  return assessEventProtectedTimeConflicts({
+    event: eventRecord as never,
+    protectedBlocks: state.blocks as never,
+    viewerTimeZone: state.viewerTimeZone,
+  }) as Array<Record<string, unknown>>;
+}
+
 /**
  * Authenticated Event edit/status/lifecycle writer.
  *
@@ -130,7 +189,7 @@ export async function handleRequest(
   }
   const input = body as Record<string, unknown>;
   const allowedKeys = input.action === "edit"
-    ? ["action", "event", "eventId", "expectedUpdatedAt"]
+    ? ["action", "event", "eventId", "expectedUpdatedAt", "conflictDecisions"]
     : ["action", "eventId", "expectedUpdatedAt"];
   if (Object.keys(input).length !== allowedKeys.length
     || Object.keys(input).some((key) => !allowedKeys.includes(key))) {
@@ -146,7 +205,10 @@ export async function handleRequest(
         ? createEventDraft(input.event)
         : null,
     });
-    const intent = await hashEventMutationIntent(mutation);
+    const conflictDecisions = mutation.action === "edit"
+      ? normalizeProtectedTimeConflictDecisions(input.conflictDecisions ?? [])
+      : normalizeProtectedTimeConflictDecisions([]);
+    const intent = await hashEventMutationIntent(mutation, globalThis.crypto, conflictDecisions);
 
     // Replay a completed receipt before resolving civil time. A retry must
     // return its original result even if the current TZDB package is unavailable
@@ -182,6 +244,8 @@ export async function handleRequest(
 
     const now = (dependencies.now ?? (() => new Date().toISOString()))();
     let eventPatch: Record<string, unknown> = {};
+    let protectedTimeState: ProtectedTimeState | null = null;
+    let protectedTimeConflicts: Array<Record<string, unknown>> = [];
     if (mutation.action === "edit") {
       let readyDraft = mutation.eventDraft!;
       if (readyDraft.temporal.kind === "zoned_civil") {
@@ -195,19 +259,55 @@ export async function handleRequest(
         now,
       });
       eventPatch = toEventPatch(record as unknown as Record<string, unknown>);
+      try {
+        protectedTimeState = await readProtectedTimeState(ctx, profile.profileId);
+        protectedTimeConflicts = assessCurrentProtectedTime(
+          record as unknown as Record<string, unknown>,
+          protectedTimeState,
+        );
+      } catch (error) {
+        const code = error instanceof Error ? error.message : "PROTECTED_TIME_LOOKUP_FAILED";
+        return json({ error: code }, 503);
+      }
+      if (protectedTimeConflicts.length > 0 && conflictDecisions.length === 0) {
+        return json({ error: "PROTECTED_TIME_CONFLICTS", conflicts: protectedTimeConflicts }, 409);
+      }
+      if (!decisionsMatchConflicts(
+        conflictDecisions as unknown as Array<Record<string, unknown>>,
+        protectedTimeConflicts,
+      )) {
+        return json({
+          error: "PROTECTED_TIME_CONFLICTS_CHANGED",
+          conflicts: protectedTimeConflicts,
+        }, 409);
+      }
     }
 
-    const result = await ctx.supabaseAdmin.rpc("mutate_calendar_event_once", {
-      p_owner_user_id: profile.profileId,
-      p_event_id: mutation.eventId,
-      p_idempotency_key: idempotencyKey,
-      p_payload_version: intent.version,
-      p_payload_hash_hex: intent.payloadHash,
-      p_expected_updated_at: mutation.expectedUpdatedAt,
-      p_mutation: mutation.action,
-      p_event_patch: eventPatch,
-      p_now: now,
-    });
+    const result = mutation.action === "edit"
+      ? await ctx.supabaseAdmin.rpc("mutate_calendar_event_with_protected_time_once", {
+        p_owner_user_id: profile.profileId,
+        p_event_id: mutation.eventId,
+        p_idempotency_key: idempotencyKey,
+        p_payload_version: intent.version,
+        p_payload_hash_hex: intent.payloadHash,
+        p_expected_updated_at: mutation.expectedUpdatedAt,
+        p_mutation: mutation.action,
+        p_event_patch: eventPatch,
+        p_now: now,
+        p_protected_time_snapshot: protectedTimeState!.snapshot,
+        p_conflict_decisions: conflictDecisions,
+      })
+      : await ctx.supabaseAdmin.rpc("mutate_calendar_event_once", {
+        p_owner_user_id: profile.profileId,
+        p_event_id: mutation.eventId,
+        p_idempotency_key: idempotencyKey,
+        p_payload_version: intent.version,
+        p_payload_hash_hex: intent.payloadHash,
+        p_expected_updated_at: mutation.expectedUpdatedAt,
+        p_mutation: mutation.action,
+        p_event_patch: eventPatch,
+        p_now: now,
+      });
     if (result.error) return json({ error: "EVENT_MUTATION_FAILED" }, 503);
 
     const row = Array.isArray(result.data) ? result.data[0] : result.data;
@@ -217,12 +317,32 @@ export async function handleRequest(
     if (typeof status !== "number" || !outcome.response_body || typeof outcome.response_body !== "object") {
       return json({ error: "EVENT_MUTATION_RESULT_INVALID" }, 503);
     }
+    const responseBody = outcome.response_body as Record<string, unknown>;
+    if (status === 409 && responseBody.error === "PROTECTED_TIME_STATE_CHANGED"
+      && mutation.action === "edit") {
+      try {
+        const refreshed = await readProtectedTimeState(ctx, profile.profileId);
+        const refreshedConflicts = assessCurrentProtectedTime(
+          eventPatch,
+          refreshed,
+        );
+        return json({
+          error: refreshedConflicts.length > 0 ? "PROTECTED_TIME_CONFLICTS_CHANGED" : "PROTECTED_TIME_STATE_CHANGED",
+          conflicts: refreshedConflicts,
+        }, 409);
+      } catch {
+        return json({ error: "PROTECTED_TIME_STATE_CHANGED", conflicts: [] }, 409);
+      }
+    }
     return json({
       ...(outcome.response_body as Record<string, unknown>),
       replayed: outcome.replayed === true,
     }, status);
   } catch (error) {
     if (error instanceof TzdbVersionError) return json({ error: "TIMEZONE_RULES_UNAVAILABLE" }, 503);
+    if (error instanceof Error && error.message.startsWith("PROTECTED_TIME_")) {
+      return json({ error: error.message }, 503);
+    }
     if (error instanceof TypeError || error instanceof RangeError) {
       return json({ error: error.message }, 422);
     }
