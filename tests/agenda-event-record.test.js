@@ -94,6 +94,8 @@ test('serializes an all-day Event as date-only with an exclusive end', () => {
   assert.equal(record.start_local, null);
   assert.equal(record.end_local, null);
   assert.equal(record.time_zone, null);
+  assert.deepEqual(record.protected_time_decisions, []);
+  assert.deepEqual(record.protected_time_snapshot, []);
 });
 
 test('serializes fixed instants in canonical UTC without inventing local wall time', () => {
@@ -199,4 +201,43 @@ test('requires internally consistent authoritative resolver metadata', () => {
   };
 
   assert.throws(() => serialize(invalid), /authoritative IANA TZDB resolver/);
+});
+
+test('serializes per-occurrence Protected Time consent and transient owner snapshot with an Event', () => {
+  const decision = {
+    policyVersion: 'protected-time-decision-v1',
+    blockId: '019a0000-0000-7000-8000-000000000111',
+    blockUpdatedAt: '2026-11-20T10:00:00.000000+00:00',
+    protectionMode: 'hard',
+    occurrenceDate: null,
+    occurrenceStartsAt: '2026-12-24T06:00:00.000Z',
+    occurrenceEndsAt: '2026-12-24T07:00:00.000Z',
+    overlapStartsAt: '2026-12-24T06:00:00.000Z',
+    overlapEndsAt: '2026-12-24T07:00:00.000Z',
+    timeZone: 'America/Havana',
+    decision: 'override_hard',
+    consentedAt: NOW,
+  };
+  const record = serialize(allDayDraft(), {
+    protectedTimeDecisions: [decision],
+    protectedTimeSnapshot: [{
+      id: decision.blockId,
+      updated_at: decision.blockUpdatedAt,
+    }],
+  });
+  assert.deepEqual(record.protected_time_decisions, [decision]);
+  assert.deepEqual(record.protected_time_snapshot, [{
+    id: decision.blockId,
+    updated_at: decision.blockUpdatedAt,
+  }]);
+  assert.equal(Object.keys(record).length, 28);
+});
+
+test('rejects malformed Protected Time snapshot evidence at the Event serializer boundary', () => {
+  assert.throws(() => serialize(allDayDraft(), {
+    protectedTimeSnapshot: [{ id: 'not-a-uuid', updated_at: NOW }],
+  }), /UUIDv7/);
+  assert.throws(() => serialize(allDayDraft(), {
+    protectedTimeDecisions: Array.from({ length: 501 }, () => ({})),
+  }), /at most 500/);
 });
