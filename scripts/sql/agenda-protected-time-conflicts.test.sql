@@ -135,7 +135,7 @@ BEGIN
       v_status, v_body, v_replayed;
   END IF;
 
-  RESET ROLE;
+  EXECUTE 'RESET ROLE';
   SELECT count(*) INTO v_audit_count
   FROM public.audit_event
   WHERE entity_type = 'calendar_event'
@@ -175,7 +175,7 @@ BEGIN
     RAISE EXCEPTION 'Stale Protected Time snapshot was not rejected: %, %', v_status, v_body;
   END IF;
 
-  RESET ROLE;
+  EXECUTE 'RESET ROLE';
   SELECT title INTO v_event_title FROM public.calendar_event WHERE id = v_event;
   IF v_event_title <> 'Conflict audit test Event with consent' THEN
     RAISE EXCEPTION 'Stale Protected Time snapshot changed the Event unexpectedly';
