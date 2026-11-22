@@ -137,6 +137,7 @@ test('zoned civil Event promotes only matching authoritative atomic resolution',
     description: ' Revisar resultados ',
     locationKind: 'physical',
     locationLabel: 'Clínica Central',
+    endDisambiguation: 'later',
   });
   const resolved = applyAuthoritativeEventResolution(event, authoritativeRange());
 
