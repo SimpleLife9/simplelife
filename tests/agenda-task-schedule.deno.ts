@@ -1,4 +1,8 @@
 import { handleRequest } from "../supabase/functions/agenda-task-schedule-mutate/handler.ts";
+import {
+  hashTaskScheduleMutationIntent,
+  normalizeTaskScheduleMutation,
+} from "../src/features/agenda/domain/task-schedule.js";
 import type { EventAuthenticatedContext } from "../supabase/functions/_shared/agenda-event-profile.ts";
 
 const AUTH_USER_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -241,10 +245,13 @@ Deno.test("a hard Protected Time overlap requires its per-occurrence override de
 });
 
 Deno.test("completed idempotent retry replays before timezone and conflict lookups", async () => {
+  const intent = await hashTaskScheduleMutationIntent(
+    normalizeTaskScheduleMutation(createPayload()),
+  );
   const existing = {
     task_schedule_id: SCHEDULE_ID,
-    payload_version: "task-schedule-mutation-v1",
-    payload_hash: new Uint8Array(32),
+    payload_version: intent.version,
+    payload_hash: intent.payloadHash,
     response_http_status: 201,
     response_body: { taskScheduleId: SCHEDULE_ID, replayed: false },
   };
