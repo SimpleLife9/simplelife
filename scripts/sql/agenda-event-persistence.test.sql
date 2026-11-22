@@ -62,11 +62,27 @@ BEGIN
   END IF;
 
   IF NOT has_table_privilege('service_role', 'public.calendar_event', 'SELECT')
-     OR NOT has_table_privilege('service_role', 'public.calendar_event', 'INSERT')
+     OR has_table_privilege('service_role', 'public.calendar_event', 'INSERT')
      OR NOT has_table_privilege('service_role', 'public.calendar_event', 'UPDATE')
      OR has_table_privilege('service_role', 'public.calendar_event', 'DELETE')
      OR has_table_privilege('service_role', 'public.calendar_event', 'TRUNCATE') THEN
-    RAISE EXCEPTION 'service_role Event privileges are not SELECT/INSERT/UPDATE only';
+    RAISE EXCEPTION 'service_role Event privileges are not SELECT/UPDATE only';
+  END IF;
+
+  IF NOT has_function_privilege('service_role',
+       'public.create_calendar_event_idempotent(uuid,uuid,text,jsonb)', 'EXECUTE')
+     OR has_function_privilege('authenticated',
+       'public.create_calendar_event_idempotent(uuid,uuid,text,jsonb)', 'EXECUTE')
+     OR has_function_privilege('anon',
+       'public.create_calendar_event_idempotent(uuid,uuid,text,jsonb)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'Event idempotency function execution grants are incorrect';
+  END IF;
+
+  IF has_table_privilege('service_role', 'private.calendar_event_idempotency', 'SELECT')
+     OR has_table_privilege('service_role', 'private.calendar_event_idempotency', 'INSERT')
+     OR has_table_privilege('authenticated', 'private.calendar_event_idempotency', 'SELECT')
+     OR has_table_privilege('anon', 'private.calendar_event_idempotency', 'SELECT') THEN
+    RAISE EXCEPTION 'Idempotency ledger is directly accessible to an API role';
   END IF;
 
   IF has_table_privilege('anon', 'public.calendar_event', 'SELECT')
@@ -145,39 +161,151 @@ BEGIN
 END;
 $test$;
 
--- Simulate the trusted backend writer. service_role bypasses RLS but has only
--- SELECT/INSERT/UPDATE on calendar_event; the audit trigger runs as postgres.
+-- Simulate the trusted server writer: direct INSERT is revoked, so all
+-- creates must reserve an owner-scoped idempotency key in the same transaction.
 SET LOCAL ROLE service_role;
+DO $test$
+DECLARE
+  v_result record;
+  v_record jsonb;
+  v_retry jsonb;
+  v_conflict jsonb;
+  v_owner_b_record jsonb;
+  v_first_created_at timestamptz;
+  v_direct_insert_failed boolean := false;
+BEGIN
+  v_record := jsonb_build_object(
+    'id', '019a0000-0000-7000-8000-000000000101',
+    'owner_user_id', '019a0000-0000-7000-8000-000000000001',
+    'created_by_user_id', '019a0000-0000-7000-8000-000000000001',
+    'updated_by_user_id', '019a0000-0000-7000-8000-000000000001',
+    'title', 'Owner A all-day test',
+    'description', NULL, 'location_label', NULL, 'location_kind', NULL,
+    'event_status', 'confirmed', 'temporal_kind', 'all_day',
+    'start_date', '2026-11-23', 'end_date_exclusive', '2026-11-24',
+    'start_local', NULL, 'end_local', NULL, 'time_zone', NULL,
+    'starts_at', NULL, 'ends_at', NULL,
+    'start_disambiguation', NULL, 'end_disambiguation', NULL,
+    'start_gap_strategy', NULL, 'end_gap_strategy', NULL,
+    'archived_at', NULL, 'deleted_at', NULL, 'purge_after', NULL,
+    'created_at', clock_timestamp(), 'updated_at', clock_timestamp()
+  );
 
-INSERT INTO public.calendar_event (
-  id, owner_user_id, created_by_user_id, updated_by_user_id,
-  title, temporal_kind, start_date, end_date_exclusive
-) VALUES (
-  '019a0000-0000-7000-8000-000000000101',
-  '019a0000-0000-7000-8000-000000000001',
-  '019a0000-0000-7000-8000-000000000001',
-  '019a0000-0000-7000-8000-000000000001',
-  'Owner A all-day test',
-  'all_day',
-  DATE '2026-11-23',
-  DATE '2026-11-24'
-);
+  SELECT * INTO v_result
+  FROM public.create_calendar_event_idempotent(
+    '019a0000-0000-7000-8000-000000000001',
+    'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    repeat('a', 64),
+    v_record
+  );
+  IF v_result.outcome <> 'created'
+     OR v_result.resolved_event_id <> '019a0000-0000-7000-8000-000000000101'::uuid THEN
+    RAISE EXCEPTION 'First owner A request did not create the Event exactly once';
+  END IF;
+  v_first_created_at := v_result.event_created_at;
 
-INSERT INTO public.calendar_event (
-  id, owner_user_id, created_by_user_id, updated_by_user_id,
-  title, temporal_kind, starts_at, ends_at
-) VALUES (
-  '019a0000-0000-7000-8000-000000000102',
-  '019a0000-0000-7000-8000-000000000002',
-  '019a0000-0000-7000-8000-000000000002',
-  '019a0000-0000-7000-8000-000000000002',
-  'Owner B fixed-instant test',
-  'fixed_instant',
-  TIMESTAMPTZ '2026-11-23 15:00:00+00',
-  TIMESTAMPTZ '2026-11-23 16:00:00+00'
-);
+  v_retry := jsonb_set(v_record, '{id}', to_jsonb('019a0000-0000-7000-8000-000000000105'::uuid), false);
+  SELECT * INTO v_result
+  FROM public.create_calendar_event_idempotent(
+    '019a0000-0000-7000-8000-000000000001',
+    'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    repeat('a', 64),
+    v_retry
+  );
+  IF v_result.outcome <> 'replayed'
+     OR v_result.resolved_event_id <> '019a0000-0000-7000-8000-000000000101'::uuid
+     OR v_result.event_created_at IS DISTINCT FROM v_first_created_at THEN
+    RAISE EXCEPTION 'Same key/hash retry did not replay the original Event result';
+  END IF;
 
+  v_conflict := jsonb_set(
+    jsonb_set(v_retry, '{id}', to_jsonb('019a0000-0000-7000-8000-000000000106'::uuid), false),
+    '{title}', to_jsonb('Different payload'), false
+  );
+  SELECT * INTO v_result
+  FROM public.create_calendar_event_idempotent(
+    '019a0000-0000-7000-8000-000000000001',
+    'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    repeat('b', 64),
+    v_conflict
+  );
+  IF v_result.outcome <> 'conflict' OR v_result.resolved_event_id IS NOT NULL THEN
+    RAISE EXCEPTION 'Same key with a different payload did not return conflict';
+  END IF;
+
+  v_owner_b_record := jsonb_build_object(
+    'id', '019a0000-0000-7000-8000-000000000102',
+    'owner_user_id', '019a0000-0000-7000-8000-000000000002',
+    'created_by_user_id', '019a0000-0000-7000-8000-000000000002',
+    'updated_by_user_id', '019a0000-0000-7000-8000-000000000002',
+    'title', 'Owner B fixed-instant test',
+    'description', NULL, 'location_label', NULL, 'location_kind', NULL,
+    'event_status', 'confirmed', 'temporal_kind', 'fixed_instant',
+    'start_date', NULL, 'end_date_exclusive', NULL,
+    'start_local', NULL, 'end_local', NULL, 'time_zone', 'UTC',
+    'starts_at', '2026-11-23T15:00:00Z', 'ends_at', '2026-11-23T16:00:00Z',
+    'start_disambiguation', NULL, 'end_disambiguation', NULL,
+    'start_gap_strategy', NULL, 'end_gap_strategy', NULL,
+    'archived_at', NULL, 'deleted_at', NULL, 'purge_after', NULL,
+    'created_at', clock_timestamp(), 'updated_at', clock_timestamp()
+  );
+  SELECT * INTO v_result
+  FROM public.create_calendar_event_idempotent(
+    '019a0000-0000-7000-8000-000000000002',
+    'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    repeat('b', 64),
+    v_owner_b_record
+  );
+  IF v_result.outcome <> 'created'
+     OR v_result.resolved_event_id <> '019a0000-0000-7000-8000-000000000102'::uuid THEN
+    RAISE EXCEPTION 'Idempotency key was not correctly scoped by owner';
+  END IF;
+
+  BEGIN
+    INSERT INTO public.calendar_event (
+      id, owner_user_id, created_by_user_id, updated_by_user_id,
+      title, temporal_kind, start_date, end_date_exclusive
+    ) VALUES (
+      '019a0000-0000-7000-8000-000000000107',
+      '019a0000-0000-7000-8000-000000000001',
+      '019a0000-0000-7000-8000-000000000001',
+      '019a0000-0000-7000-8000-000000000001',
+      'Direct insert must fail', 'all_day', DATE '2026-11-23', DATE '2026-11-24'
+    );
+  EXCEPTION WHEN insufficient_privilege THEN
+    v_direct_insert_failed := true;
+  END;
+  IF NOT v_direct_insert_failed THEN
+    RAISE EXCEPTION 'service_role direct Event INSERT unexpectedly succeeded';
+  END IF;
+END;
+$test$;
 RESET ROLE;
+
+DO $test$
+DECLARE
+  v_count bigint;
+BEGIN
+  SELECT count(*) INTO v_count
+  FROM private.calendar_event_idempotency
+  WHERE idempotency_key = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+  IF v_count <> 2 THEN
+    RAISE EXCEPTION 'Owner-scoped idempotency ledger should have two reservations; got %', v_count;
+  END IF;
+
+  SELECT count(*) INTO v_count
+  FROM public.calendar_event
+  WHERE id IN (
+    '019a0000-0000-7000-8000-000000000101',
+    '019a0000-0000-7000-8000-000000000102',
+    '019a0000-0000-7000-8000-000000000105',
+    '019a0000-0000-7000-8000-000000000106'
+  );
+  IF v_count <> 2 THEN
+    RAISE EXCEPTION 'Idempotent replay/conflict created duplicate Event rows; got %', v_count;
+  END IF;
+END;
+$test$;
 
 DO $test$
 DECLARE
