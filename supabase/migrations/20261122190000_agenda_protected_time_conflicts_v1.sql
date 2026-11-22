@@ -28,9 +28,11 @@ BEGIN
     RAISE EXCEPTION 'Protected Time decision audit requires matching Event owner and actor';
   END IF;
 
-  IF jsonb_typeof(NEW.protected_time_decisions) IS DISTINCT FROM 'array'
-     OR jsonb_array_length(NEW.protected_time_decisions) > 500 THEN
-    RAISE EXCEPTION 'Protected Time decision evidence must be a bounded JSON array';
+  IF jsonb_typeof(NEW.protected_time_decisions) IS DISTINCT FROM 'array' THEN
+    RAISE EXCEPTION 'Protected Time decision evidence must be a JSON array';
+  END IF;
+  IF jsonb_array_length(NEW.protected_time_decisions) > 500 THEN
+    RAISE EXCEPTION 'Protected Time decision evidence cannot exceed 500 entries';
   END IF;
 
   IF jsonb_array_length(NEW.protected_time_decisions) = 0 THEN
@@ -195,10 +197,13 @@ BEGIN
   END IF;
 
   IF jsonb_typeof(p_event_record->'protected_time_decisions') IS DISTINCT FROM 'array'
-     OR jsonb_typeof(p_event_record->'protected_time_snapshot') IS DISTINCT FROM 'array'
-     OR jsonb_array_length(p_event_record->'protected_time_decisions') > 500
+     OR jsonb_typeof(p_event_record->'protected_time_snapshot') IS DISTINCT FROM 'array' THEN
+    RAISE EXCEPTION 'Protected Time decisions/snapshot must be JSON arrays'
+      USING ERRCODE = '22023';
+  END IF;
+  IF jsonb_array_length(p_event_record->'protected_time_decisions') > 500
      OR jsonb_array_length(p_event_record->'protected_time_snapshot') > 500 THEN
-    RAISE EXCEPTION 'Protected Time decisions/snapshot must be bounded arrays'
+    RAISE EXCEPTION 'Protected Time decisions/snapshot cannot exceed 500 entries'
       USING ERRCODE = '22023';
   END IF;
 
@@ -424,10 +429,13 @@ BEGIN
 
   IF p_mutation = 'edit' THEN
     IF jsonb_typeof(p_event_patch->'protected_time_decisions') IS DISTINCT FROM 'array'
-       OR jsonb_typeof(p_event_patch->'protected_time_snapshot') IS DISTINCT FROM 'array'
-       OR jsonb_array_length(p_event_patch->'protected_time_decisions') > 500
+       OR jsonb_typeof(p_event_patch->'protected_time_snapshot') IS DISTINCT FROM 'array' THEN
+      RAISE EXCEPTION 'Protected Time decisions/snapshot must be JSON arrays'
+        USING ERRCODE = '22023';
+    END IF;
+    IF jsonb_array_length(p_event_patch->'protected_time_decisions') > 500
        OR jsonb_array_length(p_event_patch->'protected_time_snapshot') > 500 THEN
-      RAISE EXCEPTION 'Protected Time decisions/snapshot must be bounded arrays'
+      RAISE EXCEPTION 'Protected Time decisions/snapshot cannot exceed 500 entries'
         USING ERRCODE = '22023';
     END IF;
 
