@@ -57,6 +57,8 @@ DECLARE
   v_key_stale uuid := private.uuidv7();
   v_key_cancel uuid := private.uuidv7();
   v_key_reopen uuid := private.uuidv7();
+  v_key_finish uuid := private.uuidv7();
+  v_key_cancel_finished uuid := private.uuidv7();
   v_key_archive uuid := private.uuidv7();
   v_key_restore uuid := private.uuidv7();
   v_key_trash uuid := private.uuidv7();
@@ -210,6 +212,24 @@ BEGIN
   ) AS r;
   IF v_status <> 200 THEN RAISE EXCEPTION 'Event reopen failed'; END IF;
 
+  SELECT updated_at INTO v_version FROM public.calendar_event WHERE id = v_event_a;
+  SELECT r.http_status INTO v_status
+  FROM public.mutate_calendar_event_once(
+    v_owner_a, v_event_a, v_key_finish, 'event-mutation-v1', repeat('5', 64),
+    v_version, 'finish', '{}'::jsonb, clock_timestamp()
+  ) AS r;
+  IF v_status <> 200 THEN RAISE EXCEPTION 'Event finish failed'; END IF;
+
+  SELECT updated_at INTO v_version FROM public.calendar_event WHERE id = v_event_a;
+  SELECT r.http_status, r.response_body INTO v_status, v_body
+  FROM public.mutate_calendar_event_once(
+    v_owner_a, v_event_a, v_key_cancel_finished, 'event-mutation-v1', repeat('6', 64),
+    v_version, 'cancel', '{}'::jsonb, clock_timestamp()
+  ) AS r;
+  IF v_status <> 409 OR v_body ->> 'error' <> 'EVENT_CANNOT_BE_CANCELLED' THEN
+    RAISE EXCEPTION 'A finished Event must not be cancellable';
+  END IF;
+
   -- Archive is separate from functional status and is recoverable.
   SELECT updated_at INTO v_version FROM public.calendar_event WHERE id = v_event_a;
   SELECT r.http_status INTO v_status
@@ -256,7 +276,7 @@ BEGIN
     INTO v_event_status, v_title, v_version, v_purge_after
   FROM public.calendar_event
   WHERE id = v_event_a AND owner_user_id = v_owner_a;
-  IF v_event_status <> 'confirmed'
+  IF v_event_status <> 'finished'
      OR v_title <> 'Mutation Event A edited'
      OR v_version IS NOT NULL
      OR v_purge_after IS NOT NULL THEN
@@ -266,15 +286,15 @@ BEGIN
   SELECT count(*) INTO v_audit_count
   FROM public.audit_event
   WHERE entity_type = 'calendar_event' AND entity_id = v_event_a;
-  IF v_audit_count <> 8 THEN
-    RAISE EXCEPTION 'Expected create + seven meaningful updates audit rows; got %', v_audit_count;
+  IF v_audit_count <> 9 THEN
+    RAISE EXCEPTION 'Expected create + eight meaningful updates audit rows; got %', v_audit_count;
   END IF;
 
   SELECT count(*) INTO v_receipt_count
   FROM public.event_mutation_request
   WHERE owner_user_id = v_owner_a;
-  IF v_receipt_count <> 9 THEN
-    RAISE EXCEPTION 'Expected one receipt for each attempted unique mutation (including two conflicts); got %', v_receipt_count;
+  IF v_receipt_count <> 11 THEN
+    RAISE EXCEPTION 'Expected one receipt for each attempted unique mutation (including four conflicts); got %', v_receipt_count;
   END IF;
 
   SELECT count(*) INTO v_audit_count
