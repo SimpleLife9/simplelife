@@ -1,22 +1,22 @@
 # Agenda — recurrence v1 decision proposal
 
-**Status:** PROPOSAL FOR PRODUCT/TECHNICAL REVIEW — none of the choices below are approved by this document.  
-**Baseline:** main SHA 6ddf34f75e141bca266b831bd0f4cb3e44d1ff1a  
-**Scope:** reconcile the recurring-series contract with the Phase 1 Agenda data contract before implementation.
+**Status:** APPROVED DECISION RECORD — Robert approved all eight decisions and the hybrid model on 21 November 2026.  
+**Approval PR:** [PR #71](https://github.com/SimpleLife9/simplelife/pull/71), merge SHA `5158b32cf4019ef37d4dfff7c054b05e59b3c8ab`.  
+**Implementation:** PR #72 reconciles the authoritative contracts and introduces the pure recurrence domain engine.
 
-This proposal does not authorize schema changes, migrations, hosted Supabase operations, scheduled jobs, Edge Function deployment, production data changes, or release.
+This approved product/technical decision record does not authorize schema changes, migrations, hosted Supabase operations, cron, Edge Function deployment, production data changes, or release.
 
 ## 1. Executive recommendation
 
 Adopt a deliberately bounded v1 recurrence engine, preserve stable civil-slot identity, and use bounded materialization rather than generating an unlimited future. Keep all generation deterministic and idempotent. Do not implement full RFC 5545 compatibility.
 
-The recommendations below are a starting point for acceptance. Any product-facing choice remains pending Robert's explicit approval.
+All product-facing choices below are approved. Implementation details must conform to the authoritative contracts and remain subject to the separate persistence/deployment Human Gates.
 
 ## 2. Proposed decisions
 
 ### D1 — Recurrence grammar and yearly rules
 
-**Recommendation:** include DAILY, WEEKLY, MONTHLY and YEARLY in v1, using a versioned normalized JSON grammar.
+**Approved decision:** include DAILY, WEEKLY, MONTHLY and YEARLY in v1, using a versioned normalized JSON grammar.
 
 Supported selectors:
 - DAILY: interval N.
@@ -110,7 +110,7 @@ Series-level choices are inherited; an explicit occurrence override takes preced
 
 **Reason:** this honors the approved no-silent-shift policy without introducing an unreliable notification delivery promise.
 
-## 3. Contract reconciliation required
+## 3. Contract reconciliation — completed by PR #72
 
 The current documents describe two different occurrence strategies:
 
@@ -127,19 +127,19 @@ These approaches cannot both be the authoritative persistence model for the same
 - Keep occurrence keys based on the original local civil slot, independent of UTC/TZDB.
 - Never silently replace an existing materialized occurrence with a recomputed preview.
 
-Before implementation, reconcile the two contracts explicitly and remove the conflicting virtual-only recommendation if this hybrid model is accepted.
+PR #72 removes the conflicting virtual-only recommendation from the data contract and makes the hybrid model authoritative in both contracts.
 
 ## 4. Acceptance checklist
 
-- [ ] D1 — grammar and yearly support accepted.
-- [ ] D2 — month-end and leap-day behavior accepted.
-- [ ] D3 — horizon and batch accepted.
-- [ ] D4 — triggers and operational ownership accepted.
-- [ ] D5 — recurring DST defaults accepted.
-- [ ] D6 — occurrence duration override accepted.
-- [ ] D7 — Task link deferred accepted.
-- [ ] D8 — in-app TZDB review behavior accepted.
-- [ ] Hybrid materialization model accepted and both contracts reconciled.
+- [x] D1 — grammar and yearly support approved.
+- [x] D2 — month-end and leap-day behavior approved.
+- [x] D3 — 90-day horizon and maximum batch of 500 approved.
+- [x] D4 — create/edit and authenticated-read top-up triggers approved; no cron in v1.
+- [x] D5 — recurring DST defaults approved.
+- [x] D6 — occurrence-specific duration override approved.
+- [x] D7 — direct Task-to-occurrence link deferred in v1.
+- [x] D8 — in-app TZDB review, no push guarantee and stale-action rejection approved.
+- [x] Hybrid materialization model approved; contracts reconciled in PR #72.
 
 ## 5. Required tests before persistence implementation
 
@@ -155,6 +155,6 @@ Before implementation, reconcile the two contracts explicitly and remove the con
 
 ## 6. Explicit gates and non-effects
 
-This is a proposal only. It creates no schema, migrations, policies, grants, triggers, RPCs, Edge Functions, cron jobs, audit records, users, series or occurrences. It changes no hosted Supabase state and deploys nothing.
+This is an approved product/technical decision record. It creates no schema, migrations, policies, grants, triggers, RPCs, Edge Functions, cron jobs, audit records, users, series or occurrences. It changes no hosted Supabase state and deploys nothing.
 
 A separate explicit Human Gate remains mandatory before any hosted DDL/migration, RLS/grant/Auth/security change, Edge Function deployment, scheduled job, production data operation, or release.
