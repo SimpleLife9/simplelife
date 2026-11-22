@@ -86,6 +86,8 @@ export function assessProtectedTimeConflict({
       requiredAction: null,
       requiresUserDecision: false,
       requiresExplicitOverride: false,
+      requiresFlexibleChoice: false,
+      userAcceptedOverlap,
       blocksAutomaticScheduling: false,
       canProceed: true,
     });
@@ -107,7 +109,10 @@ export function assessProtectedTimeConflict({
     requiresUserDecision: !userAcceptedOverlap,
     requiresExplicitOverride,
     requiresFlexibleChoice,
-    blocksAutomaticScheduling: !userAcceptedOverlap,
+    userAcceptedOverlap,
+    // The protected block remains protected for automatic scheduling even
+    // when this particular overlap has explicit user authorization.
+    blocksAutomaticScheduling: true,
     canProceed: userAcceptedOverlap,
   });
 }
