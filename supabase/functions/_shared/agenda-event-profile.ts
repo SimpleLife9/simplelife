@@ -57,12 +57,10 @@ export interface EventAuthenticatedContext {
 
 function failure(
   status: EventProfileResolutionFailure["status"],
-  code: EventProfileResolutionFailureFailureCode,
+  code: EventProfileResolutionFailureCode,
 ): EventProfileResolutionFailure {
   return { ok: false, status, code };
 }
-
-type EventProfileResolutionFailureFailureCode = EventProfileResolutionFailureCode;
 
 /**
  * Resolve the current signed-in user's active SimpleLife profile.
