@@ -127,3 +127,20 @@
   .agenda-dialog-actions .button{min-width:0;width:100%}
   .agenda-week-grid{min-width:770px}
 }
+
+
+.agenda-protected-time-conflict-backdrop{z-index:70}
+.agenda-protected-time-conflict-dialog{width:min(640px,100%)}
+.agenda-protected-time-conflict-dialog>.agenda-confirm-copy{margin:16px 0;color:#667a6d;font-size:.77rem;line-height:1.55}
+.agenda-protected-time-conflict-list{display:grid;gap:10px;max-height:42vh;overflow:auto}
+.agenda-protected-time-conflict-item{display:grid;gap:10px;padding:13px;border:1px solid #e4ebe2;border-radius:12px;background:#fff}
+.agenda-protected-time-conflict-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.agenda-protected-time-conflict-heading>div{display:grid;gap:4px;min-width:0}
+.agenda-protected-time-conflict-heading strong{color:#345244;font-size:.83rem;overflow-wrap:anywhere}
+.agenda-protected-time-conflict-heading span:not(.protected-time-mode){color:#8a978e;font-size:.66rem}
+.agenda-protected-time-occurrence{margin:0;color:#61766a;font-size:.7rem;line-height:1.45}
+.agenda-protected-time-acknowledgement{display:flex;align-items:flex-start;gap:9px;padding-top:10px;border-top:1px solid #edf1ec;color:#445f50;font-size:.72rem;line-height:1.5;font-weight:650}
+.agenda-protected-time-acknowledgement input{flex:0 0 auto;width:17px;height:17px;margin:1px 0 0;accent-color:#4d8760}
+.agenda-protected-time-conflict-dialog .agenda-dialog-actions{display:grid;grid-template-columns:1fr 1fr;padding-top:15px}
+.agenda-protected-time-conflict-dialog .agenda-dialog-actions>*{min-width:0;white-space:normal}
+@media(max-width:600px){.agenda-protected-time-conflict-dialog .agenda-dialog-actions{grid-template-columns:1fr}.agenda-protected-time-conflict-list{max-height:38vh}}
