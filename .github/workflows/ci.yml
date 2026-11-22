@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: simplelife-ci-${{ github.ref }}
+  group: simplelife-ci-v2-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -128,7 +128,9 @@ jobs:
         if: always()
         run: |
           if command -v supabase >/dev/null 2>&1; then
-            supabase stop --no-backup
+            if ! timeout 90s supabase stop --no-backup; then
+              docker ps -aq --filter "name=supabase_" | xargs -r docker rm -f || true
+            fi
           fi
 
       - name: Restore tracked Supabase config after temporary CI override
