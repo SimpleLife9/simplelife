@@ -51,12 +51,14 @@ assertUuid(authUserId, UUID_PATTERN, "Auth user id");
 // and RLS-scoped client; no owner/actor identifier is accepted from request JSON.
 const profileId = sqlScalar("SELECT private.uuidv7()");
 assertUuid(profileId, UUID_V7_PATTERN, "disposable profile id");
+// Both interpolated values are constrained to canonical UUID characters above;
+ // psql -c sends SQL directly and does not perform psql variable substitution.
+const profileInsertSql = "INSERT INTO public.user_profile (id, auth_user_id, display_name, account_status) " +
+  "VALUES ('" + profileId + "'::uuid, '" + authUserId + "'::uuid, 'Agenda Edge CI', 'active')";
 run("docker", [
   "exec", "-i", "supabase_db_simplelife",
   "psql", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "postgres",
-  "-v", "profile_id=" + profileId,
-  "-v", "auth_user_id=" + authUserId,
-  "-c", "INSERT INTO public.user_profile (id, auth_user_id, display_name, account_status) VALUES (:'profile_id'::uuid, :'auth_user_id'::uuid, 'Agenda Edge CI', 'active')",
+  "-c", profileInsertSql,
 ]);
 
 const idempotencyKey = sqlScalar("SELECT private.uuidv7()");
