@@ -641,7 +641,11 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
                           <div className="agenda-timeline-time">{continues ? 'Sigue' : range.startTime}</div>
                           <div className="agenda-timeline-track">
                             <span className="agenda-timeline-marker is-task-schedule" />
-                            <div className="agenda-timeline-card is-task-schedule">
+                            <div
+                              className="agenda-timeline-card is-task-schedule"
+                              role="group"
+                              aria-label={'Tarea reservada: ' + (scheduledTaskById.get(item.task_id)?.action || 'Tarea programada')}
+                            >
                               <strong>{scheduledTaskById.get(item.task_id)?.action || 'Tarea programada'}</strong>
                               <span>{continues ? 'Continúa · ' : ''}{range.startDate === range.endDate
                                 ? range.startTime + ' – ' + range.endTime
