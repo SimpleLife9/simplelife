@@ -118,8 +118,8 @@ BEGIN
     )
   );
 
-  IF jsonb_object_length(v_patch) <> 18 THEN
-    RAISE EXCEPTION 'Event edit patch should contain exactly 18 fields, got %', jsonb_object_length(v_patch);
+  IF (SELECT count(*) FROM jsonb_object_keys(v_patch)) <> 18 THEN
+    RAISE EXCEPTION 'Event edit patch should contain exactly 18 fields';
   END IF;
 
   EXECUTE 'SET LOCAL ROLE service_role';
