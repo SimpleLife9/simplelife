@@ -141,7 +141,7 @@ export async function handleRequest(
     const mutation = normalizeEventMutation({
       eventId: input.eventId,
       expectedUpdatedAt: input.expectedUpdatedAt,
-      action: input.action,
+      action: String(input.action),
       eventDraft: input.action === "edit"
         ? createEventDraft(input.event)
         : null,
