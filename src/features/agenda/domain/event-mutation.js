@@ -46,7 +46,7 @@ export function normalizeExpectedEventVersion(value) {
  *   eventDraft?: NormalizedEventDraft | null
  * }} input
  */
-export function normalizeEventMutation({ eventId, expectedUpdatedAt, action, eventDraft = null }) {
+export function normalizeEventMutation({ eventId, expectedUpdatedAt, action, eventDraft = null, protectedTimeDecisions = [] }) {
   const normalizedEventId = normalizeEventMutationId(eventId);
   const normalizedVersion = normalizeExpectedEventVersion(expectedUpdatedAt);
   assert(EVENT_MUTATION_ACTIONS.includes(action), 'Unsupported Event mutation action.');
@@ -56,11 +56,18 @@ export function normalizeEventMutation({ eventId, expectedUpdatedAt, action, eve
   } else {
     assert(eventDraft == null, 'Only an Event edit may include an Event draft.');
   }
+  assert(Array.isArray(protectedTimeDecisions) && protectedTimeDecisions.length <= 500,
+    'protectedTimeDecisions must be an array with at most 500 entries.');
+  assert(action === 'edit' || protectedTimeDecisions.length === 0,
+    'Only an Event edit may include Protected Time decisions.');
+  assert(protectedTimeDecisions.every((item) => item && typeof item === 'object' && !Array.isArray(item)),
+    'Every Protected Time decision must be an object.');
   return Object.freeze({
     eventId: normalizedEventId,
     expectedUpdatedAt: normalizedVersion,
     action,
     eventDraft,
+    protectedTimeDecisions: Object.freeze(protectedTimeDecisions.map((item) => Object.freeze({ ...item }))),
   });
 }
 
@@ -76,6 +83,7 @@ export function buildEventMutationIntent(mutation) {
     normalized.expectedUpdatedAt,
     normalized.action,
     draftIntent,
+    normalized.protectedTimeDecisions,
   ]);
   return Object.freeze({
     version: EVENT_MUTATION_INTENT_VERSION,
