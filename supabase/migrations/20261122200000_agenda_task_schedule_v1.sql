@@ -207,7 +207,7 @@ CREATE TABLE public.task_schedule_mutation_request (
   owner_user_id uuid NOT NULL REFERENCES public.user_profile(id) ON DELETE RESTRICT,
   idempotency_key uuid NOT NULL,
   task_schedule_id uuid NOT NULL,
-  payload_version text NOT NULL CHECK (payload_version = 'task-schedule-mutation-v1'),
+  payload_version text NOT NULL CHECK (payload_version = 'task-schedule-mutation-v2'),
   payload_hash bytea NOT NULL CHECK (octet_length(payload_hash) = 32),
   response_http_status integer,
   response_body jsonb,
@@ -287,7 +287,7 @@ BEGIN
       USING ERRCODE = '22023';
   END IF;
 
-  IF p_payload_version IS DISTINCT FROM 'task-schedule-mutation-v1'
+  IF p_payload_version IS DISTINCT FROM 'task-schedule-mutation-v2'
      OR p_payload_hash_hex IS NULL
      OR p_payload_hash_hex !~ '^[0-9a-f]{64}$' THEN
     RAISE EXCEPTION 'TaskSchedule mutation payload version/hash is invalid'
