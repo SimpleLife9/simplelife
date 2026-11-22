@@ -21,7 +21,7 @@ CREATE TABLE private.calendar_event_idempotency (
   CONSTRAINT calendar_event_idempotency_event_owner_fk
     FOREIGN KEY (event_id, owner_user_id)
     REFERENCES public.calendar_event (id, owner_user_id)
-    ON DELETE RESTRICT
+    ON DELETE NO ACTION
     DEFERRABLE INITIALLY DEFERRED
 );
 
