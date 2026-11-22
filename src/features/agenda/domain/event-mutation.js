@@ -43,7 +43,8 @@ export function normalizeExpectedEventVersion(value) {
  *   eventId: unknown,
  *   expectedUpdatedAt: unknown,
  *   action: string,
- *   eventDraft?: NormalizedEventDraft | null
+ *   eventDraft?: NormalizedEventDraft | null,
+ *   protectedTimeDecisions?: readonly Record<string, unknown>[]
  * }} input
  */
 export function normalizeEventMutation({ eventId, expectedUpdatedAt, action, eventDraft = null, protectedTimeDecisions = [] }) {
