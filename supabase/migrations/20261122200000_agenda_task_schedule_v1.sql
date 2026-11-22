@@ -140,7 +140,8 @@ BEGIN
     v_details := jsonb_build_object(
       'changed_fields', to_jsonb(ARRAY['created']::text[]),
       'schedule_status_after', NEW.schedule_status,
-      'conflict_decision_count', jsonb_array_length(NEW.conflict_decisions)
+      'conflict_decision_count', jsonb_array_length(NEW.conflict_decisions),
+      'conflict_decisions_after', NEW.conflict_decisions
     );
     INSERT INTO public.audit_event (
       id, account_user_id, actor_user_id, action, entity_type, entity_id,
@@ -180,7 +181,9 @@ BEGIN
     'schedule_status_before', OLD.schedule_status,
     'schedule_status_after', NEW.schedule_status,
     'conflict_decision_count_before', jsonb_array_length(OLD.conflict_decisions),
-    'conflict_decision_count_after', jsonb_array_length(NEW.conflict_decisions)
+    'conflict_decision_count_after', jsonb_array_length(NEW.conflict_decisions),
+    'conflict_decisions_before', OLD.conflict_decisions,
+    'conflict_decisions_after', NEW.conflict_decisions
   );
 
   INSERT INTO public.audit_event (
