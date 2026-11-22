@@ -172,10 +172,13 @@ export async function handleRequest(
     return json({ error: "EVENT_MUTATION_BODY_MUST_BE_AN_OBJECT" }, 422);
   }
   const input = body as Record<string, unknown>;
-  const allowedKeys = input.action === "edit"
-    ? ["action", "event", "eventId", "expectedUpdatedAt", "protectedTimeDecisions"]
+  const requiredKeys = input.action === "edit"
+    ? ["action", "event", "eventId", "expectedUpdatedAt"]
     : ["action", "eventId", "expectedUpdatedAt"];
-  if (Object.keys(input).length !== allowedKeys.length
+  const allowedKeys = input.action === "edit"
+    ? [...requiredKeys, "protectedTimeDecisions"]
+    : requiredKeys;
+  if (requiredKeys.some((key) => !(key in input))
     || Object.keys(input).some((key) => !allowedKeys.includes(key))) {
     return json({ error: "EVENT_MUTATION_BODY_HAS_UNSUPPORTED_FIELDS" }, 422);
   }
