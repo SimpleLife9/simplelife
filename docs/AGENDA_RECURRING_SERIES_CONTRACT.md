@@ -1,6 +1,6 @@
 # Agenda — recurring series and occurrence contract
 
-**Status:** PRODUCT DECISIONS APPROVED — pure domain engine v1 merged; bounded authoritative resolver batching is in implementation; persistence remains gated.  
+**Status:** PRODUCT DECISIONS APPROVED — recurrence engine and bounded authoritative resolver batching merged; pure occurrence-resolution adapter in implementation; persistence remains gated.  
 **Approval:** Robert approved the complete recurrence v1 proposal on 21 November 2026 (PR #71).  
 **Scope:** This contract defines the bounded v1 recurrence behavior. It does not authorize DDL, hosted migrations, RLS/grant/Auth changes, cron, production data operations, Edge Function deployment or release.
 
@@ -149,3 +149,16 @@ The `agenda-time-resolve` Edge Function supports a bounded atomic batch request 
 - Every range in a batch is resolved against the same loaded, pinned TZDB release and resolver build. All-day occurrences remain date-only and are excluded from this endpoint.
 - This transport limit is separate from the recurrence planner's 90-day horizon and 500-candidate planning ceiling. A planner batch must be split into transport batches of at most 25 timed ranges.
 - The endpoint performs no database writes and does not authorize deployment. The trusted write/materialization path remains a separate gated implementation.
+
+
+## 13. Pure occurrence-to-resolver adapter
+
+The browser/domain adapter joins the recurrence planner with the authoritative batch resolver without performing network calls or persistence:
+
+- It receives planned occurrences and explicit end-local-date-time endpoints keyed by stable `occurrenceKey`.
+- It creates request batches of at most 25 timed ranges, preserving occurrence order and the original stable key alongside each request range.
+- Start wall time is taken from the occurrence's effective local date/time, IANA zone and approved fold/gap defaults. Moved occurrences resolve their effective local slot while retaining their original key.
+- All-day occurrences remain date-only output and are never placed in resolver requests or given artificial UTC instants.
+- End wall time is intentionally explicit input. `durationMinutes` is retained as occurrence metadata but is not converted to an end wall time by this adapter until product semantics define elapsed-vs-civil duration over DST transitions.
+- Joining validates response count, order (requested start/end local values), timezone, authoritative source, TZDB/resolver version and positive UTC interval before associating returned instants and resolution metadata with the original occurrence key.
+- The adapter is pure. It makes no network request, writes no records and does not authorize migrations, Edge Function deployment or production release.
