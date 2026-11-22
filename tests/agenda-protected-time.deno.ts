@@ -226,6 +226,17 @@ Deno.test("Protected Time mutation hash binds action, block, expected version an
   assertEquals(first.payloadHash, replay.payloadHash, "stable canonical hash");
   assertEquals(first.payloadHash === changed.payloadHash, false, "changed intent hash");
   assertEquals(first.payloadHash.length, 64, "SHA-256 length");
+  const concurrentCreate = await hashProtectedTimeMutationIntent({
+    action: "create", blockId: "019a0000-0000-7000-8000-000000000399", expectedUpdatedAt: null, blockDraft: draft,
+  });
+  assertEquals(first.payloadHash, concurrentCreate.payloadHash, "create intent is stable across racing generated IDs");
+  const otherAction = await hashProtectedTimeMutationIntent({
+    action: "edit", blockId: BLOCK_ID, expectedUpdatedAt: VERSION, blockDraft: draft,
+  });
+  const otherBlock = await hashProtectedTimeMutationIntent({
+    action: "edit", blockId: "019a0000-0000-7000-8000-000000000399", expectedUpdatedAt: VERSION, blockDraft: draft,
+  });
+  assertEquals(otherAction.payloadHash === otherBlock.payloadHash, false, "non-create intent remains block-scoped");
 });
 
 Deno.test("authenticated one-off create resolves IANA and calls only the owner-scoped RPC", async () => {
