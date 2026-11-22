@@ -1,6 +1,6 @@
 # Agenda Event Create Idempotency — Contract v1
 
-**Status:** CONTRACT CLOSED FOR PHASE 1 DESIGN; DATABASE LEDGER / RPC / EDGE WRITER NOT IMPLEMENTED  
+**Status:** CONTRACT CLOSED; SOURCE LEDGER + ATOMIC SQL ROUTINE PREPARED; CI VALIDATION PENDING  
 **Date:** 22 November 2026  
 **Main baseline:** \`d1ff5d1d401f0e8bb0acdbe7386c5d6c18805973\`  
 **Scope:** one-off Event creation only
@@ -172,10 +172,24 @@ The local/ephemeral CI implementation must prove:
 11. Direct authenticated/anon access to the ledger is denied; service-role operations are owner-filtered; no direct audit privileges are added.
 12. Replay still works without invoking IANA resolution and after a simulated resolver/TZDB version change.
 
-## 9. Explicit non-effects and next implementation unit
+## 9. Source implementation — idempotency ledger + atomic PostgreSQL routine
 
-This PR's contract/helper does not create the ledger, SQL routine, Edge Function, HTTP endpoint, UI, local outbox, migration, grant, policy, RPC or deployed resource. It does not apply the existing Event migration to hosted Supabase.
+The next implementation unit has now been prepared in source on branch `feat/agenda-event-idempotency-atomic-ledger-v1`:
 
-Next implementation unit: add the server-only idempotency ledger and atomic SQL routine, then run the concurrency/rollback/RLS integration suite against ephemeral local PostgreSQL. After that passes, build the authenticated Event writer that uses the profile resolver, domain normalizer, authoritative IANA resolver, serializer and atomic routine.
+- Migration: `supabase/migrations/20261122140500_agenda_event_idempotency_v1.sql`.
+- Ledger: `public.event_create_request`, owner-scoped by `(owner_user_id, idempotency_key)`, RLS enabled with no browser policy/grants, service-role SELECT/INSERT/UPDATE only. The minimal receipt stores canonical version/hash, result Event ID, original creation timestamp/status and created_at; it deliberately has no FK to calendar_event, preserving a retry tombstone after Event purge.
+- Atomic routine: `public.create_calendar_event_once(...)`, `SECURITY INVOKER`, fixed `search_path=pg_catalog`, EXECUTE granted only to `service_role`. It validates the UUIDv7 key, v1 payload version, SHA-256 format, exact 26-key serialized Event shape, verified owner equality, creatable status and active lifecycle.
+- First claim writes the Event through the existing calendar_event trigger and completes the receipt in one transaction. Same key/hash replays the original receipt; same key/different hash returns 409. PostgreSQL's unique owner/key constraint serializes concurrent calls. Failed Event/audit writes roll back both the Event and the key claim.
+- Sequential SQL suite: `scripts/sql/agenda-event-idempotency.test.sql`, covering catalog ACL/RLS, exact receipt replay, 409 conflict, owner-scoped same-key isolation, new-key creation, owner tampering rejection, browser ledger denial and rollback/retry after forced audit failure.
+- Concurrent smoke: `scripts/agenda-event-idempotency-concurrency-smoke.mjs`, opens independent psql sessions to verify same-key/same-hash replay and same-key/different-hash 409 races, then checks Event/audit/receipt counts.
+- CI runs both suites only against ephemeral local Supabase Postgres after migration replay. They are not hosted operations.
+
+**Validation evidence at this revision:** source is prepared; the new PR CI has not yet completed on its exact head. Do not call the ledger/routine tested until the SQL and concurrent-session smoke succeed, followed by post-merge CI on the exact main SHA.
+
+## 10. Explicit non-effects and next implementation unit
+
+This implementation does not create the authenticated Event Edge Function, HTTP endpoint, browser outbox, CRUD/UI or deployed resource. It does not apply either Event migration to hosted Supabase.
+
+Next implementation unit after this ledger PR passes: implement the authenticated Event writer that uses `resolveActiveEventProfile(ctx)`, `createEventDraft()`, the authoritative IANA resolver, `buildEventInsertRecord()`, `hashEventCreateIntent()` and `create_calendar_event_once(...)`. Add bounded-body/auth tests, replay-before-IANA tests and owner isolation before any hosted deployment.
 
 **Human Gate remains independent and mandatory** before any hosted DDL, remote privilege change or Edge Function deployment.

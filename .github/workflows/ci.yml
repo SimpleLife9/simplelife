@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: simplelife-ci-${{ github.ref }}
+  group: simplelife-ci-v2-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -115,6 +115,12 @@ jobs:
       - name: Test Event persistence and append-only audit invariants in ephemeral local Postgres
         run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/agenda-event-persistence.test.sql
 
+      - name: Test Event create idempotency ledger and atomic routine in ephemeral local Postgres
+        run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/agenda-event-idempotency.test.sql
+
+      - name: Test concurrent Event create idempotency claims in ephemeral local Postgres
+        run: node scripts/agenda-event-idempotency-concurrency-smoke.mjs
+
       - name: Verify Agenda auth in the actual local Edge Runtime
         run: node scripts/agenda-edge-runtime-smoke.mjs
 
@@ -122,7 +128,9 @@ jobs:
         if: always()
         run: |
           if command -v supabase >/dev/null 2>&1; then
-            supabase stop --no-backup
+            if ! timeout 90s supabase stop --no-backup; then
+              docker ps -aq --filter "name=supabase_" | xargs -r docker rm -f || true
+            fi
           fi
 
       - name: Restore tracked Supabase config after temporary CI override

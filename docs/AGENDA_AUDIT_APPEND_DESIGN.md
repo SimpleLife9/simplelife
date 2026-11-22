@@ -281,9 +281,23 @@ The Phase 1 one-off Event-create idempotency contract is now closed at the desig
 - Canonical request identity: versioned `event-create-v1` positional JSON plus server-computed SHA-256. Zoned-civil hashes preserve the original local intent and exclude resolver/TZDB outputs so a retry remains the same intent after rules updates.
 - Same owner/key/hash: replay the stored original 201 receipt; no new Event/audit.
 - Same owner/key/different hash: 409 `IDEMPOTENCY_KEY_REUSED`.
-- Concurrency/atomicity: the future server-only PostgreSQL routine claims the unique key, inserts the Event, allows the audit trigger append, and records a minimal receipt in one transaction.
+- Concurrency/atomicity: the server-only PostgreSQL routine claims the unique key, inserts the Event, allows the audit trigger append, and records a minimal receipt in one transaction. Source implementation is in `supabase/migrations/20261122140500_agenda_event_idempotency_v1.sql`; it remains local/CI-only until a separate hosted Human Gate.
 - The original user payload is not copied into the ledger. The minimal key/hash/Event receipt remains as a tombstone while the owner profile exists, including after Event purge, and is removed only by the approved account-purge procedure.
 
 The pure helper `src/features/agenda/domain/event-idempotency.js` implements canonical intent construction, UUIDv7 key validation and SHA-256 hashing; Deno contract tests cover semantic stability and resolver-version independence.
 
-**Not implemented yet:** ledger DDL, atomic SQL routine, concurrency/rollback SQL tests, client outbox persistence, or authenticated Event Edge writer. The next code unit is the local-only ledger + atomic routine and its PostgreSQL integration tests. The Human Gate before hosted DDL or deployment remains unchanged.
+**Source implementation prepared (PR validation pending):** ledger migration `20261122140500_agenda_event_idempotency_v1.sql`, SQL suite `scripts/sql/agenda-event-idempotency.test.sql`, and two-session concurrency smoke `scripts/agenda-event-idempotency-concurrency-smoke.mjs`. CI runs all three only against ephemeral local Supabase after migration replay. The Edge writer and client outbox remain unimplemented. The Human Gate before hosted DDL or deployment remains unchanged.
+
+
+## 11. Source idempotency ledger and atomic Event create routine — 22 November 2026
+
+The first source implementation is prepared on `feat/agenda-event-idempotency-atomic-ledger-v1`:
+
+- Migration `supabase/migrations/20261122140500_agenda_event_idempotency_v1.sql` creates `public.event_create_request` with owner-scoped key, canonical payload version/hash and minimal receipt. It has RLS enabled, no browser grants or policies, and SELECT/INSERT/UPDATE for service_role only. The receipt does not have a cascading FK to `calendar_event`, so it remains a tombstone after Event purge.
+- `public.create_calendar_event_once(...)` is SECURITY INVOKER with fixed `search_path=pg_catalog`, EXECUTE only to service_role. The routine validates the UUIDv7 key, supported payload version/hash, exact serialized Event key set, owner/creator/updater equality and initial lifecycle/status. Unique `(owner_user_id,idempotency_key)` claim serializes concurrent requests.
+- New key: claim + Event insert + existing Event audit trigger + minimal receipt occur in one transaction. Same hash replays the original receipt; different hash returns 409. If Event or audit insert fails, PostgreSQL rolls back the key claim and Event together.
+- SQL tests cover role grants/RLS, exact receipt replay, 409, same key across two owners, different key creates new Event, owner tampering rejection, direct browser-role ledger denial, forced audit failure rollback and retry.
+- A Node smoke starts two independent psql sessions to verify same-key/same-hash replay and same-key/different-hash conflict under real concurrent transactions, then asserts one Event/audit/receipt per winning request.
+- `.github/workflows/ci.yml` runs these tests only against the ephemeral local Supabase Postgres stack after migrations. No hosted database is touched.
+
+**Validation status:** source branch has the migration, tests and CI wiring prepared. The PR head CI must pass the new local SQL and concurrent-session smoke before merge; post-merge CI must then pass on exact main SHA. The authenticated Event Edge writer, client outbox, API endpoint and app CRUD remain separate pending implementation.
