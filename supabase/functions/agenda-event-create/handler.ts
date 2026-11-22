@@ -189,8 +189,8 @@ export async function handleRequest(
       eventId,
       ownerProfileId: profile.profileId,
       now,
-      protectedTimeDecisions: conflictAssessment.assessment.decisions,
-      protectedTimeSnapshot: conflictAssessment.assessment.snapshot,
+      protectedTimeDecisions: [...conflictAssessment.assessment.decisions],
+      protectedTimeSnapshot: [...conflictAssessment.assessment.snapshot],
     });
     const result = await ctx.supabaseAdmin.rpc("create_calendar_event_once", {
       p_owner_user_id: profile.profileId,
