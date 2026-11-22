@@ -1,8 +1,9 @@
 # Agenda — trusted Event writes and append-only audit path
 
-**Status:** SECURITY / DATA DESIGN PROPOSAL — NOT IMPLEMENTED  
-**Date:** 22 November 2026 (read-only catalog refresh)  
-**Repository baseline:** `main` SHA `3e861d5a1c17297ff99ba4e96849d8565e80fe2b`  
+**Status:** SOURCE MIGRATION PREPARED IN FEATURE BRANCH — NOT APPLIED TO HOSTED SUPABASE  
+**Last reviewed:** 22 November 2026  
+**Main baseline for this slice:** `09e7a46bc4f960ab36f6e45aed9da1fbe83e30ae`  
+**Feature branch:** `feat/agenda-event-persistence-audit-v1`  
 **Supabase target inspected read-only:** `Simplelife_dev` / `iybnjrnysiikbtokyshg` / PostgreSQL 17.12
 
 This document defines a safe route for the first persisted Phase 1 Event. It is a design artifact only: no migration, DDL, function, trigger, grant, RLS policy, row write, Auth setting or hosted deployment is authorized by this document.
@@ -252,3 +253,19 @@ The UUIDv7 helper must satisfy the existing `audit_event.id_check`: 48-bit Unix-
 - Test retries with the selected Event-create idempotency design, if adopted; the same key/same payload must not create duplicate Events or audit rows.
 
 No production migration, function deploy, key change, Auth/RLS/grant change, cron, row write or release is authorized by this design. A separate explicit Human Gate is required before any hosted DDL or deployment.
+
+
+## 9. Source migration and ephemeral SQL verification — 22 November 2026
+
+The first Event persistence migration has been prepared on feature branch `feat/agenda-event-persistence-audit-v1`:
+
+- `supabase/migrations/20261122133000_agenda_event_persistence_v1.sql` creates the one-off `public.calendar_event` table, owner-scoped SELECT policy, exact object grants, a private UUIDv7 generator and a transaction-bound append trigger for `public.audit_event`.
+- The migration explicitly removes all direct privileges on the existing `audit_event` from `PUBLIC`, `anon` and `service_role`, while preserving authenticated owner-scoped SELECT. It does not grant direct audit INSERT to any API role.
+- `scripts/sql/agenda-event-persistence.test.sql` is an ephemeral PostgreSQL test suite. It covers UUIDv7 shape/uniqueness, RLS and role ACLs, two-owner isolation, Event insert/update append behavior, no-op suppression, append-failure rollback and audit immutability. The test transaction ends with ROLLBACK.
+- `.github/workflows/ci.yml` runs this suite only against the ephemeral local Supabase Postgres after the six historical migrations and the CI-only platform RLS bootstrap.
+
+**Evidence state at this document revision:** source files are prepared on the feature branch; the new SQL suite has not yet completed CI. Do not call the migration validated until the exact PR head passes its CI and the same main SHA passes post-merge CI.
+
+**Hosted boundary remains unchanged:** no linked CLI command, remote migration, `db push`, schema/ACL/RLS/Auth/data change, secret modification or Edge Function deployment was performed. The last read-only catalog evidence remains the baseline in §7. `calendar_event` is not asserted to exist in Simplelife_dev. A separate explicit Human Gate is still required before any hosted DDL or deployment.
+
+**Rollback boundary:** the source migration must be reviewed against a concrete down/compensation procedure before hosted application. Any rollback must not rewrite or delete pre-existing append-only audit history.
