@@ -3,7 +3,7 @@
 -- a separate Human Gate. No exclusion constraint: overlaps are explained to the user
 -- and only an explicit user decision can preserve an overlap.
 
-CREATE OR REPLACE FUNCTION private.is_valid_protected_weekday_set(p_weekdays smallint[])
+CREATE OR REPLACE FUNCTION public.is_valid_protected_weekday_set(p_weekdays smallint[])
 RETURNS boolean
 LANGUAGE sql
 IMMUTABLE
@@ -19,9 +19,10 @@ AS $function$
     );
 $function$;
 
-ALTER FUNCTION private.is_valid_protected_weekday_set(smallint[]) OWNER TO postgres;
-REVOKE ALL PRIVILEGES ON FUNCTION private.is_valid_protected_weekday_set(smallint[])
+ALTER FUNCTION public.is_valid_protected_weekday_set(smallint[]) OWNER TO postgres;
+REVOKE ALL PRIVILEGES ON FUNCTION public.is_valid_protected_weekday_set(smallint[])
   FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.is_valid_protected_weekday_set(smallint[]) TO service_role;
 
 CREATE TABLE public.protected_time_block (
   id uuid PRIMARY KEY,
@@ -113,7 +114,7 @@ CREATE TABLE public.protected_time_block (
       AND (end_date_exclusive IS NULL OR (
         isfinite(end_date_exclusive) AND end_date_exclusive > start_date
       ))
-      AND private.is_valid_protected_weekday_set(weekdays)
+      AND public.is_valid_protected_weekday_set(weekdays)
       AND start_time_local IS NOT NULL
       AND end_time_local IS NOT NULL
       AND ends_next_day IS NOT NULL
