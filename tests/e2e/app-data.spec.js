@@ -2973,6 +2973,88 @@ test('Agenda retries TaskSchedule with a fresh idempotency key after conflict sn
   expect(task.due_date).toBe(tomorrow);
 });
 
+test('Agenda requires explicit version-bound consent before overlapping an active TaskSchedule', async ({ page }) => {
+  const today = await todayInBrowserHavana(page);
+  const tomorrow = await page.evaluate((value) => {
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
+  }, today);
+  const task = {
+    id: '019a0000-0000-7000-8000-000000000513',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    action: 'Preparar presupuesto',
+    description: 'Reserva con cruce explícito.',
+    status: 'todo',
+    due_date: tomorrow,
+    priority: 2,
+    archived_at: null,
+    deleted_at: null,
+  };
+  const existingScheduleId = '019a0000-0000-7000-8000-000000000599';
+  const existingScheduleUpdatedAt = '2026-11-22T18:00:00.000Z';
+  const { taskSchedules, taskScheduleMutationRequests } = await mockSupabaseSession(page, {
+    tasks: [task],
+    taskScheduleConflictResponses: [{
+      status: 409,
+      body: {
+        error: 'TASK_SCHEDULE_OVERLAPS',
+        eventConflicts: [],
+        protectedTimeConflicts: [],
+        taskScheduleConflicts: [{
+          taskScheduleId: existingScheduleId,
+          taskScheduleUpdatedAt: existingScheduleUpdatedAt,
+          startsAt: tomorrow + 'T14:30:00.000Z',
+          endsAt: tomorrow + 'T15:30:00.000Z',
+          timeZone: 'America/Havana',
+          requiredDecision: 'keep_overlap',
+        }],
+      },
+    }],
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.getByRole('navigation', { name: 'Navegación principal' })
+    .getByRole('button', { name: /Agenda/ }).click();
+
+  await page.getByRole('button', { name: 'Tareas programadas', exact: true }).click();
+  const section = page.getByRole('region', { name: 'Reservas de tareas' });
+  await section.getByRole('button', { name: 'Programar tarea' }).click();
+  await section.getByLabel('Tarea').selectOption(task.id);
+  await section.getByLabel('Comienza').fill(tomorrow + 'T09:00');
+  await section.getByLabel('Termina').fill(tomorrow + 'T10:00');
+  await section.getByRole('button', { name: 'Crear reserva' }).click();
+
+  const conflictDialog = page.getByRole('alertdialog');
+  await expect(conflictDialog).toContainText('Otra reserva de tarea');
+  await expect(conflictDialog).toContainText('se conservará sin moverla');
+  const decisionSelect = conflictDialog.getByLabel('Tu decisión');
+  await expect(decisionSelect).toBeVisible();
+  await expect(decisionSelect.locator('option[value="keep_overlap"]')).toHaveText('Mantener ambas reservas');
+  await expect(conflictDialog.getByRole('button', { name: 'Guardar con mis decisiones' })).toBeDisabled();
+  await decisionSelect.selectOption('keep_overlap');
+  await conflictDialog.getByRole('button', { name: 'Guardar con mis decisiones' }).click();
+
+  await expect(page.getByText('Reserva de tarea creada.')).toBeVisible();
+  expect(taskScheduleMutationRequests).toHaveLength(2);
+  expect(taskScheduleMutationRequests[0].key).toBe(taskScheduleMutationRequests[1].key);
+  expect(taskScheduleMutationRequests[1].payload.taskScheduleDecisions).toEqual([{
+    taskScheduleId: existingScheduleId,
+    taskScheduleUpdatedAt: existingScheduleUpdatedAt,
+    decision: 'keep_overlap',
+  }]);
+  expect(taskSchedules).toHaveLength(1);
+  expect(taskSchedules[0]).toMatchObject({
+    task_id: task.id,
+    schedule_status: 'proposed',
+    owner_user_id: profile.id,
+  });
+  expect(task.status).toBe('todo');
+  expect(task.due_date).toBe(tomorrow);
+});
+
 test('Agenda keeps day, week and month controls usable on a 390px mobile screen without page overflow', async ({ page }) => {
   await mockSupabaseSession(page);
   await page.setViewportSize({ width: 390, height: 844 });
