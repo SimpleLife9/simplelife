@@ -1,0 +1,52 @@
+.task-schedule-page{display:grid;gap:18px;padding:4px 0 28px;min-width:0}
+.task-schedule-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;padding:17px 18px;border:1px solid #e7ede6;border-radius:14px;background:linear-gradient(135deg,#fbfdf9,#f4f8f2)}
+.task-schedule-heading>div{min-width:0}
+.task-schedule-heading h2{margin:5px 0 6px;color:#29483b;font-family:Manrope,sans-serif;font-size:1.24rem}
+.task-schedule-heading p{margin:0;color:#77877c;font-size:.76rem;line-height:1.55}
+.task-schedule-heading>.button{flex:0 0 auto;white-space:nowrap}
+.task-schedule-form{display:grid;gap:14px;padding:17px;border:1px solid #dfe9df;border-radius:14px;background:#fff;box-shadow:0 8px 28px rgba(29,54,37,.05)}
+.task-schedule-form-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.task-schedule-form-heading h3,.task-schedule-section-heading h3{margin:4px 0 0;color:#345244;font-size:.94rem}
+.task-schedule-deadline,.task-schedule-timezone{margin:0;color:#7c8b80;font-size:.7rem;line-height:1.5}
+.task-schedule-deadline strong,.task-schedule-timezone strong{color:#496352}
+.task-schedule-section-heading{display:flex;align-items:center;gap:9px;padding:4px 1px 0}
+.task-schedule-section-heading h3{margin:0;font-family:Manrope,sans-serif}
+.task-schedule-section-heading>span{display:inline-grid;place-items:center;min-width:23px;height:23px;padding:0 7px;border-radius:20px;background:#edf3eb;color:#55735d;font-size:.68rem;font-weight:800}
+.task-schedule-list{display:grid;gap:10px}
+.task-schedule-card{display:flex;align-items:center;justify-content:space-between;gap:16px;min-width:0;padding:14px 15px;border:1px solid #e5ece4;border-radius:12px;background:#fff}
+.task-schedule-card-main{display:grid;gap:6px;min-width:0}
+.task-schedule-card-title{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.task-schedule-card-title>strong{color:#355243;font-size:.8rem;overflow-wrap:anywhere}
+.task-schedule-card-main>p{margin:0;color:#607467;font-size:.72rem;line-height:1.5}
+.task-schedule-card-main>small{color:#91a096;font-size:.64rem}
+.task-schedule-status{display:inline-flex;align-items:center;padding:4px 7px;border:1px solid #e2eae1;border-radius:20px;background:#f8faf7;color:#728276;font-size:.58rem;font-weight:800;white-space:nowrap}
+.task-schedule-status.is-confirmed{border-color:#d5e7d5;background:#eef6ed;color:#3d744e}
+.task-schedule-status.is-proposed{border-color:#e9e3cd;background:#faf7ed;color:#8b7746}
+.task-schedule-status.is-cancelled{background:#fbf4f1;color:#986b60}
+.task-schedule-status.is-released,.task-schedule-status.is-elapsed{background:#f1f3f0;color:#7f8980}
+.task-schedule-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex-wrap:wrap;flex:0 0 auto}
+.task-schedule-actions .agenda-secondary-button{padding:7px 9px;font-size:.64rem}
+.task-schedule-list.is-history .task-schedule-card{background:#fafbf9}
+.task-schedule-conflict-backdrop{z-index:75}
+.task-schedule-conflict-dialog{width:min(680px,100%)}
+.task-schedule-conflict-dialog .agenda-confirm-copy{padding-bottom:14px}
+.task-schedule-conflict-item{display:grid;grid-template-columns:minmax(0,1fr) minmax(190px,.8fr);gap:14px;align-items:center;padding:12px;border:1px solid #e5ece4;border-radius:11px;background:#fff}
+.task-schedule-conflict-item>div{display:grid;gap:4px;min-width:0}
+.task-schedule-conflict-item>div strong{color:#365344;font-size:.77rem;overflow-wrap:anywhere}
+.task-schedule-conflict-item>div small{color:#7f8f84;font-size:.64rem;line-height:1.5}
+.task-schedule-conflict-item>div span{color:#93a097;font-size:.62rem}
+@media(max-width:760px){
+  .task-schedule-heading{align-items:flex-start;flex-direction:column}
+  .task-schedule-heading>.button{width:100%}
+  .task-schedule-card{align-items:flex-start;flex-direction:column}
+  .task-schedule-actions{width:100%;justify-content:flex-start}
+}
+@media(max-width:600px){
+  .task-schedule-page{gap:13px}
+  .task-schedule-heading{padding:14px}
+  .task-schedule-form{padding:14px}
+  .task-schedule-conflict-dialog .agenda-dialog-actions{display:grid;grid-template-columns:1fr}
+  .task-schedule-conflict-dialog .agenda-dialog-actions>*{width:100%;min-width:0}
+  .task-schedule-conflict-item{grid-template-columns:minmax(0,1fr);gap:10px}
+  .task-schedule-card{padding:12px}
+}
