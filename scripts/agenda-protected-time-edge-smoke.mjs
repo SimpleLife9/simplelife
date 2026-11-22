@@ -34,7 +34,7 @@ function newKey() {
 }
 function blockVersion(blockId) {
   return sqlScalar(
-    "SELECT to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\\\"T\\\"HH24:MI:SS.US\\\"Z\\\"') " +
+    "SELECT to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') " +
     "FROM public.protected_time_block WHERE id = '" + blockId + "'::uuid",
   );
 }
@@ -47,8 +47,8 @@ function blockSnapshot(blockId) {
 }
 
 const status = run("supabase", ["status"]);
-const publishable = status.match(/Publishable\\s*[│|]\\s*(sb_publishable_[A-Za-z0-9_-]+)/i)?.[1];
-const secret = status.match(/Secret\\s*[│|]\\s*(sb_secret_[A-Za-z0-9_-]+)/i)?.[1];
+const publishable = status.match(/Publishable\s*[│|]\s*(sb_publishable_[A-Za-z0-9_-]+)/i)?.[1];
+const secret = status.match(/Secret\s*[│|]\s*(sb_secret_[A-Za-z0-9_-]+)/i)?.[1];
 if (!publishable || !secret) fail("Local Supabase status did not expose publishable/secret keys.");
 
 async function createUser(label) {
