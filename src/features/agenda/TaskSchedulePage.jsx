@@ -279,6 +279,10 @@ export function TaskSchedulePage({ profile, refreshKey, runAction, busy }) {
           || response.error === 'PROTECTED_TIME_CONFLICTS'
           || response.error === 'TASK_SCHEDULE_CONFLICTS_CHANGED'
         )) {
+          if (response.error === 'TASK_SCHEDULE_CONFLICTS_CHANGED') {
+            // The SQL writer commits this 409 receipt; the next retry needs a new key.
+            setPendingKey(null);
+          }
           setConflictPrompt(response);
           setConflictChoices({});
           throw new Error(response.error === 'TASK_SCHEDULE_CONFLICTS_CHANGED'
