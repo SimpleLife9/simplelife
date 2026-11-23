@@ -72,6 +72,10 @@ BEGIN
        OR item.value->>'occurrence_key' NOT LIKE 'v1:' || p_series_event_id::text || ':%'
        OR (item.value->>'original_local_date')::date < p_materialization_date
        OR (item.value->>'original_local_date')::date > p_materialization_date + 89
+       OR (v_event.recurrence_effective_from IS NOT NULL
+         AND (item.value->>'original_local_date')::date < v_event.recurrence_effective_from)
+       OR (v_event.recurrence_effective_through IS NOT NULL
+         AND (item.value->>'original_local_date')::date > v_event.recurrence_effective_through)
        OR item.value->>'actual_local_date' IS DISTINCT FROM item.value->>'original_local_date'
        OR item.value->>'temporal_kind' IS DISTINCT FROM v_event.temporal_kind
        OR (
