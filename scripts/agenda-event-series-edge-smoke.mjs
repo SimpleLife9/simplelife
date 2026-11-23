@@ -87,6 +87,9 @@ server.stdout.on("data", capture);
 server.stderr.on("data", capture);
 let exitCode = null;
 server.on("exit", (code) => { exitCode = code; });
+let materializerServer = null;
+let materializerExitCode = null;
+let materializerLogs = "";
 
 async function invoke(token, key, payload) {
   return await fetch(base + "/functions/v1/agenda-event-series-create", {
@@ -142,7 +145,7 @@ try {
       interval: 1,
       startDate,
       temporalKind: "all_day",
-      count: 2,
+      count: 3,
     },
     endDayOffset: 0,
   };
@@ -156,7 +159,7 @@ try {
     "Authenticated recurring Event create",
   );
   assertUuid(first.seriesEventId, UUID_V7_PATTERN, "Created series Event id");
-  equal(first.materializedCount, 2, "Materialized occurrence count");
+  equal(first.materializedCount, 3, "Materialized occurrence count");
   equal(first.replayed, false, "First create replay marker");
 
   const replay = await expectJson(
@@ -174,16 +177,89 @@ try {
   const storedOccurrences = sqlScalar(
     "SELECT count(*) FROM public.calendar_event_occurrence WHERE calendar_event_id = '" + first.seriesEventId + "'::uuid AND owner_user_id = '" + profileId + "'::uuid",
   );
-  equal(storedOccurrences, "2", "Exactly two persisted occurrences after retry");
+  equal(storedOccurrences, "3", "Exactly three persisted occurrences after retry");
 
-  console.log("PASS: real Auth JWT creates a recurring Event through the local Edge Runtime.");
-  console.log("PASS: invalid API-key Bearer is rejected by the authenticated wrapper.");
-  console.log("PASS: owner-scoped series + two occurrence rows persist; same-key retry replays one identity without duplicates.");
-} finally {
+  // Simulate one missing future slot in disposable CI data. The authenticated
+  // top-up must restore exactly that key, and a second retry must insert zero.
+  const missingDate = addCalendarDay(startDate);
+  const deleted = sqlScalar(
+    "DELETE FROM public.calendar_event_occurrence WHERE calendar_event_id = '" + first.seriesEventId
+      + "'::uuid AND owner_user_id = '" + profileId + "'::uuid AND original_local_date = '" + missingDate + "' RETURNING id",
+  );
+  assertUuid(deleted, UUID_V7_PATTERN, "Disposable missing occurrence id");
+
   server.kill("SIGTERM");
   await new Promise((resolve) => {
     if (server.exitCode !== null) return resolve();
     const timeout = setTimeout(resolve, 5000);
     server.once("exit", () => { clearTimeout(timeout); resolve(); });
+  });
+
+  materializerServer = spawn("supabase", ["functions", "serve", "agenda-event-series-materialize", "--no-verify-jwt"], {
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, NO_COLOR: "1" },
+  });
+  materializerServer.stdout.on("data", (chunk) => { materializerLogs = (materializerLogs + chunk.toString()).slice(-16000); });
+  materializerServer.stderr.on("data", (chunk) => { materializerLogs = (materializerLogs + chunk.toString()).slice(-16000); });
+  materializerServer.on("exit", (code) => { materializerExitCode = code; });
+
+  let materializerReady = false;
+  const materializerDeadline = Date.now() + 60000;
+  while (Date.now() < materializerDeadline) {
+    if (materializerExitCode !== null) fail("Recurring materializer Edge server exited early: " + materializerExitCode + "\\n" + materializerLogs);
+    try {
+      const probe = await fetch(base + "/functions/v1/agenda-event-series-materialize", {
+        method: "GET",
+        headers: { apikey: publishable, authorization: "Bearer " + publishable },
+        signal: AbortSignal.timeout(2000),
+      });
+      if (probe.status === 401) { materializerReady = true; break; }
+      await probe.body?.cancel().catch(() => {});
+    } catch { /* bounded readiness retry */ }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  if (!materializerReady) fail("Recurring materializer Edge Runtime did not become ready.\\n" + materializerLogs);
+
+  async function invokeMaterializer(token) {
+    return await fetch(base + "/functions/v1/agenda-event-series-materialize", {
+      method: "POST",
+      headers: {
+        apikey: publishable,
+        authorization: "Bearer " + token,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ seriesIds: [first.seriesEventId] }),
+      signal: AbortSignal.timeout(20000),
+    });
+  }
+
+  const invalidMaterializerBearer = await invokeMaterializer(publishable);
+  equal(invalidMaterializerBearer.status, 401, "Materializer rejects publishable API key as Bearer");
+  const topUp = await expectJson(await invokeMaterializer(session.access_token), 200, "Authenticated recurring top-up");
+  equal(topUp.processedSeriesCount, 1, "Top-up processed one series");
+  equal(topUp.materializedCount, 1, "Top-up restored one missing occurrence");
+  const topUpRetry = await expectJson(await invokeMaterializer(session.access_token), 200, "Idempotent recurring top-up retry");
+  equal(topUpRetry.materializedCount, 0, "Top-up retry inserts no duplicate rows");
+  const finalOccurrenceCount = sqlScalar(
+    "SELECT count(*) FROM public.calendar_event_occurrence WHERE calendar_event_id = '" + first.seriesEventId + "'::uuid AND owner_user_id = '" + profileId + "'::uuid",
+  );
+  equal(finalOccurrenceCount, "3", "Top-up restores exactly three occurrence rows");
+
+  console.log("PASS: real Auth JWT creates a recurring Event through the local Edge Runtime.");
+  console.log("PASS: invalid API-key Bearer is rejected by the authenticated wrapper.");
+  console.log("PASS: owner-scoped series + three occurrence rows persist; same-key create retry replays one identity.");
+  console.log("PASS: authenticated rolling-horizon top-up restores a missing future slot once; retry inserts no duplicate.");
+} finally {
+  server.kill("SIGTERM");
+  materializerServer?.kill("SIGTERM");
+  await new Promise((resolve) => {
+    if (server.exitCode !== null && (!materializerServer || materializerServer.exitCode !== null)) return resolve();
+    const timeout = setTimeout(resolve, 5000);
+    server.once("exit", () => {
+      if (!materializerServer || materializerServer.exitCode !== null) { clearTimeout(timeout); resolve(); }
+    });
+    materializerServer?.once("exit", () => {
+      if (server.exitCode !== null) { clearTimeout(timeout); resolve(); }
+    });
   });
 }
