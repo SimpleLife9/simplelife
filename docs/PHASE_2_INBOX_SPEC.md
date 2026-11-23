@@ -111,3 +111,32 @@ Each slice should be a focused PR with exact-SHA CI. The phase closes only when 
 - Request acceptance/shared participant workflows (Phase 7).
 - Guaranteed background recording, offline private synchronization or push delivery (Phase 9).
 - Automatic creation of Event, Habit or Request records before their destination contracts are integrated.
+
+
+## 12. Implementation checkpoint — 23 November 2026
+
+**Status: implementation in progress; Phase 2 is not closed.** Consolidated delivery is tracked in [PR #97](https://github.com/SimpleLife9/simplelife/pull/97). Acceptance must use the final exact SHA and CI result.
+
+### Delivered in the integration branch
+
+- Lossless text capture foundation, with original text retained and first fragment persisted.
+- Secure processing_run queue with owner-scoped enqueue, UUIDv7 idempotency keys, leases, claim/complete/fail lifecycle, bounded retry state and stale-lease rejection.
+- Owner-authenticated processing bridge. The browser can only request a run visible through its own RLS-scoped client; service-role operations remain server-side.
+- Provider-free deterministic rules processor (inbox-rules-v1) that proposes the eight categories. This is explicitly **heuristic processing, not an AI model**; confidence is heuristic affinity, not a probability.
+- Multi-item splitting only at explicit list/bullet boundaries. The SQL completion RPC validates that concatenating every stored fragment reconstructs content_original exactly. Parts remain unreviewed.
+- Inbox UI processing/retry control, per-part review, manual correction, rejection, and explicit task/note/list destination confirmation. No destination is created by classification.
+- Owner-scoped, audited, recoverable trash with a 30-day retention window and idempotent restore/trash RPCs.
+- Normalized duplicate warnings across the latest 250 loaded captures. Duplicates are never merged or deleted automatically.
+- CI coverage for classifier and worker contracts, browser desktop/mobile, ephemeral PostgreSQL RLS/lifecycle/audit, Edge Runtime smoke, Deno type checks and production build.
+
+### Remaining exit gates
+
+1. **Voice/transcription:** no private audio object lifecycle or provider/region/retention choice has been approved. Voice recording/transcription remains unavailable; raw audio is never placed in content_original.
+2. **Actual AI classification:** no AI provider/model or credentials have been approved. The deterministic processor is a safe provider-independent baseline, not a substitute for an AI capability.
+3. **Offline private capture/sync:** remains disabled until encryption, key recovery, conflict handling, idempotency, deletion and platform-specific tests are proven.
+4. **Background retry dispatch:** queue retry metadata and lease recovery exist; the current UI can retry a failed run manually. A scheduled production dispatcher is not configured or activated.
+5. **Coverage limits:** Inbox search and duplicate detection currently cover the latest 250 loaded captures; this is not yet a server-wide indexed search.
+6. **Manual acceptance:** Playwright desktop/mobile does not replace owner acceptance on desktop and a physical Android device.
+7. **Destination readiness:** Event destinations remain gated on the Agenda event writer/PR #93; Habit and Request destinations remain suggestion-only.
+
+No hosted migration, production Edge deployment, secret change, merge, release or production data write is part of this branch. Do not mark Phase 2 closed until every required exit gate has either been implemented and evidenced or explicitly accepted as a deferral by the owner.

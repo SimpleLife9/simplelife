@@ -56,6 +56,10 @@ This is a preparation phase, not a new product module. It prevents new features 
 
 **Dependency:** Agenda event contracts must exist before event classification becomes a supported Inbox destination.
 
+**Implementation status — 23 November 2026: IN PROGRESS / NOT CLOSED.** PR [#97](https://github.com/SimpleLife9/simplelife/pull/97) consolidates the text-capture foundation and secure queue, adds a provider-free deterministic proposal processor, owner-authenticated processing, per-part review/rejection, 30-day recoverable trash with audit, and normalized duplicate warnings without auto-merge. The processor is heuristic, not an AI model. Search/dedup currently cover the latest 250 loaded captures.
+
+**Open exit gates:** private voice/audio storage and transcription provider/region/retention; approved AI model/provider; encrypted offline persistence and recovery; scheduled background retry dispatch; desktop and physical Android owner acceptance. Event destinations remain gated on Agenda; Habit/Request are not auto-created. CI must pass on the final exact PR SHA before any release gate is considered.
+
 ### Phase 3 — ARIA intelligent planner (Vision Phase C)
 
 **Objective:** turn tasks, events, availability and user preferences into an explainable daily plan.
