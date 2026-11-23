@@ -21,3 +21,11 @@ verify_jwt = true
 
 [functions.agenda-protected-time-mutate]
 verify_jwt = true
+
+# User-authenticated queue entry point.
+[functions.inbox-processing-queue]
+verify_jwt = true
+
+# Internal worker; @supabase/server validates the secret apikey header.
+[functions.inbox-processing-worker]
+verify_jwt = false
