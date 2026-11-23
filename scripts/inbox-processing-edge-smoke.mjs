@@ -305,8 +305,6 @@ try {
   processServer = null;
 
   // Verify the bounded scheduled dispatcher through the actual local Edge Runtime.
-  await stopServer(processServer.server);
-  processServer = null;
   queueServer = await startFunction("inbox-processing-queue", { apikey: publishable }, 401);
   const dispatchQueue = await queue(ownerA.accessToken, captureDispatch, keyDispatch);
   equal(dispatchQueue.status, 202, "dispatcher fixture enqueue");

@@ -26,6 +26,11 @@ const authUser = {
   created_at: '2026-11-19T00:00:00.000Z',
   updated_at: '2026-11-19T00:00:00.000Z',
 };
+function normalizeCaptureForDuplicate(value) {
+  return String(value || '').normalize('NFKC').toLocaleLowerCase('es')
+    .replace(/[^\\p{L}\\p{N}]+/gu, ' ').trim().replace(/\\s+/g, ' ');
+}
+
 const profile = {
   id: '00000000-0000-7000-8000-000000000081',
   auth_user_id: authUser.id,
