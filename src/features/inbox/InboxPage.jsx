@@ -36,6 +36,10 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
 
   const [captureSearch, setCaptureSearch] = useState('');
   const [attentionFilter, setAttentionFilter] = useState('needs_review');
+  const [reviewHistoryPartId, setReviewHistoryPartId] = useState(null);
+  const [reviewHistoryRows, setReviewHistoryRows] = useState([]);
+  const [reviewHistoryLoading, setReviewHistoryLoading] = useState(false);
+  const [reviewHistoryError, setReviewHistoryError] = useState('');
 
   const buildCaptureQuery = (offset) => {
     let query = supabase.from('capture').select('*', { count: 'exact' })
@@ -221,6 +225,34 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
     if (error) throw error;
     if (data !== true) throw new Error('No se pudo registrar el rechazo de esta sugerencia.');
   }, 'Sugerencia descartada y decisión registrada en auditoría.');
+
+  const toggleReviewHistory = async (part) => {
+    if (reviewHistoryPartId === part.id) {
+      setReviewHistoryPartId(null);
+      setReviewHistoryRows([]);
+      setReviewHistoryError('');
+      return;
+    }
+    setReviewHistoryPartId(part.id);
+    setReviewHistoryRows([]);
+    setReviewHistoryError('');
+    setReviewHistoryLoading(true);
+    try {
+      const { data, error } = await supabase.from('audit_event')
+        .select('id,occurred_at,details')
+        .eq('entity_type', 'capture_part')
+        .eq('entity_id', part.id)
+        .eq('action', 'capture.part_reviewed')
+        .order('occurred_at', { ascending: false })
+        .limit(30);
+      if (error) throw error;
+      setReviewHistoryRows(data || []);
+    } catch (error) {
+      setReviewHistoryError(error?.message || 'No se pudo cargar el historial de revisión.');
+    } finally {
+      setReviewHistoryLoading(false);
+    }
+  };
 
   const queueAndProcess = async (captureId) => {
     const queued = await supabase.functions.invoke('inbox-processing-queue', {
@@ -472,6 +504,26 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
                   <div className="capture-part-heading"><strong>{categoryLabels[capturePart.category] || 'Fragmento'}</strong>
                     {proposal && <span className="capture-part-confidence">Afinidad heurística: {Math.round(proposal.confidence * 100)}%{proposal.requiresClarification ? ' · necesita aclaración' : ''}</span>}
                     {capturePart.review_status === 'accepted' || capturePart.review_status === 'edited' ? <span className="capture-part-confirmed">Confirmado</span> : null}
+                  </div>
+                  {capturePart.review_status !== 'unreviewed' && <div className="capture-part-history">
+                    <button type="button" className="capture-action-button" disabled={busy || reviewHistoryLoading && reviewHistoryPartId !== capturePart.id} onClick={() => toggleReviewHistory(capturePart)}>
+                      {reviewHistoryPartId === capturePart.id ? 'Ocultar historial' : 'Ver historial'}
+                    </button>
+                    {reviewHistoryPartId === capturePart.id && <div className="capture-history-list" aria-live="polite">
+                      {reviewHistoryLoading ? <p className="muted">Cargando historial…</p>
+                        : reviewHistoryError ? <p className="form-error">{reviewHistoryError}</p>
+                          : reviewHistoryRows.length ? reviewHistoryRows.map((entry) => {
+                            const details = entry.details || {};
+                            const categoryLabels = { task: 'Tarea', event: 'Evento', request: 'Solicitud', habit: 'Hábito', goal_subgoal: 'Meta / submeta', project: 'Proyecto', note_idea: 'Nota / idea', list: 'Lista' };
+                            return <div className="capture-history-entry" key={entry.id}>
+                              <small>{new Intl.DateTimeFormat('es', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Havana' }).format(new Date(entry.occurred_at))}</small>
+                              <strong>{categoryLabels[details.category_before] || 'Sin categoría'} → {categoryLabels[details.category_after] || 'Sin categoría'}</strong>
+                              {details.interpretation_before != null && <p>Antes: {details.interpretation_before}</p>}
+                              {details.interpretation_after != null && <p>Después: {details.interpretation_after}</p>}
+                              <span>{details.review_status_before || '—'} → {details.review_status_after || '—'}</span>
+                            </div>;
+                          }) : <p className="muted">No hay cambios de revisión registrados.</p>}
+                    </div>}
                   </div>
                   {capturePart.original_fragment !== capture.content_original && <p>{capturePart.original_fragment}</p>}
                   {partLink ? <span className="muted">Destino vinculado y trazable.</span> : <>

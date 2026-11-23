@@ -404,3 +404,12 @@
 /* Inbox global search pagination */
 .capture-pagination{display:flex;justify-content:center;align-items:center;padding:14px 0}
 .capture-pagination .capture-action-button{min-width:180px}
+
+/* Inbox per-part review history */
+.capture-part-history{display:grid;gap:7px}
+.capture-history-list{display:grid;gap:8px;padding:10px 11px;border:1px solid #e9eee8;border-radius:9px;background:#fff}
+.capture-history-entry{display:grid;gap:4px;padding-bottom:8px;border-bottom:1px solid #eff2ee}
+.capture-history-entry:last-child{padding-bottom:0;border-bottom:0}
+.capture-history-entry small,.capture-history-entry span{font-size:.64rem;color:#87958b}
+.capture-history-entry strong{font-size:.7rem;color:#486651}
+.capture-history-entry p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:.7rem;color:#58695e}

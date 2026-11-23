@@ -108,6 +108,7 @@ DECLARE
   v_capture_id uuid;
   v_before_category text;
   v_before_status text;
+  v_before_interpretation text;
   v_now timestamptz := clock_timestamp();
 BEGIN
   SELECT up.id INTO v_profile_id
@@ -125,8 +126,8 @@ BEGIN
     RAISE EXCEPTION 'Invalid Inbox review payload' USING ERRCODE = '22023';
   END IF;
 
-  SELECT cp.capture_id, cp.category, cp.review_status
-  INTO v_capture_id, v_before_category, v_before_status
+  SELECT cp.capture_id, cp.category, cp.review_status, cp.interpretation
+  INTO v_capture_id, v_before_category, v_before_status, v_before_interpretation
   FROM public.capture_part cp
   JOIN public.capture c ON c.id = cp.capture_id
   WHERE cp.id = p_capture_part_id AND c.owner_user_id = v_profile_id AND c.deleted_at IS NULL
@@ -147,7 +148,9 @@ BEGIN
     p_audit_id, v_profile_id, v_profile_id, 'capture.part_reviewed', 'capture_part', p_capture_part_id,
     'success', 'user',
     jsonb_build_object(
-      'capture_id',v_capture_id,'category_before',v_before_category,'category_after',p_category,
+      'capture_id',v_capture_id,'category_before',v_before_category,'category_after',COALESCE(p_category, v_before_category),
+      'interpretation_before',v_before_interpretation,
+      'interpretation_after',COALESCE(p_interpretation, v_before_interpretation),
       'review_status_before',v_before_status,'review_status_after',p_review_status
     ), v_now, v_now
   );

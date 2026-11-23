@@ -28,7 +28,7 @@ VALUES('019b2000-0000-7000-8000-000000000101',
        '019b2000-0000-7000-8000-000000000001','Inbox review audit capture');
 INSERT INTO public.capture_part(id,capture_id,part_index,original_fragment,category)
 VALUES('019b2000-0000-7000-8000-000000000201',
-       '019b2000-0000-7000-8000-000000000101',0,'Inbox review audit capture','note_idea');
+       '019b2000-0000-7000-8000-000000000101',0,'Inbox review audit capture','note_idea','Original interpretation');
 
 RESET ROLE;
 SET LOCAL ROLE authenticated;
@@ -93,6 +93,18 @@ BEGIN
         '019b2000-0000-7000-8000-000000000201'
       )) <> 3 THEN
     RAISE EXCEPTION 'Trash, restore and part-review decisions must all be audited';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.audit_event
+    WHERE id='019b2000-0000-7000-8000-000000000303'
+      AND details->>'category_before'='note_idea'
+      AND details->>'category_after'='task'
+      AND details->>'interpretation_before'='Original interpretation'
+      AND details->>'interpretation_after'='Manual correction'
+      AND details->>'review_status_before'='unreviewed'
+      AND details->>'review_status_after'='edited'
+  ) THEN
+    RAISE EXCEPTION 'Review audit must preserve old/new category, interpretation and status';
   END IF;
 END;
 $test$;
