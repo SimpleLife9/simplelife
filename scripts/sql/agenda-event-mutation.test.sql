@@ -94,7 +94,13 @@ DECLARE
     'start_gap_strategy', NULL,
     'end_gap_strategy', NULL,
     'protected_time_decisions', '[]'::jsonb,
-    'protected_time_snapshot', '[]'::jsonb
+    'protected_time_snapshot', '[]'::jsonb,
+    'task_schedule_conflict_decisions', '[]'::jsonb,
+    'task_schedule_snapshot', '[]'::jsonb,
+    'task_schedule_window', jsonb_build_object(
+      'startsAt', '2026-12-25T00:00:00.000Z',
+      'endsAt', '2026-12-27T00:00:00.000Z'
+    )
   );
 BEGIN
   IF NOT EXISTS (
