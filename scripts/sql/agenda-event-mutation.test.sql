@@ -76,6 +76,26 @@ INSERT INTO public.calendar_event (
     'Mutation Event B', 'all_day', DATE '2026-12-24', DATE '2026-12-25'
   );
 
+INSERT INTO public.protected_time_block (
+  id, owner_user_id, created_by_user_id, updated_by_user_id,
+  label, category, protection_mode, pattern_kind, time_zone,
+  start_local, end_local, starts_at, ends_at,
+  start_disambiguation, end_disambiguation, start_gap_strategy, end_gap_strategy,
+  start_date, end_date_exclusive, weekdays, start_time_local, end_time_local, ends_next_day,
+  resolver_metadata
+) VALUES (
+  '019a0000-0000-7000-8000-000000000015',
+  '019a0000-0000-7000-8000-000000000012',
+  '019a0000-0000-7000-8000-000000000012',
+  '019a0000-0000-7000-8000-000000000012',
+  'Owner B protected rest', 'sleep', 'hard', 'one_off', 'America/Havana',
+  timestamp '2026-12-24 05:00:00', timestamp '2026-12-24 07:00:00',
+  timestamptz '2026-12-24 10:00:00+00', timestamptz '2026-12-24 12:00:00+00',
+  'earlier', 'earlier', 'next-valid', 'next-valid',
+  NULL, NULL, NULL, NULL, NULL, NULL,
+  '{"rulesSource":"iana-tzdb","rulesVersion":"2026f","resolverVersion":"agenda-iana-resolver-v1","authoritative":true}'::jsonb
+);
+
 DO $test$
 DECLARE
   v_event_a uuid := '019a0000-0000-7000-8000-000000000111';
@@ -98,7 +118,10 @@ DECLARE
   v_key_b_cancel uuid := private.uuidv7();
   v_key_b_reopen uuid := private.uuidv7();
   v_schedule_b uuid := '019a0000-0000-7000-8000-000000000014';
+  v_block_b uuid := '019a0000-0000-7000-8000-000000000015';
   v_schedule_version timestamptz;
+  v_block_version timestamptz;
+  v_protected_decisions jsonb;
   v_lifecycle_patch jsonb;
   v_schedule_decisions jsonb;
   v_old_version timestamptz;
@@ -340,9 +363,25 @@ BEGIN
   WHERE id = v_event_b AND owner_user_id = v_owner_b;
   SELECT updated_at INTO v_schedule_version FROM public.task_schedule
   WHERE id = v_schedule_b AND owner_user_id = v_owner_b;
+  SELECT updated_at INTO v_block_version FROM public.protected_time_block
+  WHERE id = v_block_b AND owner_user_id = v_owner_b;
+  v_protected_decisions := jsonb_build_array(jsonb_build_object(
+    'policyVersion', 'protected-time-decision-v1',
+    'blockId', v_block_b,
+    'blockUpdatedAt', v_block_version,
+    'protectionMode', 'hard',
+    'occurrenceDate', '2026-12-24',
+    'occurrenceStartsAt', '2026-12-24T10:00:00.000Z',
+    'occurrenceEndsAt', '2026-12-24T12:00:00.000Z',
+    'overlapStartsAt', '2026-12-24T10:00:00.000Z',
+    'overlapEndsAt', '2026-12-24T12:00:00.000Z',
+    'timeZone', 'America/Havana',
+    'decision', 'override_hard',
+    'consentedAt', clock_timestamp()
+  ));
   v_lifecycle_patch := jsonb_build_object(
-    'protected_time_decisions', '[]'::jsonb,
-    'protected_time_snapshot', '[]'::jsonb,
+    'protected_time_decisions', v_protected_decisions,
+    'protected_time_snapshot', jsonb_build_array(jsonb_build_object('id', v_block_b, 'updated_at', v_block_version)),
     'task_schedule_conflict_decisions', '[]'::jsonb,
     'task_schedule_snapshot', jsonb_build_array(jsonb_build_object('id', v_schedule_b, 'updated_at', v_schedule_version)),
     'task_schedule_window', jsonb_build_object('startsAt', '2026-12-24T05:00:00Z', 'endsAt', '2026-12-25T05:00:00Z')
@@ -383,7 +422,8 @@ BEGIN
     SELECT 1 FROM public.calendar_event WHERE id = v_event_b AND owner_user_id = v_owner_b
       AND archived_at IS NULL AND deleted_at IS NULL
       AND task_schedule_conflict_decisions = v_schedule_decisions
-  ) THEN RAISE EXCEPTION 'Restore did not persist the exact consent evidence'; END IF;
+      AND protected_time_decisions = v_protected_decisions
+  ) THEN RAISE EXCEPTION 'Restore did not persist the exact Protected Time and TaskSchedule consent evidence'; END IF;
 
   SELECT updated_at INTO v_version FROM public.calendar_event WHERE id = v_event_b;
   SELECT r.http_status INTO v_status
@@ -477,9 +517,21 @@ BEGIN
 
   SELECT count(*) INTO v_audit_count
   FROM public.audit_event
+  WHERE entity_type = 'calendar_event'
+    AND entity_id = v_event_b
+    AND action = 'calendar_event.protected_time_decisions_recorded'
+    AND details->>'decision_version' = 'protected-time-decision-v1'
+    AND details->'decisions_before' = '[]'::jsonb
+    AND details->'decisions_after' = v_protected_decisions;
+  IF v_audit_count <> 1 THEN
+    RAISE EXCEPTION 'Event Protected Time consent must be audited exactly once across restore, reopen and replay; got %', v_audit_count;
+  END IF;
+
+  SELECT count(*) INTO v_audit_count
+  FROM public.audit_event
   WHERE entity_type = 'calendar_event' AND entity_id = v_event_b;
-  IF v_audit_count <> 6 THEN
-    RAISE EXCEPTION 'Expected Event B create/archive/restore/cancel/reopen and one consent audit; got %', v_audit_count;
+  IF v_audit_count <> 7 THEN
+    RAISE EXCEPTION 'Expected Event B create/archive/restore/cancel/reopen plus two consent audit rows; got %', v_audit_count;
   END IF;
 END;
 $test$;
