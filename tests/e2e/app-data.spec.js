@@ -412,7 +412,12 @@ async function mockSupabaseSession(page, initialData = {}) {
     }
 
     if (url.pathname === '/rest/v1/processing_run' && method === 'GET') {
-      await json(200, processingRuns);
+      const captureFilter = url.searchParams.get('capture_id') || '';
+      if (captureFilter && initialData.processingRunDelayMs) {
+        await new Promise((resolve) => setTimeout(resolve, initialData.processingRunDelayMs));
+      }
+      const rows = processingRuns.filter((row) => !captureFilter || captureFilter === 'eq.' + row.capture_id);
+      await json(200, rows);
       return;
     }
 
@@ -1367,9 +1372,16 @@ test('Inbox keeps Request and Habit suggestions unavailable until the owner choo
       review_status: 'unreviewed',
     },
   ];
+  const processingRuns = captures.map((capture, index) => ({
+    id: '00000000-0000-7000-8000-00000000073' + index,
+    capture_id: capture.id,
+    created_at: capture.captured_at,
+    result: { proposals: [{ partIndex: 0, requiresClarification: false, clarificationPrompt: null }] },
+  }));
   const { insertedTasks, insertedCaptureLinks, reviewRequests } = await mockSupabaseSession(page, {
     captures,
     captureParts,
+    processingRuns,
   });
   await page.goto('/');
   await page.getByLabel('Correo electrónico').fill(authUser.email);
@@ -1445,6 +1457,7 @@ test('Inbox requires an explicit clarification before accepting an ambiguous pro
     captures: [capture],
     captureParts: [part],
     processingRuns: [processingRun],
+    processingRunDelayMs: 350,
   });
   await page.goto('/');
   await page.getByLabel('Correo electrónico').fill(authUser.email);
@@ -1457,6 +1470,8 @@ test('Inbox requires an explicit clarification before accepting an ambiguous pro
   await page.getByRole('button', { name: 'Organizar captura: Pensar en cómo mejorar mi rutina' }).click();
   const organizer = page.getByRole('dialog', { name: 'Organizar captura' });
   const confirm = organizer.getByRole('button', { name: 'Confirmar y organizar' });
+  await expect(organizer.getByText('Verificando si la sugerencia necesita aclaración…')).toBeVisible();
+  await expect(confirm).toBeDisabled();
   await expect(organizer.getByText('¿Qué quieres hacer o recordar con este texto?')).toBeVisible();
   await expect(organizer.getByLabel('Aclaración / interpretación')).toBeVisible();
   await expect(confirm).toBeDisabled();
