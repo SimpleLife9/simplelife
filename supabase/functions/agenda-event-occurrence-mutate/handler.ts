@@ -283,8 +283,25 @@ export async function handleRequest(
           gapStrategy: "next-valid",
         },
       });
+      const metadata = occurrence.resolver_metadata && typeof occurrence.resolver_metadata === "object"
+        ? occurrence.resolver_metadata as Record<string, unknown>
+        : {};
+      if (resolution.startsAt !== occurrence.starts_at
+        || metadata.rulesVersion !== resolution.rulesVersion
+        || metadata.resolverVersion !== resolution.resolverVersion) {
+        return json({
+          error: "OCCURRENCE_TIMEZONE_REVIEW_REQUIRED",
+          message: "La regla horaria cambió. Revisa el horario antes de modificar la duración.",
+        }, 409);
+      }
       patch.override_kind = "modified";
-      Object.assign(patch, authoritativePatch(resolution));
+      // A duration-only edit must not recalculate or silently move the confirmed
+      // start instant. Only the explicit end endpoint is changed.
+      patch.end_local = resolution.end.resolvedLocalDateTime;
+      patch.ends_at = resolution.endsAt;
+      patch.end_disambiguation = resolution.end.resolution === "ambiguous-later" ? "later" : "earlier";
+      patch.end_gap_strategy = "next-valid";
+      patch.resolver_metadata = { ...metadata, end: resolution.end };
     } else {
       throw new RangeError("La acción no es compatible con el tipo de esta ocurrencia.");
     }
