@@ -252,8 +252,11 @@ export async function handleRequest(
           taskScheduleConflicts: assessment.conflicts,
         }, 409);
       }
-      blockPatch.task_schedule_conflict_decisions = [...assessment.assessment.decisions];
-      blockPatch.task_schedule_snapshot = [...assessment.assessment.snapshot];
+      blockPatch = {
+        ...blockPatch,
+        task_schedule_conflict_decisions: [...assessment.assessment.decisions],
+        task_schedule_snapshot: [...assessment.assessment.snapshot],
+      };
     } catch (error) {
       if (error instanceof TypeError || error instanceof RangeError) {
         return json({ error: error.message }, 422);
