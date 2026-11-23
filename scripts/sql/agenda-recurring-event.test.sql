@@ -3,9 +3,6 @@
 
 BEGIN;
 
--- Initialize pg_temp before creating test-only SECURITY DEFINER audit probes.
-CREATE TEMP TABLE _series_test_temp_schema_init (id boolean) ON COMMIT DROP;
-
 INSERT INTO auth.users (
   id, instance_id, aud, role, email, encrypted_password,
   email_confirmed_at, raw_app_meta_data, raw_user_meta_data
@@ -34,9 +31,11 @@ ON CONFLICT (id) DO NOTHING;
 -- The backend writer is intentionally denied direct audit_event privileges.
 -- This test-only SECURITY DEFINER probe lets the SQL assertions inspect rows
 -- without widening service_role's production table grants.
-CREATE TEMP TABLE recurring_test_context (marker boolean) ON COMMIT DROP;
+CREATE SCHEMA agenda_recurring_test_helpers AUTHORIZATION postgres;
+REVOKE ALL ON SCHEMA agenda_recurring_test_helpers FROM PUBLIC;
+GRANT USAGE ON SCHEMA agenda_recurring_test_helpers TO service_role;
 
-CREATE FUNCTION pg_temp.recurring_test_audit_count(
+CREATE FUNCTION agenda_recurring_test_helpers.recurring_test_audit_count(
   p_owner uuid,
   p_entity_type text,
   p_entity_id uuid,
@@ -55,11 +54,11 @@ AS $function$
     AND (p_entity_id IS NULL OR entity_id = p_entity_id)
     AND (p_actions IS NULL OR action = ANY(p_actions));
 $function$;
-ALTER FUNCTION pg_temp.recurring_test_audit_count(uuid, text, uuid, text[]) OWNER TO postgres;
-GRANT USAGE ON SCHEMA pg_temp TO service_role;
-REVOKE ALL PRIVILEGES ON FUNCTION pg_temp.recurring_test_audit_count(uuid, text, uuid, text[])
+ALTER FUNCTION agenda_recurring_test_helpers.recurring_test_audit_count(uuid, text, uuid, text[]) OWNER TO postgres;
+-- The role receives no table grants; only EXECUTE on the narrow probe.
+REVOKE ALL PRIVILEGES ON FUNCTION agenda_recurring_test_helpers.recurring_test_audit_count(uuid, text, uuid, text[])
   FROM PUBLIC, anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION pg_temp.recurring_test_audit_count(uuid, text, uuid, text[])
+GRANT EXECUTE ON FUNCTION agenda_recurring_test_helpers.recurring_test_audit_count(uuid, text, uuid, text[])
   TO service_role;
 
 SET LOCAL ROLE service_role;
@@ -256,7 +255,7 @@ BEGIN
     RAISE EXCEPTION 'Expected exactly one persisted occurrence; got %', v_seen_count;
   END IF;
 
-  SELECT pg_temp.recurring_test_audit_count(
+  SELECT agenda_recurring_test_helpers.recurring_test_audit_count(
     v_owner, NULL, NULL,
     ARRAY['calendar_event.created', 'calendar_event_occurrence.created']
   ) INTO v_audit_count;
@@ -357,7 +356,7 @@ BEGIN
     RAISE EXCEPTION 'Recurring top-up must leave exactly two occurrence rows; got %', v_seen_count;
   END IF;
 
-  SELECT pg_temp.recurring_test_audit_count(
+  SELECT agenda_recurring_test_helpers.recurring_test_audit_count(
     v_owner, 'calendar_event_occurrence', '019a0000-0000-7000-8000-000000000105', NULL
   ) INTO v_audit_count;
   IF v_audit_count <> 1 THEN
@@ -452,7 +451,7 @@ BEGIN
     RAISE EXCEPTION 'Stale occurrence row version must be rejected with 409';
   END IF;
 
-  SELECT pg_temp.recurring_test_audit_count(
+  SELECT agenda_recurring_test_helpers.recurring_test_audit_count(
     v_owner, 'calendar_event_occurrence', '019a0000-0000-7000-8000-000000000105',
     ARRAY['calendar_event_occurrence.updated']
   ) INTO v_mutation_audit;
