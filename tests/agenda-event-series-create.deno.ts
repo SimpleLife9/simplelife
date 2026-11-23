@@ -1,5 +1,6 @@
 import { handleRequest } from "../supabase/functions/agenda-event-series-create/handler.ts";
 import type { EventAuthenticatedContext } from "../supabase/functions/_shared/agenda-event-profile.ts";
+import { resolveLocalDateTimeRange } from "../supabase/functions/agenda-time-resolve/resolver.ts";
 
 const AUTH_USER_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const PROFILE_ID = "019a0000-0000-7000-8000-000000000001";
@@ -22,6 +23,21 @@ function request(event: Record<string, unknown>, recurrenceRule: Record<string, 
     method: "POST",
     headers: { "content-type": "application/json", "idempotency-key": key },
     body: JSON.stringify({ event, recurrenceRule, ...extras }),
+  });
+}
+function resolvedTimedWindow() {
+  return resolveLocalDateTimeRange({
+    timeZone: "America/Havana",
+    start: {
+      localDateTime: "2026-11-24T09:00",
+      disambiguation: "earlier",
+      gapStrategy: "next-valid",
+    },
+    end: {
+      localDateTime: "2026-11-24T10:00",
+      disambiguation: "earlier",
+      gapStrategy: "next-valid",
+    },
   });
 }
 function timedEvent(overrides: Record<string, unknown> = {}) {
@@ -217,6 +233,9 @@ Deno.test("creates date-only all-day recurrence without inventing UTC instants",
 });
 
 Deno.test("rejects Protected Time and TaskSchedule overlaps before the atomic write", async () => {
+  // Derive fixture instants from the same pinned IANA authority as the writer.
+  // This remains valid when local political decisions change the zone offset.
+  const candidate = resolvedTimedWindow();
   const block = {
     id: "019a0000-0000-7000-8000-000000000701",
     updated_at: "2026-11-22T10:00:00.000000Z",
@@ -225,8 +244,8 @@ Deno.test("rejects Protected Time and TaskSchedule overlaps before the atomic wr
     protection_mode: "hard",
     pattern_kind: "one_off",
     time_zone: "America/Havana",
-    starts_at: "2026-11-24T14:30:00.000Z",
-    ends_at: "2026-11-24T15:00:00.000Z",
+    starts_at: new Date(Date.parse(candidate.startsAt) + 30 * 60_000).toISOString(),
+    ends_at: candidate.endsAt,
     archived_at: null,
     deleted_at: null,
   };
@@ -246,11 +265,12 @@ Deno.test("rejects Protected Time and TaskSchedule overlaps before the atomic wr
 });
 
 Deno.test("rejects a TaskSchedule overlap before the atomic write", async () => {
+  const candidate = resolvedTimedWindow();
   const schedule = {
     id: "019a0000-0000-7000-8000-000000000711",
     updated_at: "2026-11-22T10:00:00.000000Z",
-    starts_at: "2026-11-24T14:30:00.000Z",
-    ends_at: "2026-11-24T15:00:00.000Z",
+    starts_at: new Date(Date.parse(candidate.startsAt) + 30 * 60_000).toISOString(),
+    ends_at: candidate.endsAt,
     time_zone: "America/Havana",
     schedule_status: "confirmed",
   };
