@@ -48,6 +48,8 @@ async function mockSupabaseSession(page, initialData = {}) {
   const insertedTasks = [];
   const updatedTasks = [];
   const calendarEvents = [...(initialData.calendarEvents || [])];
+  const calendarEventOccurrences = [...(initialData.calendarEventOccurrences || [])];
+  const recurringEventRequests = [];
   const protectedTimeBlocks = [...(initialData.protectedTimeBlocks || [])];
   const protectedTimeMutationRequests = [];
   const protectedTimeTaskScheduleConflictResponses = [...(initialData.protectedTimeTaskScheduleConflictResponses || [])];
@@ -235,6 +237,22 @@ async function mockSupabaseSession(page, initialData = {}) {
           : deletedFilter === 'is.null' ? row.deleted_at == null : true;
         return archivedMatch && deletedMatch;
       });
+      await json(200, rows);
+      return;
+    }
+
+    if (url.pathname === '/rest/v1/calendar_event_occurrence' && method === 'GET') {
+      const eventFilter = url.searchParams.get('calendar_event_id') || '';
+      const statusFilter = url.searchParams.get('occurrence_status') || '';
+      const ids = eventFilter.startsWith('in.(')
+        ? eventFilter.slice(4, -1).split(',')
+        : eventFilter.startsWith('eq.') ? [eventFilter.slice(3)] : [];
+      const statuses = statusFilter.startsWith('in.(')
+        ? statusFilter.slice(4, -1).split(',')
+        : statusFilter.startsWith('eq.') ? [statusFilter.slice(3)] : [];
+      const rows = calendarEventOccurrences.filter((row) =>
+        (!ids.length || ids.includes(row.calendar_event_id))
+        && (!statuses.length || statuses.includes(row.occurrence_status)));
       await json(200, rows);
       return;
     }
@@ -901,6 +919,87 @@ async function mockSupabaseSession(page, initialData = {}) {
       return;
     }
 
+    if (url.pathname === '/functions/v1/agenda-event-series-create' && method === 'POST') {
+      const requestBody = request.postDataJSON();
+      const event = requestBody.event;
+      const recurrenceRule = requestBody.recurrenceRule;
+      const endDayOffset = Number(requestBody.endDayOffset ?? 0);
+      const key = request.headers()['idempotency-key'] || '';
+      recurringEventRequests.push({ key, event, recurrenceRule, endDayOffset, endLocalTime: requestBody.endLocalTime ?? null });
+      const seriesId = '019a0000-0000-7000-8000-000000009301';
+      const series = {
+        id: seriesId,
+        owner_user_id: profile.id,
+        created_by_user_id: profile.id,
+        updated_by_user_id: profile.id,
+        title: event.title,
+        description: event.description ?? null,
+        location_label: event.locationLabel ?? null,
+        location_kind: event.locationKind ?? null,
+        event_status: event.eventStatus || 'confirmed',
+        temporal_kind: event.temporalKind,
+        start_date: event.startDate ?? null,
+        end_date_exclusive: event.endDateExclusive ?? null,
+        start_local: event.startLocalDateTime ?? null,
+        end_local: event.endLocalDateTime ?? null,
+        time_zone: event.timeZone ?? null,
+        starts_at: null,
+        ends_at: null,
+        recurrence_rule: recurrenceRule,
+        recurrence_end_local_time: requestBody.endLocalTime ?? null,
+        recurrence_end_day_offset: endDayOffset,
+        archived_at: null,
+        deleted_at: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      const startDate = recurrenceRule.startDate;
+      const dateFromOffset = (date, offset) => {
+        const [year, month, day] = date.split('-').map(Number);
+        return new Date(Date.UTC(year, month - 1, day + offset)).toISOString().slice(0, 10);
+      };
+      const count = Math.min(Number(recurrenceRule.count || 1), 20);
+      const generated = [];
+      for (let index = 0; index < count; index += 1) {
+        const offset = recurrenceRule.frequency === 'DAILY'
+          ? index * Number(recurrenceRule.interval || 1)
+          : index;
+        const occurrenceDate = dateFromOffset(startDate, offset);
+        const endExclusive = dateFromOffset(occurrenceDate, endDayOffset + 1);
+        generated.push({
+          id: '019a0000-0000-7000-8000-' + String(9302 + index).padStart(12, '0'),
+          owner_user_id: profile.id,
+          created_by_user_id: profile.id,
+          updated_by_user_id: profile.id,
+          calendar_event_id: seriesId,
+          occurrence_key: 'v1:' + seriesId + ':' + occurrenceDate + ':ALL_DAY',
+          original_local_date: occurrenceDate,
+          original_local_time: null,
+          actual_local_date: occurrenceDate,
+          actual_local_time: null,
+          temporal_kind: 'all_day',
+          start_date: occurrenceDate,
+          end_date_exclusive: endExclusive,
+          start_local: null,
+          end_local: null,
+          time_zone: null,
+          starts_at: null,
+          ends_at: null,
+          occurrence_status: 'scheduled',
+        });
+      }
+      calendarEvents.unshift(series);
+      calendarEventOccurrences.push(...generated);
+      await json(201, {
+        seriesEventId: seriesId,
+        materializedCount: generated.length,
+        horizonStart: generated[0]?.original_local_date ?? null,
+        horizonEnd: generated.at(-1)?.original_local_date ?? null,
+        replayed: false,
+      });
+      return;
+    }
+
     if (url.pathname === '/functions/v1/agenda-event-create' && method === 'POST') {
       const requestBody = request.postDataJSON();
       const event = requestBody.event;
@@ -1001,7 +1100,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     await json(404, { message: `Unexpected mocked Supabase request: ${method} ${url.pathname}` });
   });
 
-  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, protectedTimeBlocks, protectedTimeMutationRequests, taskSchedules, taskScheduleMutationRequests, protectedTimeConflicts, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
+  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, calendarEventOccurrences, recurringEventRequests, protectedTimeBlocks, protectedTimeMutationRequests, taskSchedules, taskScheduleMutationRequests, protectedTimeConflicts, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
 }
 
 test('mock-authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
@@ -4160,4 +4259,56 @@ test('Agenda Event edits recheck Protected Time and persist the selected hard ov
   }]);
   expect(calendarEvents[0].description).toBe('Detalles actualizados; el horario sigue protegido.');
   expect(calendarEvents[0].protected_time_decisions).toHaveLength(1);
+});
+
+
+test('Agenda creates a recurring all-day series and renders each persisted occurrence instead of the master as a one-off', async ({ page }) => {
+  const today = await todayInBrowserHavana(page);
+  const { calendarEvents, calendarEventOccurrences, recurringEventRequests } = await mockSupabaseSession(page);
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.getByRole('navigation', { name: 'Navegación principal' })
+    .getByRole('button', { name: /Agenda/ }).click();
+
+  await page.getByRole('button', { name: 'Nuevo evento' }).click();
+  const composer = page.getByRole('dialog', { name: 'Crear evento' });
+  await composer.getByLabel('Nombre del evento').fill('Rutina diaria');
+  await composer.getByLabel('Desde', { exact: true }).fill(today);
+  await composer.getByLabel('Hasta (incluido)', { exact: true }).fill(today);
+  await composer.getByLabel('Repetición').selectOption('DAILY');
+  await composer.getByLabel('Ocurrencias').fill('2');
+  await composer.getByRole('button', { name: 'Crear serie recurrente' }).click();
+
+  await expect(page.getByText('Serie recurrente creada en Agenda.')).toBeVisible();
+  await expect(composer).toHaveCount(0);
+  const upcoming = page.getByRole('region', { name: 'Próximos compromisos' });
+  await expect(upcoming.getByRole('button', { name: 'Rutina diaria' })).toHaveCount(2);
+  await upcoming.getByRole('button', { name: 'Rutina diaria' }).first().click();
+  const detail = page.getByRole('dialog', { name: 'Rutina diaria' });
+  await expect(detail).toContainText('Parte de una serie');
+  await expect(detail.getByRole('button', { name: 'Editar' })).toHaveCount(0);
+  await detail.getByRole('button', { name: 'Cerrar' }).click();
+
+  expect(recurringEventRequests).toHaveLength(1);
+  expect(recurringEventRequests[0].key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  expect(recurringEventRequests[0].recurrenceRule).toMatchObject({
+    version: 1,
+    frequency: 'DAILY',
+    interval: 1,
+    startDate: today,
+    temporalKind: 'all_day',
+    count: 2,
+  });
+  expect(recurringEventRequests[0].endDayOffset).toBe(0);
+  expect(calendarEvents).toHaveLength(1);
+  expect(calendarEvents[0].recurrence_rule.frequency).toBe('DAILY');
+  expect(calendarEventOccurrences.map((row) => row.original_local_date)).toEqual([
+    today,
+    await page.evaluate((value) => {
+      const [year, month, day] = value.split('-').map(Number);
+      return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
+    }, today),
+  ]);
 });
