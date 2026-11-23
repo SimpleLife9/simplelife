@@ -1,5 +1,6 @@
 import { handleRequest as handleQueueRequest } from "../supabase/functions/inbox-processing-queue/handler.ts";
 import { handleRequest as handleWorkerRequest } from "../supabase/functions/inbox-processing-worker/handler.ts";
+import { handleRequest as handleProcessRequest, MAX_REQUEST_BYTES as MAX_PROCESS_REQUEST_BYTES } from "../supabase/functions/inbox-processing-process/handler.ts";
 
 const AUTH_USER_ID = "00000000-0000-4000-8000-000000000001";
 const PROFILE_ID = "0190f47a-7b2c-7abc-8def-0123456789ac";
@@ -196,4 +197,88 @@ Deno.test("worker records retryable failures using bounded codes and delays only
     p_run_id: RUN_ID, p_lease_token: LEASE, p_error_code: "UPSTREAM_TIMEOUT",
     p_retryable: true, p_retry_after_seconds: 30,
   }, "fail parameters");
+});
+
+
+function processRequest(body: BodyInit): Request {
+  return new Request("https://local.test/inbox-processing-process", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body,
+  });
+}
+
+function processContext() {
+  const tables: string[] = [];
+  const rpcNames: string[] = [];
+  const ctx = {
+    authMode: "user",
+    userClaims: { id: AUTH_USER_ID },
+    supabase: {
+      from(table: string) {
+        tables.push(table);
+        return {
+          select() { return this; },
+          eq() { return this; },
+          async maybeSingle() {
+            if (table === "user_profile") {
+              return {
+                data: { id: PROFILE_ID, auth_user_id: AUTH_USER_ID, account_status: "active" },
+                error: null,
+              };
+            }
+            return { data: { id: RUN_ID }, error: null };
+          },
+        };
+      },
+    },
+    supabaseAdmin: {
+      async rpc(name: string) {
+        rpcNames.push(name);
+        if (name === "claim_inbox_processing_run_by_id") {
+          return { data: [{ run_id: RUN_ID, capture_id: CAPTURE_ID, content_original: "Comprar café" }], error: null };
+        }
+        if (name === "complete_inbox_processing_run_with_parts") return { data: true, error: null };
+        return { data: false, error: null };
+      },
+    },
+  };
+  return { ctx, tables, rpcNames };
+}
+
+Deno.test("authenticated process bridge rejects oversized and invalid UTF-8 bodies before run lookup", async () => {
+  const oversized = processContext();
+  const tooLargeBody = JSON.stringify({ runId: RUN_ID }) + " ".repeat(MAX_PROCESS_REQUEST_BYTES);
+  const tooLarge = await handleProcessRequest(processRequest(tooLargeBody), oversized.ctx as never);
+  assertEquals(tooLarge.status, 413, "oversized body");
+  assertEquals(oversized.tables, ["user_profile"], "oversized body stops before run lookup");
+  assertEquals(oversized.rpcNames, [], "oversized body never reaches privileged worker");
+
+  const invalidUtf8 = processContext();
+  const malformed = await handleProcessRequest(processRequest(new Uint8Array([0xff, 0xfe])), invalidUtf8.ctx as never);
+  assertEquals(malformed.status, 400, "invalid UTF-8 body");
+  assertEquals(invalidUtf8.tables, ["user_profile"], "invalid UTF-8 stops before run lookup");
+  assertEquals(invalidUtf8.rpcNames, [], "invalid UTF-8 never reaches privileged worker");
+});
+
+Deno.test("authenticated process bridge keeps owner-scoped processing flow intact", async () => {
+  const { ctx, tables, rpcNames } = processContext();
+  const response = await handleProcessRequest(
+    processRequest(JSON.stringify({ runId: RUN_ID })),
+    ctx as never,
+    { newLeaseToken: () => LEASE },
+  );
+  assertEquals(response.status, 200, "process bridge status");
+  assertEquals(await body(response), {
+    accepted: true,
+    status: "succeeded",
+    engine: "deterministic-rules",
+    processorVersion: "inbox-rules-v1",
+    proposalCount: 1,
+  }, "process bridge response");
+  assertEquals(tables, ["user_profile", "processing_run"], "owner-scoped lookups");
+  assertEquals(rpcNames, [
+    "claim_inbox_processing_run_by_id",
+    "complete_inbox_processing_run_with_parts",
+  ], "privileged worker lifecycle");
 });
