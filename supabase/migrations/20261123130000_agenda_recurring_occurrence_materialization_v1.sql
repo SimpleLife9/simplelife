@@ -41,6 +41,10 @@ BEGIN
       USING ERRCODE = '22023';
   END IF;
 
+  -- Use the same owner lock as Event, Protected Time and TaskSchedule writers
+  -- before taking any row locks, avoiding lock-order inversions across domains.
+  PERFORM pg_advisory_xact_lock(hashtextextended(p_owner_user_id::text, 8102026));
+
   SELECT * INTO v_event
   FROM public.calendar_event
   WHERE id = p_series_event_id AND owner_user_id = p_owner_user_id
@@ -105,8 +109,6 @@ BEGIN
     RAISE EXCEPTION 'Recurring Event top-up rows do not match the series, current horizon or authoritative time contract'
       USING ERRCODE = '22023';
   END IF;
-
-  PERFORM pg_advisory_xact_lock(hashtextextended(p_owner_user_id::text, 8102026));
 
   IF EXISTS (
     WITH actual AS (
