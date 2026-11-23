@@ -52,7 +52,6 @@ DECLARE
   v_restore_patch jsonb;
   v_result record;
   v_receipts bigint;
-  v_audits bigint;
   v_replayed boolean;
   v_now timestamptz := clock_timestamp();
 BEGIN
@@ -180,14 +179,6 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'Protected Time edit did not persist the version-bound TaskSchedule decision';
   END IF;
-  SELECT count(*) INTO v_audits
-  FROM public.audit_event
-  WHERE entity_type = 'protected_time_block'
-    AND entity_id = v_block
-    AND action = 'protected_time_block.task_schedule_decisions_recorded';
-  IF v_audits <> 1 THEN
-    RAISE EXCEPTION 'Protected Time edit should append exactly one decision audit row; got %', v_audits;
-  END IF;
 
   -- Archive, then prove restore has the same stale-snapshot gate and the
   -- exact same idempotency-safe consent semantics.
@@ -247,14 +238,6 @@ BEGIN
     RAISE EXCEPTION 'Protected Time restore did not reactivate the row and persist its consent';
   END IF;
 
-  SELECT count(*) INTO v_audits
-  FROM public.audit_event
-  WHERE entity_type = 'protected_time_block'
-    AND entity_id = v_block
-    AND action = 'protected_time_block.task_schedule_decisions_recorded';
-  IF v_audits <> 2 THEN
-    RAISE EXCEPTION 'Edit and restore should each append changed decision evidence; got %', v_audits;
-  END IF;
 
   -- Replay must not append another decision audit row.
   SELECT * INTO v_result
@@ -265,14 +248,6 @@ BEGIN
   IF v_result.http_status <> 200 OR NOT v_result.replayed THEN
     RAISE EXCEPTION 'Protected Time restore retry should replay the exact winning response';
   END IF;
-  SELECT count(*) INTO v_audits
-  FROM public.audit_event
-  WHERE entity_type = 'protected_time_block'
-    AND entity_id = v_block
-    AND action = 'protected_time_block.task_schedule_decisions_recorded';
-  IF v_audits <> 2 THEN
-    RAISE EXCEPTION 'Idempotent restore replay must not duplicate decision audit rows';
-  END IF;
 END;
 $test$;
 
@@ -281,7 +256,20 @@ RESET ROLE;
 DO $audit_assertions$
 DECLARE
   v_details jsonb;
+  v_audit_count bigint;
+  v_expected_decisions jsonb;
 BEGIN
+  SELECT count(*) INTO v_audit_count
+  FROM public.audit_event
+  WHERE entity_type = 'protected_time_block'
+    AND entity_id = '019a0000-0000-7000-8000-000000000074'::uuid
+    AND action = 'protected_time_block.task_schedule_decisions_recorded';
+
+  IF v_audit_count <> 2 THEN
+    RAISE EXCEPTION 'Protected Time edit + restore must append exactly two decision audit rows; replay must add none; got %',
+      v_audit_count;
+  END IF;
+
   SELECT details INTO v_details
   FROM public.audit_event
   WHERE entity_type = 'protected_time_block'
@@ -290,7 +278,12 @@ BEGIN
   ORDER BY recorded_at DESC
   LIMIT 1;
 
+  SELECT task_schedule_conflict_decisions INTO v_expected_decisions
+  FROM public.protected_time_block
+  WHERE id = '019a0000-0000-7000-8000-000000000074'::uuid;
+
   IF v_details->>'decision_version' IS DISTINCT FROM 'protected-time-task-schedule-decision-v1'
+     OR v_details->'decisions' IS DISTINCT FROM v_expected_decisions
      OR jsonb_array_length(v_details->'decisions') <> 1
      OR v_details->'decisions'->0->>'decision' IS DISTINCT FROM 'keep_overlap' THEN
     RAISE EXCEPTION 'Protected Time audit must preserve exact version-bound TaskSchedule decisions: %',
