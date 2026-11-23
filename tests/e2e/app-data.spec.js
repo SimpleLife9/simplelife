@@ -2882,7 +2882,7 @@ test('Agenda navigates day, week and month views and creates a confirmed all-day
   await upcomingPanel.getByRole('button', { name: /Día de familia/ }).click();
   const upcomingEventDetail = page.getByRole('dialog', { name: 'Día de familia' });
   await expect(upcomingEventDetail).toBeVisible();
-  await upcomingEventDetail.getByRole('button', { name: 'Cerrar' }).click();
+  await upcomingEventDetail.getByLabel('Cerrar').click();
   await expect(page.getByRole('button', { name: 'Día de familia', exact: true })).toBeVisible();
   await expect(page.getByRole('group', { name: 'Tarea reservada: Preparar informe semanal' })).toBeVisible();
 
