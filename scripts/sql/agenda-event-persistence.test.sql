@@ -410,6 +410,55 @@ END;
 $test$;
 RESET ROLE;
 
+-- TaskSchedule cross-conflict decisions are appended exactly, including before/after evidence.
+SET LOCAL ROLE service_role;
+UPDATE public.calendar_event
+SET task_schedule_conflict_decisions = '[{
+  "policyVersion": "event-task-schedule-decision-v1",
+  "taskScheduleId": "019a0000-0000-7000-8000-000000000221",
+  "taskScheduleUpdatedAt": "2026-11-24T14:59:00.000Z",
+  "startsAt": "2026-11-24T15:00:00.000Z",
+  "endsAt": "2026-11-24T16:00:00.000Z",
+  "overlapStartsAt": "2026-11-24T15:00:00.000Z",
+  "overlapEndsAt": "2026-11-24T15:30:00.000Z",
+  "decision": "keep_overlap",
+  "consentedAt": "2026-11-22T18:10:00.000Z"
+}]'::jsonb
+WHERE id = '019a0000-0000-7000-8000-000000000102'
+  AND owner_user_id = '019a0000-0000-7000-8000-000000000002';
+RESET ROLE;
+
+DO $test$
+DECLARE
+  v_decisions jsonb := '[{
+    "policyVersion": "event-task-schedule-decision-v1",
+    "taskScheduleId": "019a0000-0000-7000-8000-000000000221",
+    "taskScheduleUpdatedAt": "2026-11-24T14:59:00.000Z",
+    "startsAt": "2026-11-24T15:00:00.000Z",
+    "endsAt": "2026-11-24T16:00:00.000Z",
+    "overlapStartsAt": "2026-11-24T15:00:00.000Z",
+    "overlapEndsAt": "2026-11-24T15:30:00.000Z",
+    "decision": "keep_overlap",
+    "consentedAt": "2026-11-22T18:10:00.000Z"
+  }]'::jsonb;
+  v_details jsonb;
+BEGIN
+  SELECT details INTO v_details
+  FROM public.audit_event
+  WHERE entity_type = 'calendar_event'
+    AND entity_id = '019a0000-0000-7000-8000-000000000102'
+    AND action = 'calendar_event.task_schedule_decisions_recorded'
+  ORDER BY recorded_at DESC
+  LIMIT 1;
+
+  IF v_details->'decision_version' IS DISTINCT FROM '"event-task-schedule-decision-v1"'::jsonb
+     OR v_details->'decisions_before' IS DISTINCT FROM '[]'::jsonb
+     OR v_details->'decisions_after' IS DISTINCT FROM v_decisions THEN
+    RAISE EXCEPTION 'Event TaskSchedule audit must preserve exact before/after consent: %', v_details;
+  END IF;
+END;
+$test$;
+
 -- Authenticated can read only their own Event and audit rows; no write grants.
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', true);
