@@ -774,3 +774,18 @@ These deferrals are accepted to permit Phase 1 design/build work to begin. They 
 - **Alcance:** este PR cierra el slice TaskSchedule/conflictos, no toda la Fase 1 Agenda. La aceptación completa de Agenda incluye criterios adicionales del contrato de producto, entre ellos recurrencia y validación real de los flujos.
 - Sin DDL alojado, deploy de Edge Functions, publicación ni cambios en `Simplelife_dev`. PR permanece OPEN / Draft / no mergeado.
 - Próximas puertas: aceptación funcional desktop/Android cuando exista una instancia de prueba autorizada; revisión independiente; Human Gate explícito antes de quitar Draft/merge y antes de cualquier DDL/deploy/release.
+
+
+## Phase 1 Agenda — próximos compromisos y edición de recurrencias (23/11/2026)
+
+- PR #93 / rama `feat/agenda-task-schedule-persistence-v1`. Código validado en SHA `b97f4e4dafccaa339ae27585f1ffc23cc235a776`.
+- CI #510 / [run 45199729581](https://github.com/SimpleLife9/simplelife/actions/runs/45199729581): **SUCCESS sobre el SHA exacto**. Los 37 pasos del job `test-and-build` pasaron.
+- Cobertura CI #510: unit tests; Playwright escritorio/móvil; smoke opt-in; grafo y type-check Deno/IANA; bootstrap RLS y replay de migraciones en Supabase efímero; pruebas PostgreSQL de Event, Protected Time, TaskSchedule, conflictos, auditoría, idempotencia y concurrencia; Edge Runtime local de auth, Event Create/Edit, Protected Time y TaskSchedule; parada/restauración de Supabase y build de producción.
+- El panel `Próximos compromisos` combina Events y TaskSchedules, informa estado/cuenta atrás, refresca mientras Agenda está abierta y abre el detalle del Event. No implementa alarmas ni promete entrega en segundo plano. Unit y E2E cubren lista, exclusiones, fecha completa, countdown e interacción.
+- El motor recurrente v1, expansión acotada, occurrence keys, overrides y adaptador IANA siguen procediendo de PR #72/#74 integrados en main. Esta rama añade `planRecurrenceEditScope` y tests para los tres alcances: esta ocurrencia; esta y las siguientes; serie completa. La identidad original de la ocurrencia seleccionada se preserva.
+- La nueva lógica de edición es un planificador de dominio puro: **no crea todavía series/ocurrencias persistidas, RPC, materialización ni editor de UI**.
+- Recurrencia timed continúa bloqueada para persistencia definitiva hasta decidir si `durationMinutes` significa tiempo transcurrido real o duración de reloj civil ante DST. El adaptador de resolución exige un extremo local explícito y no lo infiere; no introducir una regla silenciosa.
+- Los smoke de Auth/ownership/Postgres/Edge Runtime del workflow validan usuarios sintéticos y persistencia local efímera para los dominios ya implementados. No equivalen a una prueba contra Supabase LIVE.
+- Playwright desktop/móvil: PASS en viewport de navegador; aceptación manual real y Android físico no declarados.
+- Revisión estática de rutas críticas anterior: sin bloqueadores encontrados en las rutas examinadas. No hay segundo revisor, reviews ni review threads externos.
+- PR #93 sigue OPEN / Draft / no mergeado. Sin DDL alojado, despliegues Edge, cambios en `Simplelife_dev` ni publicación. Merge/release/operaciones alojadas requieren Human Gate explícito.
