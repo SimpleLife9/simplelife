@@ -25,20 +25,31 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = pg_catalog
 AS $function$
+DECLARE
+  v_decisions_before jsonb := '[]'::jsonb;
 BEGIN
   IF NEW.owner_user_id IS NULL OR NEW.updated_by_user_id IS NULL
      OR NEW.owner_user_id <> NEW.updated_by_user_id THEN
     RAISE EXCEPTION 'TaskSchedule decision audit requires the verified Protected Time owner';
   END IF;
-  IF TG_OP = 'UPDATE'
-     AND NEW.task_schedule_conflict_decisions IS NOT DISTINCT FROM OLD.task_schedule_conflict_decisions THEN
-    RETURN NEW;
+
+  IF TG_OP = 'UPDATE' THEN
+    IF NEW.task_schedule_conflict_decisions IS NOT DISTINCT FROM OLD.task_schedule_conflict_decisions THEN
+      RETURN NEW;
+    END IF;
+    v_decisions_before := coalesce(OLD.task_schedule_conflict_decisions, '[]'::jsonb);
+  ELSIF TG_OP <> 'INSERT' THEN
+    RAISE EXCEPTION 'Unsupported Protected Time TaskSchedule decision audit operation: %', TG_OP;
   END IF;
+
   IF jsonb_typeof(NEW.task_schedule_conflict_decisions) IS DISTINCT FROM 'array'
      OR jsonb_array_length(NEW.task_schedule_conflict_decisions) > 500 THEN
     RAISE EXCEPTION 'TaskSchedule decision evidence must be a bounded JSON array';
   END IF;
-  IF jsonb_array_length(NEW.task_schedule_conflict_decisions) = 0 THEN
+
+  -- An empty initial state has nothing to audit. An UPDATE from a non-empty
+  -- state to [] is meaningful revocation and must remain visible.
+  IF TG_OP = 'INSERT' AND jsonb_array_length(NEW.task_schedule_conflict_decisions) = 0 THEN
     RETURN NEW;
   END IF;
 
@@ -47,12 +58,16 @@ BEGIN
     result, source, details, occurred_at, recorded_at
   ) VALUES (
     private.uuidv7(), NEW.owner_user_id, NEW.updated_by_user_id,
-    'protected_time_block.task_schedule_decisions_recorded',
+    'protected_time_block.task_schedule_decisions_changed',
     'protected_time_block', NEW.id, 'success', 'user',
     jsonb_build_object(
       'decision_version', 'protected-time-task-schedule-decision-v1',
       'protection_mode', NEW.protection_mode,
-      'decisions', NEW.task_schedule_conflict_decisions
+      'decision_count_before', jsonb_array_length(v_decisions_before),
+      'decision_count_after', jsonb_array_length(NEW.task_schedule_conflict_decisions),
+      'decisions', NEW.task_schedule_conflict_decisions,
+      'decisions_before', v_decisions_before,
+      'decisions_after', NEW.task_schedule_conflict_decisions
     ),
     clock_timestamp(), clock_timestamp()
   );
