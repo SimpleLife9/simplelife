@@ -5,6 +5,7 @@ import { SectionTitle } from '../../shared/components/SectionTitle.jsx';
 import { EmptyState } from '../../shared/components/EmptyState.jsx';
 import { CaptureComposer } from './components/CaptureComposer.jsx';
 import { persistTextCapture } from './data/capture-repository.js';
+import { getSuggestedDestinationType, isInboxDestinationReady } from './domain/capture-pipeline.js';
 
 function normalizeCaptureForDuplicate(value) {
   return String(value || "").normalize("NFKC").toLocaleLowerCase("es")
@@ -286,11 +287,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
     setSelectedCapture(capture);
     setSelectedPart(part || { id: uuidv7(), capture_id: capture.id, part_index: 0, original_fragment: capture.content_original });
     const source = String(part?.original_fragment || capture.content_original || '');
-    const suggestedDestination = part?.category === 'event' ? 'event'
-      : part?.category === 'note_idea' ? 'note'
-        : part?.category === 'list' ? 'list'
-          : part?.category === 'goal_subgoal' ? 'goal'
-            : part?.category === 'project' ? 'project' : 'task';
+    const suggestedDestination = getSuggestedDestinationType(part?.category);
     setDestinationType(suggestedDestination);
     const suggestedTargets = suggestedDestination === 'goal' ? goals
       : suggestedDestination === 'subgoal' ? subgoals
@@ -332,6 +329,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
 
   const saveOrganization = async (event) => {
     event.preventDefault();
+    if (!isInboxDestinationReady(destinationType)) return;
     if (!selectedCapture || !selectedPart || !operationIds || getConfirmedLink(selectedCapture.id, selectedPart.id)) return;
     const sourceText = String(selectedPart.original_fragment || selectedCapture.content_original || '');
     if (!sourceText.trim()) return;
@@ -588,7 +586,10 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
           <form className="capture-organizer-form" onSubmit={saveOrganization}>
             <label className="field"><span>Tipo de destino</span><select aria-label="Tipo de destino" value={destinationType} disabled={busy} onChange={(event) => { setDestinationType(event.target.value); resetTargetIds(); }}>
               <option value="task">Tarea</option><option value="event">Evento de Agenda</option><option value="goal">Meta existente</option><option value="subgoal">Submeta existente</option><option value="project">Proyecto existente</option><option value="note">Nota</option><option value="idea">Idea</option><option value="list">Lista</option>
+              <option value="request">Solicitud · destino pendiente (Fase 7)</option><option value="habit">Hábito · destino pendiente (Fase 4)</option>
             </select></label>
+            {destinationType === 'request' && <p className="capture-organizer-help" role="status">La clasificación se conserva como Solicitud. Su flujo de destino aún no existe; no se creará una tarea ni otro registro por sustitución. Puedes elegir otro tipo solo si deseas convertirla manualmente.</p>}
+            {destinationType === 'habit' && <p className="capture-organizer-help" role="status">La clasificación se conserva como Hábito. El sistema de hábitos aún no está implementado; no se creará una tarea ni otro registro por sustitución. Puedes elegir otro tipo solo si deseas convertirla manualmente.</p>}
             {destinationType === 'task' && <>
               <label className="field"><span>Título de la tarea</span><input aria-label="Título de la tarea" maxLength={240} value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} required disabled={busy} /></label>
               <div className="capture-organizer-two-col">
@@ -619,7 +620,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
                 <label className="field"><span>Texto del elemento (máximo 500 caracteres)</span><textarea aria-label="Texto del elemento" maxLength={500} rows={3} value={listItemText} onChange={(event) => setListItemText(event.target.value)} required disabled={busy} /></label>
               </>}
             </>}
-            <div className="capture-organizer-actions"><button type="button" className="capture-action-button" onClick={closeOrganizer} disabled={busy}>Cancelar</button><button type="submit" className="button button-primary" disabled={busy || !operationIds}>{busy ? 'Organizando…' : 'Confirmar y organizar'} <span>→</span></button></div>
+            <div className="capture-organizer-actions"><button type="button" className="capture-action-button" onClick={closeOrganizer} disabled={busy}>Cancelar</button><button type="submit" className="button button-primary" disabled={busy || !operationIds || !isInboxDestinationReady(destinationType)}>{busy ? 'Organizando…' : isInboxDestinationReady(destinationType) ? 'Confirmar y organizar' : 'Destino aún no disponible'} <span>→</span></button></div>
           </form>
         </section>
       </div>
