@@ -175,6 +175,8 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
   const [pendingKey, setPendingKey] = useState(null);
   const [protectedConflictPrompt, setProtectedConflictPrompt] = useState(null);
   const [protectedConflictChoices, setProtectedConflictChoices] = useState({});
+  const [taskScheduleConflictPrompt, setTaskScheduleConflictPrompt] = useState(null);
+  const [taskScheduleConflictChoices, setTaskScheduleConflictChoices] = useState({});
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [locationLabel, setLocationLabel] = useState('');
@@ -339,7 +341,11 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
     setPendingKey(null);
   };
 
-  const submitEvent = async (event, acceptedProtectedTimeDecisions = undefined) => {
+  const submitEvent = async (
+    event,
+    acceptedProtectedTimeDecisions = undefined,
+    acceptedTaskScheduleDecisions = undefined,
+  ) => {
     event.preventDefault();
     const key = pendingKey || uuidv7();
     setPendingKey(key);
@@ -392,6 +398,9 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
       const protectedTimeBody = acceptedProtectedTimeDecisions === undefined
         ? {}
         : { protectedTimeDecisions: acceptedProtectedTimeDecisions };
+      const taskScheduleBody = acceptedTaskScheduleDecisions === undefined
+        ? {}
+        : { taskScheduleDecisions: acceptedTaskScheduleDecisions };
       const { data, error } = editingEvent
         ? await supabase.functions.invoke('agenda-event-mutate', {
           body: {
@@ -400,6 +409,7 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
             action: 'edit',
             event: buildEventRequest(draft),
             ...protectedTimeBody,
+            ...taskScheduleBody,
           },
           headers: { 'Idempotency-Key': key },
         })
@@ -407,6 +417,7 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
           body: {
             event: buildEventRequest(draft),
             ...protectedTimeBody,
+            ...taskScheduleBody,
           },
           headers: { 'Idempotency-Key': key },
         });
@@ -417,6 +428,19 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
           response = error.context instanceof Response ? await error.context.clone().json() : null;
           if (response?.error) message = response.error;
         } catch { /* keep SDK error message */ }
+        if (response?.error === 'TASK_SCHEDULE_CONFLICTS'
+          || response?.error === 'TASK_SCHEDULE_CONFLICTS_CHANGED') {
+          if (response.error === 'TASK_SCHEDULE_CONFLICTS_CHANGED') setPendingKey(null);
+          setTaskScheduleConflictPrompt({
+            error: response.error,
+            conflicts: Array.isArray(response.conflicts) ? response.conflicts : [],
+            protectedTimeDecisions: acceptedProtectedTimeDecisions,
+          });
+          setTaskScheduleConflictChoices({});
+          message = response.error === 'TASK_SCHEDULE_CONFLICTS_CHANGED'
+            ? 'Las reservas de tareas cambiaron mientras guardabas. Revisa el horario y vuelve a guardar.'
+            : 'El evento coincide con una reserva de tarea. Decide explícitamente cómo conservar ambos compromisos.';
+        }
         if (response?.error === 'PROTECTED_TIME_CONFLICTS'
           || response?.error === 'PROTECTED_TIME_CONFLICTS_CHANGED') {
           setProtectedConflictPrompt({
@@ -440,6 +464,8 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
       setPendingKey(null);
       setProtectedConflictPrompt(null);
       setProtectedConflictChoices({});
+      setTaskScheduleConflictPrompt(null);
+      setTaskScheduleConflictChoices({});
     }
   };
 
@@ -466,6 +492,29 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
     }));
     setProtectedConflictPrompt(null);
     void submitEvent({ preventDefault() {} }, decisions);
+  };
+
+  const taskScheduleConflictItems = taskScheduleConflictPrompt?.conflicts ?? [];
+  const taskScheduleConflictDecisionsReady = taskScheduleConflictItems.length > 0
+    && taskScheduleConflictItems.every((conflict) =>
+      taskScheduleConflictChoices[conflict.taskScheduleId] === 'keep_overlap');
+
+  const closeTaskScheduleConflictPrompt = () => {
+    if (busy) return;
+    setTaskScheduleConflictPrompt(null);
+    setTaskScheduleConflictChoices({});
+  };
+
+  const saveWithTaskScheduleDecisions = () => {
+    if (!taskScheduleConflictDecisionsReady || busy) return;
+    const decisions = taskScheduleConflictItems.map((conflict) => ({
+      taskScheduleId: conflict.taskScheduleId,
+      taskScheduleUpdatedAt: conflict.taskScheduleUpdatedAt,
+      decision: taskScheduleConflictChoices[conflict.taskScheduleId],
+    }));
+    const protectedDecisions = taskScheduleConflictPrompt.protectedTimeDecisions;
+    setTaskScheduleConflictPrompt(null);
+    void submitEvent({ preventDefault() {} }, protectedDecisions, decisions);
   };
 
   const mutateSelectedEvent = async (action) => {
@@ -967,6 +1016,81 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
                 disabled={busy || !protectedConflictDecisionsReady || hasRescheduleChoice}
               >
                 {busy ? 'Guardando…' : 'Guardar con estas decisiones'}
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
+      {taskScheduleConflictPrompt && (
+        <div className="agenda-dialog-backdrop agenda-conflict-backdrop" role="presentation">
+          <section className="agenda-dialog agenda-conflict-dialog" role="alertdialog" aria-modal="true" aria-labelledby="agenda-task-schedule-conflict-title">
+            <header className="agenda-dialog-header">
+              <div>
+                <span className="agenda-section-kicker">RESERVAS DE TAREAS</span>
+                <h2 id="agenda-task-schedule-conflict-title">El evento coincide con tiempo reservado</h2>
+              </div>
+              <button type="button" className="agenda-close-button" aria-label="Cerrar" onClick={closeTaskScheduleConflictPrompt} disabled={busy}>×</button>
+            </header>
+            {taskScheduleConflictPrompt.error === 'TASK_SCHEDULE_CONFLICTS_CHANGED' && taskScheduleConflictItems.length === 0 ? (
+              <p className="agenda-confirm-copy">
+                Las reservas de tareas cambiaron durante el guardado. Ningún evento fue creado ni modificado.
+                Vuelve al evento y guarda de nuevo para revisar el estado actual.
+              </p>
+            ) : (
+              <>
+                <p className="agenda-confirm-copy">
+                  El evento no se guardó. Para conservar el horario, confirma cada cruce. La reserva existente no se moverá ni modificará.
+                </p>
+                <div className="agenda-conflict-list">
+                  {taskScheduleConflictItems.map((conflict) => (
+                    <article className="agenda-conflict-card" key={conflict.taskScheduleId}>
+                      <div className="agenda-conflict-card-heading">
+                        <div>
+                          <strong>Reserva de tarea</strong>
+                          <small>{conflict.timeZone || timeZone}</small>
+                        </div>
+                        <span className="protected-time-mode is-flexible">Activa</span>
+                      </div>
+                      <p>
+                        Reserva: {formatInstantInTimeZone(conflict.startsAt, conflict.timeZone || timeZone)}
+                        {' — '}
+                        {formatInstantInTimeZone(conflict.endsAt, conflict.timeZone || timeZone)}
+                        {' · Cruce: '}
+                        {formatInstantInTimeZone(conflict.overlapStartsAt, conflict.timeZone || timeZone)}
+                        {' — '}
+                        {formatInstantInTimeZone(conflict.overlapEndsAt, conflict.timeZone || timeZone)}
+                      </p>
+                      <label className="agenda-field">
+                        <span>Tu decisión</span>
+                        <select
+                          aria-label="Decisión para reserva de tarea"
+                          value={taskScheduleConflictChoices[conflict.taskScheduleId] || ''}
+                          onChange={(event) => setTaskScheduleConflictChoices((current) => ({
+                            ...current,
+                            [conflict.taskScheduleId]: event.target.value,
+                          }))}
+                          disabled={busy}
+                        >
+                          <option value="">Selecciona una decisión</option>
+                          <option value="keep_overlap">Mantener ambos compromisos</option>
+                        </select>
+                      </label>
+                    </article>
+                  ))}
+                </div>
+              </>
+            )}
+            <footer className="agenda-dialog-actions">
+              <button type="button" className="agenda-secondary-button" onClick={closeTaskScheduleConflictPrompt} disabled={busy}>
+                Volver al evento
+              </button>
+              <button
+                type="button"
+                className="button button-primary"
+                onClick={saveWithTaskScheduleDecisions}
+                disabled={busy || !taskScheduleConflictDecisionsReady}
+              >
+                {busy ? 'Guardando…' : 'Guardar y mantener ambos'}
               </button>
             </footer>
           </section>
