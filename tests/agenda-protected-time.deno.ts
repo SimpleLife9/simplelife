@@ -268,7 +268,7 @@ Deno.test("authenticated one-off create resolves IANA and calls only the owner-s
     now: () => "2026-11-22T18:10:00.000Z",
     newBlockId: () => BLOCK_ID,
   });
-  assertEquals(response.status, 201, "create status");
+  if (response.status !== 201) throw new Error("create failed: " + JSON.stringify(await responseBody(response)));
   assertEquals((await responseBody(response)).blockId, BLOCK_ID, "created block id");
   assertEquals(calls.rpc, 1, "mutation RPC count");
   assertEquals(calls.rpcName, "mutate_protected_time_block_once", "RPC name");
@@ -290,7 +290,7 @@ Deno.test("authenticated weekly create stores the civil rule, not a fake UTC occ
     now: () => "2026-11-22T18:10:00.000Z",
     newBlockId: () => BLOCK_ID,
   });
-  assertEquals(response.status, 201, "weekly create status");
+  if (response.status !== 201) throw new Error("weekly create failed: " + JSON.stringify(await responseBody(response)));
   const args = calls.rpcArgs as Record<string, unknown>;
   const patch = args.p_block_patch as Record<string, unknown>;
   assertEquals(patch.pattern_kind, "weekly", "weekly pattern");
@@ -359,7 +359,7 @@ Deno.test("Protected Time requires version-bound consent for overlapping TaskSch
     now: () => "2026-11-22T18:11:00.000Z",
     newBlockId: () => BLOCK_ID,
   });
-  assertEquals(accepted.status, 201, "explicitly accepted overlap status");
+  if (accepted.status !== 201) throw new Error("accepted overlap failed: " + JSON.stringify(await responseBody(accepted)));
   const args = calls.rpcArgs as Record<string, unknown>;
   assertEquals(args.p_payload_version, "protected-time-mutation-v2", "consent is idempotency-hash versioned");
   const patch = args.p_block_patch as Record<string, unknown>;
