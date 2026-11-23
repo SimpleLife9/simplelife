@@ -286,8 +286,36 @@ BEGIN
     RAISE EXCEPTION 'Inbox processing failure update requires service_role' USING ERRCODE = '42501';
   END IF;
   IF p_run_id IS NULL OR p_lease_token IS NULL OR p_error_code IS NULL
-     OR p_error_code !~ '^[A-Z0-9_]{1,64}$' OR p_retryable IS NULL
-     OR p_retry_after_seconds NOT BETWEEN 0 AND 86400 THEN
+     OR p_error_code !~ '^[A-Z0-9_]{1,64}
+    RAISE EXCEPTION 'Invalid processing failure payload' USING ERRCODE = '22023';
+  END IF;
+
+  SELECT * INTO v_run FROM public.processing_run WHERE id = p_run_id FOR UPDATE;
+  IF NOT FOUND OR v_run.status <> 'running' OR v_run.lease_token IS DISTINCT FROM p_lease_token
+     OR v_run.lease_expires_at IS NULL OR v_run.lease_expires_at <= now() THEN
+    RETURN false;
+  END IF;
+
+  v_next_status := CASE WHEN p_retryable AND v_run.attempt_number < 5 THEN 'retryable' ELSE 'failed' END;
+  UPDATE public.processing_run
+  SET status = v_next_status, finished_at = now(),
+      next_attempt_at = now() + make_interval(secs => p_retry_after_seconds),
+      lease_token = NULL, lease_expires_at = NULL,
+      error_code = p_error_code, error_message = NULL
+  WHERE id = p_run_id;
+  UPDATE public.capture
+  SET processing_status = CASE WHEN v_next_status = 'retryable' THEN 'queued' ELSE 'failed' END
+  WHERE id = v_run.capture_id AND deleted_at IS NULL;
+  RETURN true;
+END;
+$function$;
+
+ALTER FUNCTION public.fail_inbox_processing_run(uuid, uuid, text, boolean, integer) OWNER TO postgres;
+REVOKE ALL PRIVILEGES ON FUNCTION public.fail_inbox_processing_run(uuid, uuid, text, boolean, integer)
+  FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.fail_inbox_processing_run(uuid, uuid, text, boolean, integer) TO service_role;
+ OR p_retryable IS NULL
+     OR p_retry_after_seconds IS NULL OR p_retry_after_seconds NOT BETWEEN 0 AND 86400 THEN
     RAISE EXCEPTION 'Invalid processing failure payload' USING ERRCODE = '22023';
   END IF;
 
