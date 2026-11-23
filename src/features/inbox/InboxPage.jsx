@@ -539,7 +539,11 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
       if (partError) throw partError;
       if (partUpdate !== true) throw new Error('El elemento fue creado, pero no se pudo confirmar su clasificación. Reintenta esta misma operación.');
 
-      const allParts = getCaptureParts(selectedCapture.id);
+      const storedParts = getCaptureParts(selectedCapture.id);
+      // A just-recovered initial part is not in the hook's current snapshot yet.
+      const allParts = storedParts.some((part) => part.id === partId)
+        ? storedParts
+        : [...storedParts, selectedPart];
       const allPartsConfirmed = allParts.length > 0 && allParts.every((part) => part.id === partId
         || captureLinks.some((link) => link.capture_part_id === part.id && link.link_status === 'confirmed'));
       const { data: captureUpdate, error: captureError } = await supabase.rpc('set_inbox_capture_attention_status', {
