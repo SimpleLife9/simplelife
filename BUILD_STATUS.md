@@ -758,3 +758,19 @@ These deferrals are accepted to permit Phase 1 design/build work to begin. They 
 - Extensions available: pgcrypto 1.3 / uuid-ossp 1.1. No UUIDv7 generator found. A read-only SQL prototype using `extensions.gen_random_bytes(10)` and database milliseconds generated an ID whose version/variant bits passed the exact table CHECK; no function was created.
 - PR #66 is a docs-only security proposal for trusted Event writes and transactional append-only audit, including server-derived actors, Edge Function `ctx.supabaseAdmin` write boundary, SELECT-only browser access, private trigger, private UUIDv7 generator and real-auth two-user test matrix. No database migration or write is authorized by the design.
 - Next gates: PR #66 CI + merge; local Edge Runtime auth smoke; timezone dependency lifecycle/rollback review; then separate explicit Human Gate before first Event DDL/migration. The UI and first persisted Event vertical slice remain not implemented.
+
+
+## Phase 1 Agenda — TaskSchedule y conflictos recíprocos (23/11/2026)
+
+- PR #93: [https://github.com/SimpleLife9/simplelife/pull/93](https://github.com/SimpleLife9/simplelife/pull/93).
+- Rama: `feat/agenda-task-schedule-persistence-v1`. Head de código validado antes de este checkpoint documental: `0baedc401a3469375dc9e3d9dbe42a594a6c62ac`.
+- Slice implementado: persistencia de TaskSchedule owner-scoped; estados y lifecycle; hora civil/IANA e intervalo UTC; writer autenticado y RPC server-only; UUIDv7/SHA-256; idempotencia, replay, CAS, advisory lock y auditoría append-only; conflictos TaskSchedule ↔ Event y Protected Time, además de solapamientos entre reservas.
+- La UI permite crear/editar/confirmar/cancelar/liberar reservas, ver historial e integrar las reservas en Día/Semana/Mes. La Task original conserva su identidad, fecha límite y estado.
+- CI #497 / [run 45186876469](https://github.com/SimpleLife9/simplelife/actions/runs/45186876469): SUCCESS sobre el SHA exacto `0baedc401a3469375dc9e3d9dbe42a594a6c62ac`. El job `test-and-build` pasó unit tests, Playwright escritorio/móvil, smoke opt-in, Deno/IANA, bootstrap RLS y replay de migraciones en Supabase efímero, pruebas SQL de Event/Protected Time/TaskSchedule, conflictos recíprocos, auditoría, idempotencia y concurrencia, Edge Runtime local, limpieza/restauración de configuración y build de producción.
+- La regresión de Protected Time restore quedó corregida: el pre-check compara el instante temporal representado, sin reemplazar el valor original usado por CAS PostgreSQL. CI #497 pasó después de la corrección.
+- Revisión estática de 40 archivos: sin bloqueadores detectados en las rutas críticas examinadas. Aún no hay revisión independiente de segundo revisor ni review threads registrados en GitHub.
+- Evidencia móvil automatizada: Playwright a 390×844 con assertion de ausencia de overflow horizontal. No equivale a MANUAL PASS en un Android físico.
+- **Estados separados:** IMPLEMENTED = sí; CI PASS = sí sobre `0baedc401a3469375dc9e3d9dbe42a594a6c62ac`; MANUAL PASS desktop/Android = pendiente; PERSISTENCE PASS contra Supabase alojado = no declarado; RELEASED = no.
+- **Alcance:** este PR cierra el slice TaskSchedule/conflictos, no toda la Fase 1 Agenda. La aceptación completa de Agenda incluye criterios adicionales del contrato de producto, entre ellos recurrencia y validación real de los flujos.
+- Sin DDL alojado, deploy de Edge Functions, publicación ni cambios en `Simplelife_dev`. PR permanece OPEN / Draft / no mergeado.
+- Próximas puertas: aceptación funcional desktop/Android cuando exista una instancia de prueba autorizada; revisión independiente; Human Gate explícito antes de quitar Draft/merge y antes de cualquier DDL/deploy/release.
