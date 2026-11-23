@@ -337,6 +337,7 @@ export async function handleRequest(
       });
       if (eventDraft.temporal.kind !== "zoned_civil"
         || eventDraft.temporal.startLocalDateTime.slice(0, 10) !== selectedDate
+        || typeof rule.localTime !== "string"
         || eventDraft.temporal.startLocalDateTime.slice(11, 19) !== rule.localTime.slice(0, 8)
         || eventDraft.temporal.timeZone !== rule.timeZone
         || eventDraft.temporal.endLocalDateTime.slice(0, 10) !== addRecurrenceCalendarDays(selectedDate, timed.endDayOffset)
@@ -487,7 +488,7 @@ export async function handleRequest(
     }
 
     const eventIdForRecord = body.scope === "entire_series" ? String(body.seriesId) : childSeriesId!;
-    const taskScheduleWindow = firstWindow ?? { startsAt: null, endsAt: null };
+    const taskScheduleWindow = firstWindow ?? undefined;
     const baseRecord = buildEventInsertRecord({
       eventDraft: resolvedMasterDraft,
       eventId: eventIdForRecord,
