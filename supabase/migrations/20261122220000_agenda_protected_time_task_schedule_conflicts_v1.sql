@@ -181,6 +181,28 @@ BEGIN
       RAISE EXCEPTION 'TaskSchedule decisions and snapshot cannot exceed 500 entries'
         USING ERRCODE = '22023';
     END IF;
+    IF EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements(p_block_patch->'task_schedule_snapshot') AS supplied(item)
+      WHERE jsonb_typeof(supplied.item) IS DISTINCT FROM 'object'
+         OR CASE
+              WHEN jsonb_typeof(supplied.item) = 'object' THEN
+                (SELECT count(*) FROM jsonb_object_keys(supplied.item)) <> 2
+                OR NOT (supplied.item ?& ARRAY['id', 'updated_at']::text[])
+              ELSE true
+            END
+    ) OR EXISTS (
+      SELECT 1
+      FROM (
+        SELECT item->>'id' AS schedule_id, count(*) AS copies
+        FROM jsonb_array_elements(p_block_patch->'task_schedule_snapshot') AS supplied(item)
+        GROUP BY item->>'id'
+      ) AS duplicate_snapshots
+      WHERE copies > 1
+    ) THEN
+      RAISE EXCEPTION 'TaskSchedule snapshot entries must be exact, unique id/updated_at objects'
+        USING ERRCODE = '22023';
+    END IF;
     IF p_payload_version = 'protected-time-mutation-v1'
        AND jsonb_array_length(p_block_patch->'task_schedule_conflict_decisions') > 0 THEN
       RAISE EXCEPTION 'TaskSchedule consent requires protected-time-mutation-v2'
@@ -221,8 +243,14 @@ BEGIN
       FROM jsonb_array_elements(p_block_patch->'task_schedule_conflict_decisions') AS supplied(item)
       WHERE jsonb_typeof(supplied.item) IS DISTINCT FROM 'object'
          OR CASE
-              WHEN jsonb_typeof(supplied.item) = 'object'
-                THEN (SELECT count(*) FROM jsonb_object_keys(supplied.item)) <> 14
+              WHEN jsonb_typeof(supplied.item) = 'object' THEN
+                (SELECT count(*) FROM jsonb_object_keys(supplied.item)) <> 14
+                OR NOT (supplied.item ?& ARRAY[
+                  'policyVersion', 'taskScheduleId', 'taskScheduleUpdatedAt',
+                  'startsAt', 'endsAt', 'occurrenceDate', 'occurrenceStartsAt',
+                  'occurrenceEndsAt', 'overlapStartsAt', 'overlapEndsAt',
+                  'protectionMode', 'timeZone', 'decision', 'consentedAt'
+                ]::text[])
               ELSE true
             END
          OR supplied.item->>'policyVersion' IS DISTINCT FROM 'protected-time-task-schedule-decision-v1'
