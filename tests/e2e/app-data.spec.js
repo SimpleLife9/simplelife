@@ -555,6 +555,9 @@ async function mockSupabaseSession(page, initialData = {}) {
       const [rangeStart, rangeEnd] = rangeHeader.split('-').map(Number);
       const start = Number.isFinite(rangeStart) ? rangeStart : 0;
       const end = Number.isFinite(rangeEnd) ? rangeEnd : start + 99;
+      if (initialData.capturePageDelayStart === start) {
+        await new Promise((resolve) => setTimeout(resolve, initialData.capturePageDelayMs ?? 800));
+      }
       const searchParam = url.searchParams.get('search_document');
       let filtered = [...captures];
       if (searchParam) {
@@ -1519,6 +1522,42 @@ test('Inbox searches and paginates the complete capture archive beyond the first
   await page.getByLabel('Buscar capturas').fill('ARCHIVE_TAIL_UNIQUE_TERM');
   await expect(page.getByText('ARCHIVE_TAIL_UNIQUE_TERM')).toBeVisible();
   expect(captures).toHaveLength(257);
+});
+
+test('Inbox ignores a delayed pagination response after the archive search changes', async ({ page }) => {
+  const captures = Array.from({ length: 120 }, (_, index) => ({
+    id: `00000000-0000-7000-8000-${String(1000001000 + index).padStart(12, '0')}`,
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    input_type: 'text',
+    content_original: index === 110 ? 'SEARCH_RACE_TARGET_UNIQUE' : `Historical capture ${index + 1}`,
+    attention_status: 'needs_review',
+    processing_status: 'not_started',
+    sync_status: 'synced',
+    captured_at: new Date(Date.UTC(2026, 10, 23 - index)).toISOString(),
+    deleted_at: null,
+  }));
+  await mockSupabaseSession(page, {
+    captures,
+    capturePageDelayStart: 100,
+    capturePageDelayMs: 900,
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  await expect(page.getByText('Historical capture 1')).toBeVisible();
+  await page.getByRole('button', { name: 'Cargar más capturas' }).click();
+  await page.getByLabel('Buscar capturas').fill('SEARCH_RACE_TARGET_UNIQUE');
+  await expect(page.getByText('SEARCH_RACE_TARGET_UNIQUE')).toBeVisible();
+  await page.waitForTimeout(1100);
+
+  await expect(page.getByText('SEARCH_RACE_TARGET_UNIQUE')).toBeVisible();
+  await expect(page.getByText('Historical capture 101')).toHaveCount(0);
+  await expect(page.getByText('Historical capture 1')).toHaveCount(0);
 });
 
 test('Inbox can link a capture to an existing Project and preserve provenance', async ({ page }) => {
