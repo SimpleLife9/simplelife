@@ -861,6 +861,8 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
       setConfirmAction(null);
       setOccurrenceMutationMode(null);
       setPendingKey(null);
+    } else {
+      setPendingKey(null);
     }
   };
 
