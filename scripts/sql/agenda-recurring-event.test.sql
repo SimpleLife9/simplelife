@@ -31,6 +31,8 @@ ON CONFLICT (id) DO NOTHING;
 -- The backend writer is intentionally denied direct audit_event privileges.
 -- This test-only SECURITY DEFINER probe lets the SQL assertions inspect rows
 -- without widening service_role's production table grants.
+CREATE TEMP TABLE recurring_test_context (marker boolean) ON COMMIT DROP;
+
 CREATE FUNCTION pg_temp.recurring_test_audit_count(
   p_owner uuid,
   p_entity_type text,
