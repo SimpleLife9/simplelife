@@ -26,7 +26,7 @@ INSERT INTO public.capture(id,owner_user_id,created_by_user_id,content_original)
 VALUES('019b2000-0000-7000-8000-000000000101',
        '019b2000-0000-7000-8000-000000000001',
        '019b2000-0000-7000-8000-000000000001','Inbox review audit capture');
-INSERT INTO public.capture_part(id,capture_id,part_index,original_fragment,category)
+INSERT INTO public.capture_part(id,capture_id,part_index,original_fragment,category,interpretation)
 VALUES('019b2000-0000-7000-8000-000000000201',
        '019b2000-0000-7000-8000-000000000101',0,'Inbox review audit capture','note_idea','Original interpretation');
 
