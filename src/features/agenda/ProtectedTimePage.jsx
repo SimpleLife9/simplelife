@@ -638,7 +638,7 @@ export function ProtectedTimePage({ profile, refreshKey, runAction, busy }) {
                 <article className="agenda-conflict-card protected-time-task-conflict" key={item.conflictKey}>
                   <div className="agenda-conflict-card-heading">
                     <div>
-                      <strong>{item.protectedTimeLabel || 'Tiempo protegido'} · {item.taskScheduleId}</strong>
+                      <strong>{item.protectedTimeLabel || 'Tiempo protegido'}</strong>
                       <small>{item.timeZone || DEFAULT_TIME_ZONE}</small>
                     </div>
                     <span className="protected-time-mode is-flexible">Reserva activa</span>
