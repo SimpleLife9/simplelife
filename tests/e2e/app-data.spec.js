@@ -50,6 +50,7 @@ async function mockSupabaseSession(page, initialData = {}) {
   const calendarEvents = [...(initialData.calendarEvents || [])];
   const protectedTimeBlocks = [...(initialData.protectedTimeBlocks || [])];
   const protectedTimeMutationRequests = [];
+  const protectedTimeTaskScheduleConflictResponses = [...(initialData.protectedTimeTaskScheduleConflictResponses || [])];
   const taskSchedules = [...(initialData.taskSchedules || [])];
   const taskScheduleMutationRequests = [];
   const taskScheduleConflictResponses = [...(initialData.taskScheduleConflictResponses || [])];
@@ -626,6 +627,11 @@ async function mockSupabaseSession(page, initialData = {}) {
       const payload = request.postDataJSON();
       const key = request.headers()['idempotency-key'] || '';
       protectedTimeMutationRequests.push({ key, payload });
+      const queuedTaskScheduleConflict = protectedTimeTaskScheduleConflictResponses.shift();
+      if (queuedTaskScheduleConflict) {
+        await json(queuedTaskScheduleConflict.status || 409, queuedTaskScheduleConflict.body);
+        return;
+      }
       const now = new Date(Date.now() + protectedTimeMutationRequests.length * 3).toISOString();
       let row = payload.action === 'create'
         ? null
@@ -661,6 +667,7 @@ async function mockSupabaseSession(page, initialData = {}) {
           end_time_local: block.endLocalTime ?? null,
           ends_next_day: block.endsNextDay ?? null,
           resolver_metadata: { rulesSource: 'iana-tzdb', rulesVersion: '2026f', resolverVersion: 'agenda-iana-resolver-v1', authoritative: true },
+          task_schedule_conflict_decisions: payload.taskScheduleDecisions || [],
           archived_at: null,
           deleted_at: null,
           created_at: now,
@@ -690,6 +697,7 @@ async function mockSupabaseSession(page, initialData = {}) {
             start_time_local: block.startLocalTime ?? null,
             end_time_local: block.endLocalTime ?? null,
             ends_next_day: block.endsNextDay ?? null,
+            task_schedule_conflict_decisions: payload.taskScheduleDecisions || [],
           });
         } else if (payload.action === 'archive') {
           row.archived_at = now;
@@ -3529,6 +3537,76 @@ test('Tiempo protegido funciona en móvil a 390px sin desbordar el documento', a
   }));
   expect(dimensions.document).toBeLessThanOrEqual(dimensions.viewport + 1);
   await expect(page.getByRole('button', { name: 'Nuevo bloque' })).toBeVisible();
+});
+
+
+test('Protected Time exige consentimiento explícito antes de cruzar reservas de tareas', async ({ page }) => {
+  const scheduleId = '019a0000-0000-7000-8000-000000000611';
+  const scheduleUpdatedAt = '2026-11-22T18:00:00.000000Z';
+  const occurrenceStartsAt = '2026-12-25T03:00:00.000Z';
+  const { protectedTimeBlocks, protectedTimeMutationRequests } = await mockSupabaseSession(page, {
+    protectedTimeTaskScheduleConflictResponses: [{
+      status: 409,
+      body: {
+        error: 'TASK_SCHEDULE_CONFLICTS',
+        taskScheduleConflicts: [{
+          conflictKey: scheduleId + ':' + occurrenceStartsAt,
+          taskScheduleId: scheduleId,
+          taskScheduleUpdatedAt: scheduleUpdatedAt,
+          startsAt: '2026-12-25T03:00:00.000Z',
+          endsAt: '2026-12-25T04:00:00.000Z',
+          overlapStartsAt: '2026-12-25T03:15:00.000Z',
+          overlapEndsAt: '2026-12-25T03:45:00.000Z',
+          occurrenceDate: '2026-12-25',
+          occurrenceStartsAt,
+          occurrenceEndsAt: '2026-12-25T04:00:00.000Z',
+          protectionMode: 'hard',
+          protectedTimeLabel: 'Gimnasio protegido',
+          patternKind: 'one_off',
+          timeZone: 'America/Havana',
+          requiredDecision: 'keep_overlap',
+        }],
+      },
+    }],
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.getByRole('navigation', { name: 'Navegación principal' })
+    .getByRole('button', { name: /Agenda/ }).click();
+  await page.getByRole('button', { name: 'Tiempo protegido', exact: true }).click();
+
+  await page.getByRole('button', { name: 'Nuevo bloque' }).click();
+  const composer = page.getByRole('dialog', { name: 'Proteger tiempo' });
+  await composer.getByLabel('Nombre del bloque').fill('Gimnasio protegido');
+  await composer.getByRole('button', { name: 'Guardar bloque' }).click();
+
+  const decisionDialog = page.getByRole('alertdialog', { name: 'Hay reservas de tareas que se cruzan' });
+  await expect(decisionDialog).toBeVisible();
+  await expect(decisionDialog.getByText(scheduleId)).toBeVisible();
+  await expect(composer).toBeVisible();
+  expect(protectedTimeMutationRequests).toHaveLength(1);
+  expect(protectedTimeMutationRequests[0].payload.taskScheduleDecisions).toBeUndefined();
+  expect(protectedTimeBlocks).toHaveLength(0);
+
+  await decisionDialog.getByRole('checkbox', {
+    name: 'Acepto mantener esta reserva dentro del tiempo protegido',
+  }).check();
+  await decisionDialog.getByRole('button', { name: 'Guardar con estas decisiones' }).click();
+
+  await expect(page.getByText('Tiempo protegido guardado.')).toBeVisible();
+  await expect(decisionDialog).toHaveCount(0);
+  expect(protectedTimeMutationRequests).toHaveLength(2);
+  expect(protectedTimeMutationRequests[1].key).toBe(protectedTimeMutationRequests[0].key);
+  expect(protectedTimeMutationRequests[1].payload.taskScheduleDecisions).toEqual([{
+    taskScheduleId: scheduleId,
+    taskScheduleUpdatedAt: scheduleUpdatedAt,
+    occurrenceStartsAt,
+    decision: 'keep_overlap',
+  }]);
+  expect(protectedTimeBlocks).toHaveLength(1);
+  expect(protectedTimeBlocks[0].task_schedule_conflict_decisions).toHaveLength(1);
 });
 
 
