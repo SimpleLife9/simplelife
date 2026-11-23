@@ -1321,6 +1321,91 @@ test('Inbox runs advisory processing, records review, and restores soft-deleted 
   expect(insertedTasks).toHaveLength(0);
 });
 
+
+test('Inbox keeps Request and Habit suggestions unavailable until the owner chooses a supported destination', async ({ page }) => {
+  const captures = [
+    {
+      id: '00000000-0000-7000-8000-000000000701',
+      owner_user_id: profile.id,
+      created_by_user_id: profile.id,
+      input_type: 'text',
+      content_original: 'Solicitud: coordinar con el proveedor',
+      attention_status: 'needs_review',
+      processing_status: 'processed',
+      sync_status: 'synced',
+      captured_at: '2026-11-19T14:00:00.000Z',
+      deleted_at: null,
+    },
+    {
+      id: '00000000-0000-7000-8000-000000000702',
+      owner_user_id: profile.id,
+      created_by_user_id: profile.id,
+      input_type: 'text',
+      content_original: 'Hábito: entrenar cuatro veces por semana',
+      attention_status: 'needs_review',
+      processing_status: 'processed',
+      sync_status: 'synced',
+      captured_at: '2026-11-19T13:00:00.000Z',
+      deleted_at: null,
+    },
+  ];
+  const captureParts = [
+    {
+      id: '00000000-0000-7000-8000-000000000711',
+      capture_id: captures[0].id,
+      part_index: 0,
+      original_fragment: captures[0].content_original,
+      category: 'request',
+      review_status: 'unreviewed',
+    },
+    {
+      id: '00000000-0000-7000-8000-000000000712',
+      capture_id: captures[1].id,
+      part_index: 0,
+      original_fragment: captures[1].content_original,
+      category: 'habit',
+      review_status: 'unreviewed',
+    },
+  ];
+  const { insertedTasks, insertedCaptureLinks, reviewRequests } = await mockSupabaseSession(page, {
+    captures,
+    captureParts,
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  await page.getByRole('button', { name: 'Organizar captura: Solicitud: coordinar con el proveedor' }).click();
+  let organizer = page.getByRole('dialog', { name: 'Organizar captura' });
+  await expect(organizer.getByLabel('Tipo de destino')).toHaveValue('request');
+  await expect(organizer.getByText(/La clasificación se conserva como Solicitud/)).toBeVisible();
+  await expect(organizer.getByRole('button', { name: /Destino aún no disponible/ })).toBeDisabled();
+  expect(insertedTasks).toHaveLength(0);
+  expect(insertedCaptureLinks).toHaveLength(0);
+  await organizer.getByLabel('Tipo de destino').selectOption('task');
+  await organizer.getByRole('button', { name: 'Confirmar y organizar' }).click();
+  await expect(page.getByText('Captura organizada como tarea.')).toBeVisible();
+  expect(insertedTasks).toHaveLength(1);
+  expect(insertedCaptureLinks).toHaveLength(1);
+  expect(reviewRequests.at(-1)).toMatchObject({
+    p_capture_part_id: captureParts[0].id,
+    p_category: 'task',
+    p_review_status: 'accepted',
+  });
+
+  await page.getByRole('button', { name: 'Organizar captura: Hábito: entrenar cuatro veces por semana' }).click();
+  organizer = page.getByRole('dialog', { name: 'Organizar captura' });
+  await expect(organizer.getByLabel('Tipo de destino')).toHaveValue('habit');
+  await expect(organizer.getByText(/La clasificación se conserva como Hábito/)).toBeVisible();
+  await expect(organizer.getByRole('button', { name: /Destino aún no disponible/ })).toBeDisabled();
+  expect(insertedTasks).toHaveLength(1);
+  expect(insertedCaptureLinks).toHaveLength(1);
+  expect(reviewRequests).toHaveLength(1);
+});
+
 test('Inbox searches and paginates the complete capture archive beyond the first 250 rows', async ({ page }) => {
   const olderCaptures = Array.from({ length: 257 }, (_, index) => ({
     id: `00000000-0000-7000-8000-${String(1000000000 + index).padStart(12, '0')}`,
