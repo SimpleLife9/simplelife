@@ -115,6 +115,8 @@ DECLARE
   v_decisions jsonb;
   v_snapshot jsonb;
   v_event_record jsonb;
+  v_event_patch jsonb;
+  v_event_version timestamptz;
   v_event_now timestamptz := clock_timestamp();
   v_event_id uuid := '019a0000-0000-7000-8000-000000000104';
   v_event_key uuid := '019a0000-0000-7000-8000-000000000213';
@@ -401,6 +403,84 @@ BEGIN
       AND task_schedule_conflict_decisions = v_decisions
   ) THEN
     RAISE EXCEPTION 'Event writer did not persist the exact TaskSchedule consent record';
+  END IF;
+
+  -- The Event Edit RPC also validates the owner snapshot and consent under
+  -- the shared advisory lock, and refuses a missing decision before receipt claim.
+  SELECT updated_at INTO v_event_version
+  FROM public.calendar_event
+  WHERE id = v_event_id;
+
+  v_event_patch := jsonb_build_object(
+    'title', 'Event edited while preserving TaskSchedule',
+    'description', NULL,
+    'location_label', NULL,
+    'location_kind', NULL,
+    'temporal_kind', 'fixed_instant',
+    'start_date', NULL,
+    'end_date_exclusive', NULL,
+    'start_local', NULL,
+    'end_local', NULL,
+    'time_zone', 'America/Havana',
+    'starts_at', '2026-11-24T14:30:00.000Z',
+    'ends_at', '2026-11-24T15:30:00.000Z',
+    'start_disambiguation', NULL,
+    'end_disambiguation', NULL,
+    'start_gap_strategy', NULL,
+    'end_gap_strategy', NULL,
+    'protected_time_decisions', '[]'::jsonb,
+    'protected_time_snapshot', '[]'::jsonb,
+    'task_schedule_conflict_decisions', '[]'::jsonb,
+    'task_schedule_snapshot', v_snapshot,
+    'task_schedule_window', v_window
+  );
+
+  SELECT * INTO v_event_result
+  FROM public.mutate_calendar_event_once(
+    '019a0000-0000-7000-8000-000000000001',
+    v_event_id,
+    '019a0000-0000-7000-8000-000000000214',
+    'event-mutation-v1',
+    repeat('b', 64),
+    v_event_version,
+    'edit',
+    v_event_patch,
+    clock_timestamp()
+  );
+  IF v_event_result.http_status <> 409
+     OR v_event_result.response_body->>'error' <> 'TASK_SCHEDULE_CONFLICTS' THEN
+    RAISE EXCEPTION 'Event Edit RPC must reject an overlap without consent; got % %',
+      v_event_result.http_status, v_event_result.response_body;
+  END IF;
+
+  v_event_patch := jsonb_set(
+    v_event_patch,
+    '{task_schedule_conflict_decisions}',
+    v_decisions
+  );
+  SELECT * INTO v_event_result
+  FROM public.mutate_calendar_event_once(
+    '019a0000-0000-7000-8000-000000000001',
+    v_event_id,
+    '019a0000-0000-7000-8000-000000000214',
+    'event-mutation-v1',
+    repeat('c', 64),
+    v_event_version,
+    'edit',
+    v_event_patch,
+    clock_timestamp()
+  );
+  IF v_event_result.http_status <> 200 OR v_event_result.replayed THEN
+    RAISE EXCEPTION 'Event Edit RPC must commit after explicit TaskSchedule consent; got % %',
+      v_event_result.http_status, v_event_result.response_body;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.calendar_event
+    WHERE id = v_event_id
+      AND task_schedule_conflict_decisions = v_decisions
+      AND title = 'Event edited while preserving TaskSchedule'
+  ) THEN
+    RAISE EXCEPTION 'Event Edit did not persist the exact TaskSchedule consent record';
   END IF;
 
   SELECT updated_at INTO v_updated_at
