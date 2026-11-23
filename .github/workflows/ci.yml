@@ -129,6 +129,8 @@ jobs:
 
       - name: Test TaskSchedule ownership, idempotency, optimistic concurrency and audit in ephemeral local Postgres
         run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/agenda-task-schedule.test.sql
+
+      - name: Test Protected Time to TaskSchedule conflict consent and audit in ephemeral local Postgres
         run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/agenda-protected-time-task-schedule-conflicts.test.sql
 
       - name: Test concurrent Event create idempotency claims in ephemeral local Postgres
