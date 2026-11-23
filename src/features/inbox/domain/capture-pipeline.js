@@ -37,6 +37,27 @@ export function createCaptureRecordDraft({ inputType, contentOriginal } = {}) {
 }
 
 /**
+ * Allows only one in-flight submit from a mounted capture composer.
+ * A second click while the first write is pending is ignored; the gate resets
+ * after either success or failure so the user can retry intentionally.
+ */
+export function createSingleSubmissionGate() {
+  let inFlight = false;
+
+  return async function runOnce(operation) {
+    assert(typeof operation === 'function', 'Submission operation must be a function.');
+    if (inFlight) return false;
+
+    inFlight = true;
+    try {
+      return await operation();
+    } finally {
+      inFlight = false;
+    }
+  };
+}
+
+/**
  * Validates an untrusted classification/splitting result.
  *
  * Offsets are JavaScript UTF-16 code-unit offsets. Fragments are reconstructed
