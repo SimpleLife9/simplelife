@@ -24,3 +24,6 @@ verify_jwt = true
 
 [functions.agenda-event-series-create]
 verify_jwt = true
+
+[functions.agenda-event-series-materialize]
+verify_jwt = true
