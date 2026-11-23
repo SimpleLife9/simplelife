@@ -88,11 +88,11 @@ BEGIN
          AND (
            (item.value->>'original_local_time')::time IS DISTINCT FROM (v_event.recurrence_rule->>'localTime')::time
            OR (item.value->>'actual_local_time')::time IS DISTINCT FROM (v_event.recurrence_rule->>'localTime')::time
-           OR item.value->>'start_local' IS DISTINCT FROM
-             (item.value->>'original_local_date') || ' ' || (v_event.recurrence_rule->>'localTime')
-           OR item.value->>'end_local' IS DISTINCT FROM
-             (((item.value->>'original_local_date')::date + v_event.recurrence_end_day_offset)::text)
-               || ' ' || v_event.recurrence_end_local_time::text
+           OR (item.value->>'start_local')::timestamp IS DISTINCT FROM
+             ((item.value->>'original_local_date')::date + (v_event.recurrence_rule->>'localTime')::time)
+           OR (item.value->>'end_local')::timestamp IS DISTINCT FROM
+             (((item.value->>'original_local_date')::date + v_event.recurrence_end_day_offset)
+               + v_event.recurrence_end_local_time)
            OR item.value->>'time_zone' IS DISTINCT FROM v_event.time_zone
            OR (item.value->>'starts_at')::timestamptz >= (item.value->>'ends_at')::timestamptz
            OR item.value->'resolver_metadata'->>'rulesSource' IS DISTINCT FROM 'iana-tzdb'
