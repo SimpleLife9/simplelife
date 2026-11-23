@@ -115,6 +115,9 @@ jobs:
       - name: Test Event persistence and append-only audit invariants in ephemeral local Postgres
         run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/agenda-event-persistence.test.sql
 
+      - name: Test recurring Event series persistence, ownership, audit and idempotency
+        run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/agenda-recurring-event.test.sql
+
       - name: Test Event create idempotency ledger and atomic routine in ephemeral local Postgres
         run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/agenda-event-idempotency.test.sql
 
