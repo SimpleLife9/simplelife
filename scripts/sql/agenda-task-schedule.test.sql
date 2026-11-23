@@ -106,9 +106,18 @@ DECLARE
   );
   v_patch jsonb;
   v_result record;
+  v_event_result record;
   v_updated_at timestamptz;
   v_schedule_count bigint;
   v_task_status text;
+  v_validation text;
+  v_window jsonb;
+  v_decisions jsonb;
+  v_snapshot jsonb;
+  v_event_record jsonb;
+  v_event_now timestamptz := clock_timestamp();
+  v_event_id uuid := '019a0000-0000-7000-8000-000000000104';
+  v_event_key uuid := '019a0000-0000-7000-8000-000000000213';
 BEGIN
   v_patch := jsonb_build_object(
     'task_id', '019a0000-0000-7000-8000-000000000011',
@@ -243,6 +252,155 @@ BEGIN
   );
   IF v_result.http_status <> 200 OR v_result.response_body->>'scheduleStatus' <> 'confirmed' THEN
     RAISE EXCEPTION 'Proposed reservation must be confirmable';
+  END IF;
+
+  SELECT updated_at INTO v_updated_at
+  FROM public.task_schedule
+  WHERE id = '019a0000-0000-7000-8000-000000000101';
+
+  -- The Event-side validator rejects a missing choice, accepts the exact versioned choice,
+  -- and rejects a choice whose TaskSchedule version has changed.
+  v_window := jsonb_build_object(
+    'startsAt', '2026-11-24T14:30:00.000Z',
+    'endsAt', '2026-11-24T15:30:00.000Z'
+  );
+  v_decisions := jsonb_build_array(jsonb_build_object(
+    'policyVersion', 'event-task-schedule-decision-v1',
+    'taskScheduleId', '019a0000-0000-7000-8000-000000000101',
+    'taskScheduleUpdatedAt', v_updated_at,
+    'startsAt', '2026-11-24T15:00:00.000Z',
+    'endsAt', '2026-11-24T16:00:00.000Z',
+    'overlapStartsAt', '2026-11-24T15:00:00.000Z',
+    'overlapEndsAt', '2026-11-24T15:30:00.000Z',
+    'decision', 'keep_overlap',
+    'consentedAt', v_event_now
+  ));
+  v_validation := public.validate_event_task_schedule_conflicts(
+    '019a0000-0000-7000-8000-000000000001',
+    v_window,
+    '[]'::jsonb
+  );
+  IF v_validation <> 'TASK_SCHEDULE_CONFLICTS' THEN
+    RAISE EXCEPTION 'Event must not overlap an active TaskSchedule without consent; got %', v_validation;
+  END IF;
+  v_validation := public.validate_event_task_schedule_conflicts(
+    '019a0000-0000-7000-8000-000000000001',
+    v_window,
+    v_decisions
+  );
+  IF v_validation <> 'ok' THEN
+    RAISE EXCEPTION 'Exact version-bound Event TaskSchedule consent should pass; got %', v_validation;
+  END IF;
+  v_validation := public.validate_event_task_schedule_conflicts(
+    '019a0000-0000-7000-8000-000000000001',
+    v_window,
+    jsonb_set(v_decisions, '{0,taskScheduleUpdatedAt}', to_jsonb(v_updated_at + interval '1 second'))
+  );
+  IF v_validation <> 'TASK_SCHEDULE_CONFLICTS_CHANGED' THEN
+    RAISE EXCEPTION 'A stale Event TaskSchedule consent must fail closed; got %', v_validation;
+  END IF;
+
+  -- Exercise the complete Event Create RPC: stale snapshots and missing consent return
+  -- 409 before claiming the idempotency key; the same key can then commit with consent.
+  v_snapshot := jsonb_build_array(jsonb_build_object(
+    'id', '019a0000-0000-7000-8000-000000000101',
+    'updated_at', v_updated_at
+  ));
+  v_event_record := jsonb_build_object(
+    'id', v_event_id,
+    'owner_user_id', '019a0000-0000-7000-8000-000000000001',
+    'created_by_user_id', '019a0000-0000-7000-8000-000000000001',
+    'updated_by_user_id', '019a0000-0000-7000-8000-000000000001',
+    'title', 'Event deliberately overlapping a TaskSchedule',
+    'description', NULL,
+    'location_label', NULL,
+    'location_kind', NULL,
+    'event_status', 'confirmed',
+    'temporal_kind', 'fixed_instant',
+    'start_date', NULL,
+    'end_date_exclusive', NULL,
+    'start_local', NULL,
+    'end_local', NULL,
+    'time_zone', 'America/Havana',
+    'starts_at', '2026-11-24T14:30:00.000Z',
+    'ends_at', '2026-11-24T15:30:00.000Z',
+    'start_disambiguation', NULL,
+    'end_disambiguation', NULL,
+    'start_gap_strategy', NULL,
+    'end_gap_strategy', NULL,
+    'archived_at', NULL,
+    'deleted_at', NULL,
+    'purge_after', NULL,
+    'created_at', v_event_now,
+    'updated_at', v_event_now,
+    'protected_time_decisions', '[]'::jsonb,
+    'protected_time_snapshot', '[]'::jsonb,
+    'task_schedule_conflict_decisions', '[]'::jsonb,
+    'task_schedule_snapshot', v_snapshot,
+    'task_schedule_window', v_window
+  );
+
+  v_event_record := jsonb_set(
+    v_event_record,
+    '{task_schedule_snapshot,0,updated_at}',
+    to_jsonb(v_updated_at + interval '1 second')
+  );
+  SELECT * INTO v_event_result
+  FROM public.create_calendar_event_once(
+    '019a0000-0000-7000-8000-000000000001',
+    v_event_key,
+    'event-create-v1',
+    repeat('a', 64),
+    v_event_record
+  );
+  IF v_event_result.http_status <> 409
+     OR v_event_result.response_body->>'error' <> 'TASK_SCHEDULE_CONFLICTS_CHANGED' THEN
+    RAISE EXCEPTION 'Event RPC must reject a stale TaskSchedule snapshot; got % %',
+      v_event_result.http_status, v_event_result.response_body;
+  END IF;
+
+  v_event_record := jsonb_set(
+    v_event_record,
+    '{task_schedule_snapshot,0,updated_at}',
+    to_jsonb(v_updated_at)
+  );
+  SELECT * INTO v_event_result
+  FROM public.create_calendar_event_once(
+    '019a0000-0000-7000-8000-000000000001',
+    v_event_key,
+    'event-create-v1',
+    repeat('a', 64),
+    v_event_record
+  );
+  IF v_event_result.http_status <> 409
+     OR v_event_result.response_body->>'error' <> 'TASK_SCHEDULE_CONFLICTS' THEN
+    RAISE EXCEPTION 'Event RPC must reject an overlap without consent; got % %',
+      v_event_result.http_status, v_event_result.response_body;
+  END IF;
+
+  v_event_record := jsonb_set(
+    v_event_record,
+    '{task_schedule_conflict_decisions}',
+    v_decisions
+  );
+  SELECT * INTO v_event_result
+  FROM public.create_calendar_event_once(
+    '019a0000-0000-7000-8000-000000000001',
+    v_event_key,
+    'event-create-v1',
+    repeat('a', 64),
+    v_event_record
+  );
+  IF v_event_result.http_status <> 201 OR v_event_result.replayed THEN
+    RAISE EXCEPTION 'Event RPC must commit after explicit TaskSchedule consent; got % %',
+      v_event_result.http_status, v_event_result.response_body;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.calendar_event
+    WHERE id = v_event_id
+      AND task_schedule_conflict_decisions = v_decisions
+  ) THEN
+    RAISE EXCEPTION 'Event writer did not persist the exact TaskSchedule consent record';
   END IF;
 
   SELECT updated_at INTO v_updated_at
