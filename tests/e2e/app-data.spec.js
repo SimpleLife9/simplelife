@@ -1246,7 +1246,7 @@ test('Inbox marks normalized duplicate text without merging or deleting captures
   await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
   await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
   await expect(page.getByText('Posible duplicado normalizado · revisar antes de combinar')).toHaveCount(2);
-  expect(captures).toHaveLength(3);
+  expect(captures).toHaveLength(4);
   expect(captureLinks).toHaveLength(0);
   expect(captures.every((capture) => !capture.deleted_at)).toBe(true);
 });
