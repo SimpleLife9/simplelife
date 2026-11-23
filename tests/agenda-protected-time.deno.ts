@@ -352,7 +352,7 @@ Deno.test("Protected Time requires version-bound consent for overlapping TaskSch
     taskScheduleDecisions: [{
       taskScheduleId,
       taskScheduleUpdatedAt,
-      occurrenceStartsAt: "2026-12-25T03:00:00.000Z",
+      occurrenceStartsAt: "2026-12-25T02:00:00.000Z",
       decision: "keep_overlap",
     }],
   }), ctx, {
