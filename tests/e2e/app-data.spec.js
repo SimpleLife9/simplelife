@@ -2914,7 +2914,7 @@ test('Agenda navigates day, week and month views and creates a confirmed all-day
 
   await expect(page.getByText('Evento guardado en Agenda.')).toBeVisible();
   await expect(dialog).toHaveCount(0);
-  await expect(page.getByText('Mi compromiso nuevo')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Mi compromiso nuevo', exact: true })).toBeVisible();
   expect(insertedAgendaEvents).toHaveLength(1);
   expect(calendarEvents).toHaveLength(2);
   expect(insertedAgendaEvents[0]).toMatchObject({
