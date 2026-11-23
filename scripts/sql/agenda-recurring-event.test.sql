@@ -27,6 +27,9 @@ VALUES
   ('019a0000-0000-7000-8000-000000000002', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'Recurring owner B')
 ON CONFLICT (id) DO NOTHING;
 
+
+SET LOCAL ROLE service_role;
+
 DO $test$
 DECLARE
   v_owner uuid := '019a0000-0000-7000-8000-000000000001';
