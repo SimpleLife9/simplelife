@@ -415,7 +415,7 @@ BEGIN
         end_disambiguation = candidate.value->>'end_disambiguation',
         start_gap_strategy = candidate.value->>'start_gap_strategy',
         end_gap_strategy = candidate.value->>'end_gap_strategy',
-        resolver_metadata = candidate.value->'resolver_metadata',
+        resolver_metadata = nullif(candidate.value->'resolver_metadata', 'null'::jsonb),
         occurrence_status = 'scheduled',
         override_kind = NULL,
         review_candidate = NULL,
