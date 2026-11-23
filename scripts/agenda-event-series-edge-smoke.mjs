@@ -90,6 +90,9 @@ server.on("exit", (code) => { exitCode = code; });
 let materializerServer = null;
 let materializerExitCode = null;
 let materializerLogs = "";
+let occurrenceMutationServer = null;
+let occurrenceMutationExitCode = null;
+let occurrenceMutationLogs = "";
 
 async function invoke(token, key, payload) {
   return await fetch(base + "/functions/v1/agenda-event-series-create", {
@@ -245,6 +248,93 @@ try {
   );
   equal(finalOccurrenceCount, "3", "Top-up restores exactly three occurrence rows");
 
+  materializerServer.kill("SIGTERM");
+  await new Promise((resolve) => {
+    if (materializerServer.exitCode !== null) return resolve();
+    const timeout = setTimeout(resolve, 5000);
+    materializerServer.once("exit", () => { clearTimeout(timeout); resolve(); });
+  });
+
+  occurrenceMutationServer = spawn("supabase", ["functions", "serve", "agenda-event-occurrence-mutate", "--no-verify-jwt"], {
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, NO_COLOR: "1" },
+  });
+  occurrenceMutationServer.stdout.on("data", (chunk) => { occurrenceMutationLogs = (occurrenceMutationLogs + chunk.toString()).slice(-16000); });
+  occurrenceMutationServer.stderr.on("data", (chunk) => { occurrenceMutationLogs = (occurrenceMutationLogs + chunk.toString()).slice(-16000); });
+  occurrenceMutationServer.on("exit", (code) => { occurrenceMutationExitCode = code; });
+
+  let occurrenceMutationReady = false;
+  const mutationDeadline = Date.now() + 60000;
+  while (Date.now() < mutationDeadline) {
+    if (occurrenceMutationExitCode !== null) fail("Occurrence mutation Edge server exited early: " + occurrenceMutationExitCode + "\\n" + occurrenceMutationLogs);
+    try {
+      const probe = await fetch(base + "/functions/v1/agenda-event-occurrence-mutate", {
+        method: "GET",
+        headers: { apikey: publishable, authorization: "Bearer " + publishable },
+        signal: AbortSignal.timeout(2000),
+      });
+      if (probe.status === 401) { occurrenceMutationReady = true; break; }
+      await probe.body?.cancel().catch(() => {});
+    } catch { /* bounded readiness retry */ }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  if (!occurrenceMutationReady) fail("Occurrence mutation Edge Runtime did not become ready.\\n" + occurrenceMutationLogs);
+
+  const occurrenceVersionRow = sqlScalar(
+    "SELECT id::text || '|' || row_version::text FROM public.calendar_event_occurrence "
+      + "WHERE calendar_event_id = '" + first.seriesEventId + "'::uuid "
+      + "AND owner_user_id = '" + profileId + "'::uuid "
+      + "ORDER BY original_local_date ASC LIMIT 1",
+  );
+  const [occurrenceId, rowVersionText] = occurrenceVersionRow.split("|");
+  assertUuid(occurrenceId, UUID_V7_PATTERN, "Occurrence selected for exception mutation");
+  const occurrenceMutationKey = newUuid();
+  const occurrenceMutationPayload = {
+    occurrenceId,
+    expectedRowVersion: Number(rowVersionText),
+    action: "cancel",
+  };
+  async function invokeOccurrenceMutation(token) {
+    return await fetch(base + "/functions/v1/agenda-event-occurrence-mutate", {
+      method: "POST",
+      headers: {
+        apikey: publishable,
+        authorization: "Bearer " + token,
+        "content-type": "application/json",
+        "idempotency-key": occurrenceMutationKey,
+      },
+      body: JSON.stringify(occurrenceMutationPayload),
+      signal: AbortSignal.timeout(20000),
+    });
+  }
+  const invalidMutationBearer = await invokeOccurrenceMutation(publishable);
+  equal(invalidMutationBearer.status, 401, "Occurrence mutation rejects publishable API key as Bearer");
+  const mutation = await expectJson(
+    await invokeOccurrenceMutation(session.access_token),
+    200,
+    "Authenticated occurrence cancellation",
+  );
+  equal(mutation.occurrenceStatus, "cancelled", "Occurrence cancellation status");
+  equal(mutation.overrideKind, "cancelled", "Occurrence cancellation override");
+  const mutationReplay = await expectJson(
+    await invokeOccurrenceMutation(session.access_token),
+    200,
+    "Idempotent occurrence cancellation retry",
+  );
+  equal(mutationReplay.occurrenceId, occurrenceId, "Occurrence mutation replay identity");
+  equal(mutationReplay.replayed, true, "Occurrence mutation replay marker");
+  const finalMutationState = sqlScalar(
+    "SELECT occurrence_status || '|' || row_version::text FROM public.calendar_event_occurrence "
+      + "WHERE id = '" + occurrenceId + "'::uuid AND owner_user_id = '" + profileId + "'::uuid",
+  );
+  equal(finalMutationState, "cancelled|2", "One CAS update and one audited occurrence exception");
+  const mutationAudit = sqlScalar(
+    "SELECT count(*) FROM public.audit_event WHERE account_user_id = '" + profileId + "'::uuid "
+      + "AND entity_type = 'calendar_event_occurrence' AND entity_id = '" + occurrenceId + "'::uuid "
+      + "AND action = 'calendar_event_occurrence.updated'",
+  );
+  equal(mutationAudit, "1", "Exactly one append-only exception audit row");
+
   console.log("PASS: real Auth JWT creates a recurring Event through the local Edge Runtime.");
   console.log("PASS: invalid API-key Bearer is rejected by the authenticated wrapper.");
   console.log("PASS: owner-scoped series + three occurrence rows persist; same-key create retry replays one identity.");
@@ -252,14 +342,16 @@ try {
 } finally {
   server.kill("SIGTERM");
   materializerServer?.kill("SIGTERM");
+  occurrenceMutationServer?.kill("SIGTERM");
   await new Promise((resolve) => {
-    if (server.exitCode !== null && (!materializerServer || materializerServer.exitCode !== null)) return resolve();
+    const allStopped = () => server.exitCode !== null
+      && (!materializerServer || materializerServer.exitCode !== null)
+      && (!occurrenceMutationServer || occurrenceMutationServer.exitCode !== null);
+    if (allStopped()) return resolve();
     const timeout = setTimeout(resolve, 5000);
-    server.once("exit", () => {
-      if (!materializerServer || materializerServer.exitCode !== null) { clearTimeout(timeout); resolve(); }
-    });
-    materializerServer?.once("exit", () => {
-      if (server.exitCode !== null) { clearTimeout(timeout); resolve(); }
-    });
+    const finish = () => { if (allStopped()) { clearTimeout(timeout); resolve(); } };
+    server.once("exit", finish);
+    materializerServer?.once("exit", finish);
+    occurrenceMutationServer?.once("exit", finish);
   });
 }
