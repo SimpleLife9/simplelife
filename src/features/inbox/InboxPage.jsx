@@ -16,6 +16,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [localError, setLocalError] = useState('');
+  const [captureRecoveryError, setCaptureRecoveryError] = useState('');
   const [pageOffset, setPageOffset] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
   const [hasMore, setHasMore] = useState(false);
@@ -338,10 +339,10 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
         if (!part) throw new Error('No se pudo recuperar el fragmento inicial de esta captura.');
       }
     } catch (error) {
-      setLocalError(error?.message || 'No se pudo recuperar la captura original.');
+      setCaptureRecoveryError(error?.message || 'No se pudo recuperar la captura original.');
       return;
     }
-    setLocalError('');
+    setCaptureRecoveryError('');
     setSelectedCapture(capture);
     setSelectedPart(part);
     const source = String(part?.original_fragment || capture.content_original || '');
@@ -569,6 +570,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
     <CaptureComposer busy={busy} onSubmit={submit} />
     <div className="inbox-list-wrap">
       <SectionTitle detail={visibleCaptures.length + ' visibles · ' + rows.length + ' cargadas de ' + totalCount + ' coincidencias en el archivo'}>Capturado recientemente</SectionTitle>
+      {captureRecoveryError && <div className="form-error" role="alert">{captureRecoveryError}</div>}
       <div className="capture-toolbar" aria-label="Buscar y revisar capturas">
         <label className="capture-toolbar-field capture-search-field">
           <span>Buscar</span>
