@@ -137,6 +137,8 @@ export async function assessOwnerProtectedTimeTaskScheduleConflicts({
     ...block,
     id: String(block.id ?? "019a0000-0000-7000-8000-000000000000"),
     updated_at: String(block.updated_at ?? now),
+    label: String(block.label ?? "Tiempo protegido"),
+    pattern_kind: String(block.pattern_kind ?? ""),
     archived_at: null,
     deleted_at: null,
   };
