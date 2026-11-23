@@ -212,6 +212,7 @@ export async function handleRequest(
       protectedTimeSnapshot: [...conflictAssessment.assessment.snapshot],
       taskScheduleDecisions: [...taskScheduleAssessment.assessment.decisions],
       taskScheduleSnapshot: [...taskScheduleAssessment.assessment.snapshot],
+      taskScheduleWindow: taskScheduleAssessment.assessment.candidate,
     });
     const result = await ctx.supabaseAdmin.rpc("create_calendar_event_once", {
       p_owner_user_id: profile.profileId,
