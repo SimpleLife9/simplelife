@@ -252,6 +252,8 @@ BEGIN
 
   SELECT updated_at INTO v_version FROM public.calendar_event WHERE id = v_event_a;
   v_lifecycle_patch := jsonb_build_object(
+    'protected_time_decisions', '[]'::jsonb,
+    'protected_time_snapshot', '[]'::jsonb,
     'task_schedule_conflict_decisions', '[]'::jsonb,
     'task_schedule_snapshot', '[]'::jsonb,
     'task_schedule_window', jsonb_build_object(
@@ -339,6 +341,8 @@ BEGIN
   SELECT updated_at INTO v_schedule_version FROM public.task_schedule
   WHERE id = v_schedule_b AND owner_user_id = v_owner_b;
   v_lifecycle_patch := jsonb_build_object(
+    'protected_time_decisions', '[]'::jsonb,
+    'protected_time_snapshot', '[]'::jsonb,
     'task_schedule_conflict_decisions', '[]'::jsonb,
     'task_schedule_snapshot', jsonb_build_array(jsonb_build_object('id', v_schedule_b, 'updated_at', v_schedule_version)),
     'task_schedule_window', jsonb_build_object('startsAt', '2026-12-24T05:00:00Z', 'endsAt', '2026-12-25T05:00:00Z')
