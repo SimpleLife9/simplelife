@@ -70,13 +70,13 @@ jobs:
 
       - name: Verify the pinned Deno dependency graph
         run: |
-          deno install --config supabase/functions/agenda-time-resolve/deno.json --frozen-lockfile --entrypoint supabase/functions/agenda-time-resolve/index.ts --entrypoint supabase/functions/agenda-event-create/index.ts --entrypoint supabase/functions/agenda-event-mutate/index.ts --entrypoint supabase/functions/agenda-protected-time-mutate/index.ts tests/agenda-iana-resolver.deno.ts tests/agenda-time-resolve.http.deno.ts tests/agenda-timezone-auth.deno.ts tests/agenda-event-profile.deno.ts tests/agenda-event-idempotency.deno.ts tests/agenda-event-create.deno.ts tests/agenda-event-mutation.deno.ts tests/agenda-protected-time.deno.ts tests/agenda-protected-time-conflicts.deno.ts
+          deno install --config supabase/functions/agenda-time-resolve/deno.json --frozen-lockfile --entrypoint supabase/functions/agenda-time-resolve/index.ts --entrypoint supabase/functions/agenda-event-create/index.ts --entrypoint supabase/functions/agenda-event-mutate/index.ts --entrypoint supabase/functions/agenda-protected-time-mutate/index.ts --entrypoint supabase/functions/agenda-task-schedule-mutate/index.ts --entrypoint supabase/functions/agenda-event-series-create/index.ts --entrypoint supabase/functions/agenda-event-series-materialize/index.ts --entrypoint supabase/functions/agenda-event-occurrence-mutate/index.ts --entrypoint supabase/functions/agenda-event-series-mutate/index.ts tests/agenda-iana-resolver.deno.ts tests/agenda-time-resolve.http.deno.ts tests/agenda-timezone-auth.deno.ts tests/agenda-event-profile.deno.ts tests/agenda-event-idempotency.deno.ts tests/agenda-event-create.deno.ts tests/agenda-event-mutation.deno.ts tests/agenda-protected-time.deno.ts tests/agenda-protected-time-conflicts.deno.ts tests/agenda-task-schedule.deno.ts tests/agenda-event-series-materialize.deno.ts tests/agenda-event-occurrence-mutate.deno.ts tests/agenda-event-series-mutate.deno.ts
 
       - name: Test and type-check Agenda IANA resolver with frozen lockfile
         run: |
-          deno test --config supabase/functions/agenda-time-resolve/deno.json --frozen-lockfile tests/agenda-iana-resolver.deno.ts tests/agenda-time-resolve.http.deno.ts tests/agenda-event-profile.deno.ts tests/agenda-event-idempotency.deno.ts tests/agenda-event-create.deno.ts tests/agenda-event-mutation.deno.ts tests/agenda-protected-time.deno.ts tests/agenda-protected-time-conflicts.deno.ts
+          deno test --config supabase/functions/agenda-time-resolve/deno.json --frozen-lockfile tests/agenda-iana-resolver.deno.ts tests/agenda-time-resolve.http.deno.ts tests/agenda-event-profile.deno.ts tests/agenda-event-idempotency.deno.ts tests/agenda-event-create.deno.ts tests/agenda-event-mutation.deno.ts tests/agenda-protected-time.deno.ts tests/agenda-protected-time-conflicts.deno.ts tests/agenda-task-schedule.deno.ts tests/agenda-event-series-create.deno.ts tests/agenda-event-series-materialize.deno.ts tests/agenda-event-occurrence-mutate.deno.ts tests/agenda-event-series-mutate.deno.ts
           APPVEYOR=simplelife-auth-test AI_AGENT=simplelife-auth-test CI=1 NODE_ENV=test deno test --allow-env=APPVEYOR,AI_AGENT,CI,DEBUG,NODE_ENV,MODE,MINIMAL,NO_COLOR,FORCE_COLOR,TERM,SUPABASE_URL,SUPABASE_PUBLISHABLE_KEYS,SUPABASE_SECRET_KEYS,SUPABASE_JWKS --config supabase/functions/agenda-time-resolve/deno.json --frozen-lockfile tests/agenda-timezone-auth.deno.ts
-          deno check --config supabase/functions/agenda-time-resolve/deno.json --frozen-lockfile supabase/functions/agenda-time-resolve/index.ts supabase/functions/agenda-event-create/index.ts supabase/functions/agenda-event-mutate/index.ts supabase/functions/agenda-protected-time-mutate/index.ts
+          deno check --config supabase/functions/agenda-time-resolve/deno.json --frozen-lockfile supabase/functions/agenda-time-resolve/index.ts supabase/functions/agenda-event-create/index.ts supabase/functions/agenda-event-mutate/index.ts supabase/functions/agenda-protected-time-mutate/index.ts supabase/functions/agenda-task-schedule-mutate/index.ts supabase/functions/agenda-event-series-create/index.ts supabase/functions/agenda-event-series-materialize/index.ts supabase/functions/agenda-event-occurrence-mutate/index.ts supabase/functions/agenda-event-series-mutate/index.ts
 
       - name: Set up pinned Supabase CLI
         uses: supabase/setup-cli@v1
@@ -115,6 +115,12 @@ jobs:
       - name: Test Event persistence and append-only audit invariants in ephemeral local Postgres
         run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/agenda-event-persistence.test.sql
 
+      - name: Test recurring Event series persistence, ownership, audit and idempotency
+        run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/agenda-recurring-event.test.sql
+
+      - name: Test recurring Event series scope edits, history, lineage and audit in ephemeral local Postgres
+        run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/agenda-recurring-series-scopes.test.sql
+
       - name: Test Event create idempotency ledger and atomic routine in ephemeral local Postgres
         run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/agenda-event-idempotency.test.sql
 
@@ -126,6 +132,12 @@ jobs:
 
       - name: Test Protected Time conflict consent and append-only Event decision audit in ephemeral local Postgres
         run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/agenda-protected-time-conflicts.test.sql
+
+      - name: Test TaskSchedule ownership, idempotency, optimistic concurrency and audit in ephemeral local Postgres
+        run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/agenda-task-schedule.test.sql
+
+      - name: Test Protected Time to TaskSchedule conflict consent and audit in ephemeral local Postgres
+        run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/agenda-protected-time-task-schedule-conflicts.test.sql
 
       - name: Test concurrent Event create idempotency claims in ephemeral local Postgres
         run: node scripts/agenda-event-idempotency-concurrency-smoke.mjs
@@ -141,6 +153,16 @@ jobs:
 
       - name: Verify Protected Time mutations in the actual local Edge Runtime
         run: node scripts/agenda-protected-time-edge-smoke.mjs
+
+      - name: Verify TaskSchedule mutations and conflict consent in the actual local Edge Runtime
+        run: node scripts/agenda-task-schedule-edge-smoke.mjs
+
+      - name: Verify recurring Event creation, idempotency and ownership in the actual local Edge Runtime
+        run: node scripts/agenda-event-series-edge-smoke.mjs
+
+      - name: Verify recurring series split, inherited occurrence and replay in the actual local Edge Runtime
+        run: node scripts/agenda-event-series-mutate-edge-smoke.mjs
+
 
       - name: Stop local Supabase stack
         if: always()

@@ -59,6 +59,32 @@ export function getCalendarWindow(view, value) {
   throw new RangeError('Calendar view must be day, week or month.');
 }
 
+/**
+ * Returns the date filter used to load materialized recurring occurrences.
+ * The visible month is the full six-week calendar grid, not only the named
+ * month. A bounded look-behind includes long events that begin before the
+ * visible window and continue into it.
+ */
+export function getRecurringOccurrenceQueryWindow(view, value, maxEndOffsetDays = 30) {
+  assert(Number.isInteger(maxEndOffsetDays)
+    && maxEndOffsetDays >= 0
+    && maxEndOffsetDays <= 30,
+  'Recurring occurrence overlap buffer must be from 0 to 30 calendar days.');
+  const visible = view === 'month'
+    ? (() => {
+      const days = monthGridDays(value);
+      return Object.freeze({
+        startDate: days[0],
+        endDateExclusive: addCalendarDays(days[days.length - 1], 1),
+      });
+    })()
+    : getCalendarWindow(view, value);
+  return Object.freeze({
+    startDate: addCalendarDays(visible.startDate, -maxEndOffsetDays),
+    endDateExclusive: visible.endDateExclusive,
+  });
+}
+
 export function shiftCalendarPeriod(view, value, direction) {
   assert(direction === -1 || direction === 1, 'Calendar direction must be -1 or 1.');
   if (view === 'day') return addCalendarDays(value, direction);
@@ -170,4 +196,45 @@ export function formatEventTime(event, viewerTimeZone) {
   if (range.temporalKind === 'all_day') return 'Todo el día';
   if (range.startDate === range.endDate) return range.startTime + ' – ' + range.endTime;
   return range.startTime + ' · hasta ' + range.endDate + ' ' + range.endTime;
+}
+
+/**
+ * Maps a persisted TaskSchedule into its original civil-time calendar range.
+ * Task reservations keep the timezone and wall clock selected when created;
+ * the viewer timezone must not shift their displayed calendar date or time.
+ */
+export function getCalendarTaskScheduleRange(schedule) {
+  assert(schedule && typeof schedule === 'object', 'A TaskSchedule row is required.');
+  const start = normalizeLocalDateTime(schedule.start_local, 'TaskSchedule start_local');
+  const end = normalizeLocalDateTime(schedule.end_local, 'TaskSchedule end_local');
+  const startsAt = Date.parse(schedule.starts_at);
+  const endsAt = Date.parse(schedule.ends_at);
+  assert(Number.isFinite(startsAt) && Number.isFinite(endsAt) && endsAt > startsAt,
+    'TaskSchedule must have a positive resolved UTC range.');
+  const endExclusive = endDateExclusive(end);
+  assert(endExclusive > start.date, 'TaskSchedule end must follow its start date.');
+  return Object.freeze({
+    startDate: start.date,
+    endDateExclusive: endExclusive,
+    startTime: start.time,
+    endTime: end.time,
+    endDate: end.date,
+    timeZone: schedule.time_zone || null,
+  });
+}
+
+export function taskScheduleOccursOnDate(schedule, date) {
+  parseCalendarDate(date);
+  const range = getCalendarTaskScheduleRange(schedule);
+  return range.startDate <= date && date < range.endDateExclusive;
+}
+
+export function sortTaskSchedulesForCalendar(schedules) {
+  return [...schedules].sort((left, right) => {
+    const a = Date.parse(left.starts_at);
+    const b = Date.parse(right.starts_at);
+    assert(Number.isFinite(a) && Number.isFinite(b),
+      'TaskSchedule sorting requires valid resolved UTC start instants.');
+    return a - b;
+  });
 }

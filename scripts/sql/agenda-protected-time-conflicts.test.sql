@@ -115,11 +115,17 @@ BEGIN
         'id', v_block::text,
         'updated_at', to_char(v_block_version AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
       )
+    ),
+    'task_schedule_conflict_decisions', '[]'::jsonb,
+    'task_schedule_snapshot', '[]'::jsonb,
+    'task_schedule_window', jsonb_build_object(
+      'startsAt', '2026-12-24T05:00:00.000Z',
+      'endsAt', '2026-12-25T05:00:00.000Z'
     )
   );
 
-  IF (SELECT count(*) FROM jsonb_object_keys(v_patch)) <> 18 THEN
-    RAISE EXCEPTION 'Event edit patch should contain exactly 18 fields';
+  IF (SELECT count(*) FROM jsonb_object_keys(v_patch)) <> 21 THEN
+    RAISE EXCEPTION 'Event edit patch should contain exactly 21 fields including TaskSchedule evidence';
   END IF;
 
   EXECUTE 'SET LOCAL ROLE service_role';

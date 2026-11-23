@@ -138,6 +138,9 @@ function createCommonRecord({ eventDraft, eventId, ownerProfileId, timestamp }) 
  *   now: string,
  *   protectedTimeDecisions?: readonly Record<string, unknown>[],
  *   protectedTimeSnapshot?: readonly { id: string; updated_at: string }[],
+ *   taskScheduleDecisions?: readonly Record<string, unknown>[],
+ *   taskScheduleSnapshot?: readonly { id: string; updated_at: string }[],
+ *   taskScheduleWindow?: { startsAt: string; endsAt: string },
  * }} input
  */
 export function buildEventInsertRecord({
@@ -147,6 +150,9 @@ export function buildEventInsertRecord({
   now,
   protectedTimeDecisions = /** @type {Record<string, unknown>[]} */ ([]),
   protectedTimeSnapshot = /** @type {{ id: string; updated_at: string }[]} */ ([]),
+  taskScheduleDecisions = /** @type {Record<string, unknown>[]} */ ([]),
+  taskScheduleSnapshot = /** @type {{ id: string; updated_at: string }[]} */ ([]),
+  taskScheduleWindow = null,
 }) {
   const timestamp = normalizeTimestamp(now);
   const record = createCommonRecord({
@@ -172,6 +178,33 @@ export function buildEventInsertRecord({
     id: item.id.toLowerCase(),
     updated_at: item.updated_at,
   }));
+  assert(Array.isArray(taskScheduleDecisions) && taskScheduleDecisions.length <= 500,
+    'taskScheduleDecisions must be an array with at most 500 entries.');
+  assert(taskScheduleDecisions.every((item) => item && typeof item === 'object' && !Array.isArray(item)),
+    'Every TaskSchedule decision must be an object.');
+  assert(Array.isArray(taskScheduleSnapshot) && taskScheduleSnapshot.length <= 500,
+    'taskScheduleSnapshot must be an array with at most 500 entries.');
+  assert(taskScheduleSnapshot.every((item) => item && typeof item.id === 'string'
+    && UUID_V7_PATTERN.test(item.id) && typeof item.updated_at === 'string'
+    && Number.isFinite(Date.parse(item.updated_at))),
+  'Every TaskSchedule snapshot entry must contain UUIDv7 and updated_at.');
+  record.task_schedule_conflict_decisions = taskScheduleDecisions.map((item) => ({ ...item }));
+  record.task_schedule_snapshot = taskScheduleSnapshot.map((item) => ({
+    id: item.id.toLowerCase(),
+    updated_at: item.updated_at,
+  }));
+  if (taskScheduleWindow != null) {
+    assert(typeof taskScheduleWindow.startsAt === 'string'
+      && typeof taskScheduleWindow.endsAt === 'string'
+      && Number.isFinite(Date.parse(taskScheduleWindow.startsAt))
+      && Number.isFinite(Date.parse(taskScheduleWindow.endsAt))
+      && Date.parse(taskScheduleWindow.endsAt) > Date.parse(taskScheduleWindow.startsAt),
+    'TaskSchedule conflict window must be a valid positive instant range.');
+    record.task_schedule_window = {
+      startsAt: new Date(Date.parse(taskScheduleWindow.startsAt)).toISOString(),
+      endsAt: new Date(Date.parse(taskScheduleWindow.endsAt)).toISOString(),
+    };
+  }
   const temporal = eventDraft.temporal;
   assert(temporal && typeof temporal === 'object', 'A normalized Event temporal value is required.');
 

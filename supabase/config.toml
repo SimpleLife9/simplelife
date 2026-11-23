@@ -21,3 +21,15 @@ verify_jwt = true
 
 [functions.agenda-protected-time-mutate]
 verify_jwt = true
+
+[functions.agenda-event-series-create]
+verify_jwt = true
+
+[functions.agenda-event-series-materialize]
+verify_jwt = true
+
+[functions.agenda-event-occurrence-mutate]
+verify_jwt = true
+
+[functions.agenda-event-series-mutate]
+verify_jwt = true

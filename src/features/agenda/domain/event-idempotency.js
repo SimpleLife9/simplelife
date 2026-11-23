@@ -154,6 +154,34 @@ function protectedTimeDecisionTuple(value) {
   return normalized;
 }
 
+function taskScheduleDecisionTuple(value) {
+  assert(Array.isArray(value) && value.length <= 500,
+    'taskScheduleDecisions must be an array with at most 500 entries.');
+  const normalized = value.map((item) => {
+    assert(item && typeof item === 'object' && !Array.isArray(item),
+      'Each TaskSchedule decision must be an object.');
+    const allowed = ['taskScheduleId', 'taskScheduleUpdatedAt', 'decision'];
+    assert(Object.keys(item).length === 3 && Object.keys(item).every((key) => allowed.includes(key)),
+      'TaskSchedule decision contains unsupported or missing fields.');
+    assert(typeof item.taskScheduleId === 'string' && UUID_V7_PATTERN.test(item.taskScheduleId),
+      'TaskSchedule decision taskScheduleId must be a UUIDv7.');
+    assert(typeof item.taskScheduleUpdatedAt === 'string' && OFFSET_INSTANT_PATTERN.test(item.taskScheduleUpdatedAt)
+      && Number.isFinite(Date.parse(item.taskScheduleUpdatedAt)),
+    'TaskSchedule decision taskScheduleUpdatedAt must be an ISO timestamp with an explicit offset.');
+    assert(item.decision === 'keep_overlap',
+      'TaskSchedule decision must be keep_overlap.');
+    return [
+      item.taskScheduleId.toLowerCase(),
+      item.taskScheduleUpdatedAt,
+      item.decision,
+    ];
+  });
+  normalized.sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+  assert(new Set(normalized.map((item) => item[0])).size === normalized.length,
+    'TaskSchedule decisions cannot contain duplicate IDs.');
+  return normalized;
+}
+
 /**
  * Build a deterministic, versioned representation of the normalized user intent.
  *
@@ -164,12 +192,15 @@ function protectedTimeDecisionTuple(value) {
  * Time consent set is bound to the same idempotency identity; an empty set keeps
  * the historical payload bytes unchanged for existing pending create retries.
  */
-export function buildEventCreateIntent(eventDraft, protectedTimeDecisions = []) {
+export function buildEventCreateIntent(eventDraft, protectedTimeDecisions = [], taskScheduleDecisions = []) {
   const eventTuple = createIntentTuple(eventDraft);
   const decisions = protectedTimeDecisionTuple(protectedTimeDecisions);
-  const canonicalPayload = JSON.stringify(decisions.length
+  const scheduleDecisions = taskScheduleDecisionTuple(taskScheduleDecisions);
+  const canonicalTuple = decisions.length
     ? [...eventTuple, PROTECTED_TIME_DECISION_VERSION, decisions]
-    : eventTuple);
+    : eventTuple;
+  if (scheduleDecisions.length) canonicalTuple.push('event-task-schedule-decision-v1', scheduleDecisions);
+  const canonicalPayload = JSON.stringify(canonicalTuple);
   return Object.freeze({
     version: EVENT_CREATE_INTENT_VERSION,
     canonicalPayload,
@@ -184,9 +215,10 @@ export async function hashEventCreateIntent(
   eventDraft,
   cryptoProvider = globalThis.crypto,
   protectedTimeDecisions = [],
+  taskScheduleDecisions = [],
 ) {
   assert(cryptoProvider?.subtle?.digest, 'Web Crypto SHA-256 is unavailable.');
-  const intent = buildEventCreateIntent(eventDraft, protectedTimeDecisions);
+  const intent = buildEventCreateIntent(eventDraft, protectedTimeDecisions, taskScheduleDecisions);
   const digest = await cryptoProvider.subtle.digest(
     'SHA-256',
     new TextEncoder().encode(intent.canonicalPayload),

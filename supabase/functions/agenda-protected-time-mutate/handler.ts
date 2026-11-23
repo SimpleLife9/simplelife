@@ -14,6 +14,7 @@ import {
   type EventAuthenticatedContext,
 } from "../_shared/agenda-event-profile.ts";
 import { resolveLocalDateTimeRange, TzdbVersionError } from "../agenda-time-resolve/resolver.ts";
+import { assessOwnerProtectedTimeTaskScheduleConflicts } from "../_shared/protected-time-task-schedule-conflicts.ts";
 
 export const MAX_REQUEST_BYTES = 32 * 1024;
 const JSON_HEADERS = {
@@ -120,14 +121,21 @@ export async function handleRequest(
   if (typeof action !== "string" || !PROTECTED_TIME_MUTATIONS.includes(action)) {
     return json({ error: "UNSUPPORTED_PROTECTED_TIME_MUTATION" }, 422);
   }
-  const expectedKeys = action === "create"
+  const requiredKeys = action === "create"
     ? ["action", "block"]
     : action === "edit"
     ? ["action", "blockId", "expectedUpdatedAt", "block"]
     : ["action", "blockId", "expectedUpdatedAt"];
-  if (Object.keys(input).length !== expectedKeys.length
-    || Object.keys(input).some((key) => !expectedKeys.includes(key))) {
+  const allowedKeys = action === "create" || action === "edit" || action === "restore"
+    ? [...requiredKeys, "taskScheduleDecisions"]
+    : requiredKeys;
+  if (requiredKeys.some((key) => !(key in input))
+    || Object.keys(input).some((key) => !allowedKeys.includes(key))) {
     return json({ error: "PROTECTED_TIME_BODY_HAS_UNSUPPORTED_FIELDS" }, 422);
+  }
+  const suppliedTaskScheduleDecisions = input.taskScheduleDecisions ?? [];
+  if (!Array.isArray(suppliedTaskScheduleDecisions)) {
+    return json({ error: "TASK_SCHEDULE_DECISIONS_MUST_BE_AN_ARRAY" }, 422);
   }
 
   let blockId = "";
@@ -176,6 +184,7 @@ export async function handleRequest(
       blockId,
       expectedUpdatedAt,
       blockDraft,
+      taskScheduleDecisions: suppliedTaskScheduleDecisions,
     });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : "PROTECTED_TIME_INTENT_INVALID" }, 422);
@@ -194,6 +203,33 @@ export async function handleRequest(
     return json({ ...existing.data.response_body, replayed: true }, existing.data.response_http_status);
   }
 
+  let restoreBlock: Record<string, unknown> | null = null;
+  if (action === "restore") {
+    const restored = await ctx.supabaseAdmin
+      .from("protected_time_block")
+      .select("id,updated_at,label,category,protection_mode,pattern_kind,time_zone,starts_at,ends_at,start_date,end_date_exclusive,weekdays,start_time_local,end_time_local,ends_next_day,archived_at,deleted_at")
+      .eq("id", blockId)
+      .eq("owner_user_id", profile.profileId)
+      .maybeSingle();
+    if (restored.error) return json({ error: "PROTECTED_TIME_BLOCK_LOOKUP_FAILED" }, 503);
+    if (!restored.data) return json({ error: "PROTECTED_TIME_BLOCK_NOT_FOUND" }, 404);
+    // PostgREST may serialize the same timestamptz with a different UTC
+    // offset suffix (for example, Z vs +00:00). Compare the represented instant
+    // here; the SQL RPC below remains the authoritative full-precision CAS.
+    const restoredVersionMs = typeof restored.data.updated_at === "string"
+      ? Date.parse(restored.data.updated_at)
+      : Number.NaN;
+    const expectedVersionMs = expectedUpdatedAt === null
+      ? Number.NaN
+      : Date.parse(expectedUpdatedAt);
+    if (!Number.isFinite(restoredVersionMs)
+      || !Number.isFinite(expectedVersionMs)
+      || restoredVersionMs !== expectedVersionMs) {
+      return json({ error: "PROTECTED_TIME_VERSION_CONFLICT" }, 409);
+    }
+    restoreBlock = restored.data as Record<string, unknown>;
+  }
+
   let blockPatch: Record<string, unknown> = {};
   if (blockDraft) {
     try {
@@ -209,6 +245,39 @@ export async function handleRequest(
   }
 
   const now = (dependencies.now ?? (() => new Date().toISOString()))();
+  if (blockDraft || (action === "restore" && restoreBlock)) {
+    try {
+      const candidate = blockDraft
+        ? { ...blockPatch, id: blockId, updated_at: now }
+        : restoreBlock as Record<string, unknown>;
+      const assessment = await assessOwnerProtectedTimeTaskScheduleConflicts({
+        supabaseAdmin: ctx.supabaseAdmin,
+        ownerProfileId: profile.profileId,
+        block: candidate,
+        suppliedDecisions: suppliedTaskScheduleDecisions,
+        now,
+      });
+      if (!assessment.ok) {
+        return json({
+          error: assessment.code,
+          taskScheduleConflicts: assessment.conflicts,
+        }, 409);
+      }
+      blockPatch = {
+        ...blockPatch,
+        task_schedule_conflict_decisions: [...assessment.assessment.decisions],
+        task_schedule_snapshot: [...assessment.assessment.snapshot],
+      };
+    } catch (error) {
+      if (error instanceof TypeError || error instanceof RangeError) {
+        return json({ error: error.message }, 422);
+      }
+      if (error instanceof Error && error.message === "PROTECTED_TIME_TASK_SCHEDULE_LOOKUP_FAILED") {
+        return json({ error: error.message }, 503);
+      }
+      return json({ error: "PROTECTED_TIME_TASK_SCHEDULE_ANALYSIS_FAILED" }, 500);
+    }
+  }
   const result = await ctx.supabaseAdmin.rpc("mutate_protected_time_block_once", {
     p_owner_user_id: profile.profileId,
     p_block_id: blockId,

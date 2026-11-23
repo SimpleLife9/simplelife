@@ -13,6 +13,7 @@ import {
 } from "../_shared/agenda-event-profile.ts";
 import { resolveLocalDateTimeRange, TzdbVersionError } from "../agenda-time-resolve/resolver.ts";
 import { assessOwnerProtectedTimeConflicts } from "../_shared/protected-time-conflicts.ts";
+import { assessOwnerEventTaskScheduleConflicts } from "../_shared/event-task-schedule-conflicts.ts";
 
 export const MAX_REQUEST_BYTES = 32 * 1024;
 const JSON_HEADERS = {
@@ -37,6 +38,7 @@ const EDIT_FIELDS = [
   "start_gap_strategy",
   "end_gap_strategy",
   "protected_time_decisions",
+  "task_schedule_conflict_decisions",
 ] as const;
 
 type RpcClient = {
@@ -88,6 +90,8 @@ function toEventPatch(record: Record<string, unknown>): Record<string, unknown> 
   const patch: Record<string, unknown> = {};
   for (const field of EDIT_FIELDS) patch[field] = record[field];
   patch.protected_time_snapshot = record.protected_time_snapshot;
+  patch.task_schedule_snapshot = record.task_schedule_snapshot;
+  patch.task_schedule_window = record.task_schedule_window;
   return patch;
 }
 
@@ -176,7 +180,9 @@ export async function handleRequest(
     ? ["action", "event", "eventId", "expectedUpdatedAt"]
     : ["action", "eventId", "expectedUpdatedAt"];
   const allowedKeys = input.action === "edit"
-    ? [...requiredKeys, "protectedTimeDecisions"]
+    ? [...requiredKeys, "protectedTimeDecisions", "taskScheduleDecisions"]
+    : input.action === "reopen" || input.action === "restore"
+    ? [...requiredKeys, "protectedTimeDecisions", "taskScheduleDecisions"]
     : requiredKeys;
   if (requiredKeys.some((key) => !(key in input))
     || Object.keys(input).some((key) => !allowedKeys.includes(key))) {
@@ -186,6 +192,10 @@ export async function handleRequest(
   const requestedProtectedTimeDecisions = input.protectedTimeDecisions ?? [];
   if (!Array.isArray(requestedProtectedTimeDecisions)) {
     return json({ error: "PROTECTED_TIME_DECISIONS_MUST_BE_AN_ARRAY" }, 422);
+  }
+  const requestedTaskScheduleDecisions = input.taskScheduleDecisions ?? [];
+  if (!Array.isArray(requestedTaskScheduleDecisions)) {
+    return json({ error: "TASK_SCHEDULE_DECISIONS_MUST_BE_AN_ARRAY" }, 422);
   }
 
   try {
@@ -197,6 +207,7 @@ export async function handleRequest(
         ? createEventDraft(input.event)
         : null,
       protectedTimeDecisions: requestedProtectedTimeDecisions as Record<string, unknown>[],
+      taskScheduleDecisions: requestedTaskScheduleDecisions as Record<string, unknown>[],
     });
     const intent = await hashEventMutationIntent(mutation);
 
@@ -242,7 +253,7 @@ export async function handleRequest(
       }
       const currentResult = await ctx.supabaseAdmin
         .from("calendar_event")
-        .select("temporal_kind,start_date,end_date_exclusive,starts_at,ends_at,protected_time_decisions")
+        .select("temporal_kind,start_date,end_date_exclusive,starts_at,ends_at,protected_time_decisions,task_schedule_conflict_decisions")
         .eq("owner_user_id", profile.profileId)
         .eq("id", mutation.eventId)
         .maybeSingle();
@@ -315,6 +326,60 @@ export async function handleRequest(
           return previous ? [previous] : [];
         })
         : conflictAssessment.assessment.decisions;
+      const taskScheduleDecisionRecords = Array.isArray(currentResult.data.task_schedule_conflict_decisions)
+        ? currentResult.data.task_schedule_conflict_decisions as Record<string, unknown>[]
+        : [];
+      const taskScheduleDecisionMap = new Map(taskScheduleDecisionRecords
+        .filter((item) => typeof item.taskScheduleId === "string")
+        .map((item) => [String(item.taskScheduleId), item]));
+      const priorTaskScheduleInputs = taskScheduleDecisionRecords.map((item) => ({
+        taskScheduleId: item.taskScheduleId,
+        taskScheduleUpdatedAt: item.taskScheduleUpdatedAt,
+        decision: item.decision,
+      }));
+      const retainTaskScheduleConsent = input.taskScheduleDecisions === undefined && sameWindow;
+      let taskScheduleDecisionInputs = input.taskScheduleDecisions !== undefined
+        ? requestedTaskScheduleDecisions
+        : retainTaskScheduleConsent ? priorTaskScheduleInputs : [];
+      let taskScheduleAssessment = await assessOwnerEventTaskScheduleConflicts({
+        supabaseAdmin: ctx.supabaseAdmin,
+        ownerProfileId: profile.profileId,
+        event: candidateRecord,
+        suppliedDecisions: taskScheduleDecisionInputs,
+        now,
+      });
+      if (!taskScheduleAssessment.ok && retainTaskScheduleConsent) {
+        const reusable = taskScheduleAssessment.conflicts.flatMap((conflict) => {
+          const previous = taskScheduleDecisionMap.get(String(conflict.taskScheduleId));
+          if (!previous || previous.taskScheduleUpdatedAt !== conflict.taskScheduleUpdatedAt
+            || previous.decision !== conflict.requiredDecision) return [];
+          return [{
+            taskScheduleId: conflict.taskScheduleId,
+            taskScheduleUpdatedAt: conflict.taskScheduleUpdatedAt,
+            decision: conflict.requiredDecision,
+          }];
+        });
+        taskScheduleDecisionInputs = reusable;
+        taskScheduleAssessment = await assessOwnerEventTaskScheduleConflicts({
+          supabaseAdmin: ctx.supabaseAdmin,
+          ownerProfileId: profile.profileId,
+          event: candidateRecord,
+          suppliedDecisions: taskScheduleDecisionInputs,
+          now,
+        });
+      }
+      if (!taskScheduleAssessment.ok) {
+        return json({
+          error: taskScheduleAssessment.code,
+          conflicts: taskScheduleAssessment.conflicts,
+        }, 409);
+      }
+      const taskScheduleDecisionsToPersist = retainTaskScheduleConsent
+        ? taskScheduleAssessment.assessment.conflicts.flatMap((conflict) => {
+          const previous = taskScheduleDecisionMap.get(String(conflict.taskScheduleId));
+          return previous ? [previous] : [];
+        })
+        : taskScheduleAssessment.assessment.decisions;
       const record = buildEventInsertRecord({
         eventDraft: readyDraft,
         eventId: mutation.eventId,
@@ -322,8 +387,144 @@ export async function handleRequest(
         now,
         protectedTimeDecisions: [...decisionsToPersist],
         protectedTimeSnapshot: [...conflictAssessment.assessment.snapshot],
+        taskScheduleDecisions: [...taskScheduleDecisionsToPersist],
+        taskScheduleSnapshot: [...taskScheduleAssessment.assessment.snapshot],
+        taskScheduleWindow: taskScheduleAssessment.assessment.candidate,
       });
       eventPatch = toEventPatch(record as unknown as Record<string, unknown>);
+    } else if (mutation.action === "reopen" || mutation.action === "restore") {
+      const currentResult = await ctx.supabaseAdmin
+        .from("calendar_event")
+        .select("temporal_kind,start_date,end_date_exclusive,starts_at,ends_at,protected_time_decisions,task_schedule_conflict_decisions")
+        .eq("owner_user_id", profile.profileId)
+        .eq("id", mutation.eventId)
+        .maybeSingle();
+      if (currentResult.error) return json({ error: "EVENT_CONFLICT_CONTEXT_LOOKUP_FAILED" }, 503);
+      if (!currentResult.data) return json({ error: "EVENT_NOT_FOUND" }, 404);
+
+      const priorProtectedRecords = Array.isArray(currentResult.data.protected_time_decisions)
+        ? currentResult.data.protected_time_decisions as Record<string, unknown>[]
+        : [];
+      const priorProtectedByKey = storedDecisionMap(priorProtectedRecords);
+      const priorProtectedInputs = storedDecisionInputs(priorProtectedRecords);
+      const retainProtectedConsent = input.protectedTimeDecisions === undefined;
+      let protectedDecisionInputs = retainProtectedConsent
+        ? priorProtectedInputs
+        : requestedProtectedTimeDecisions;
+      let protectedAssessment = await assessOwnerProtectedTimeConflicts({
+        supabaseAdmin: ctx.supabaseAdmin,
+        ownerProfileId: profile.profileId,
+        event: currentResult.data,
+        suppliedDecisions: protectedDecisionInputs,
+        now,
+      });
+
+      // Reuse an earlier Protected Time approval only while the exact block
+      // version and occurrence remain unchanged. New or edited blocks require
+      // a fresh, explicit decision before an Event can become active again.
+      if (!protectedAssessment.ok && retainProtectedConsent) {
+        const reusable = protectedAssessment.conflicts.flatMap((conflict) => {
+          const previous = priorProtectedByKey.get(
+            typeof conflict.conflictKey === "string" ? conflict.conflictKey : "",
+          );
+          if (!previous
+            || previous.blockUpdatedAt !== conflict.blockUpdatedAt
+            || previous.decision !== conflict.requiredDecision) return [];
+          return [{
+            blockId: conflict.blockId,
+            blockUpdatedAt: conflict.blockUpdatedAt,
+            occurrenceStartsAt: conflict.occurrenceStartsAt,
+            decision: conflict.requiredDecision,
+          }];
+        });
+        protectedDecisionInputs = reusable;
+        protectedAssessment = await assessOwnerProtectedTimeConflicts({
+          supabaseAdmin: ctx.supabaseAdmin,
+          ownerProfileId: profile.profileId,
+          event: currentResult.data,
+          suppliedDecisions: protectedDecisionInputs,
+          now,
+        });
+      }
+      if (!protectedAssessment.ok) {
+        return json({
+          error: protectedAssessment.code,
+          conflicts: protectedAssessment.conflicts,
+        }, 409);
+      }
+      const protectedDecisionsToPersist = retainProtectedConsent
+        ? protectedAssessment.assessment.conflicts.flatMap((conflict) => {
+          const previous = priorProtectedByKey.get(
+            typeof conflict.conflictKey === "string" ? conflict.conflictKey : "",
+          );
+          return previous ? [previous] : [];
+        })
+        : protectedAssessment.assessment.decisions;
+
+      const priorRecords = Array.isArray(currentResult.data.task_schedule_conflict_decisions)
+        ? currentResult.data.task_schedule_conflict_decisions as Record<string, unknown>[]
+        : [];
+      const priorById = new Map(priorRecords
+        .filter((item) => typeof item.taskScheduleId === "string")
+        .map((item) => [String(item.taskScheduleId).toLowerCase(), item]));
+      const priorInputs = priorRecords.map((item) => ({
+        taskScheduleId: item.taskScheduleId,
+        taskScheduleUpdatedAt: item.taskScheduleUpdatedAt,
+        decision: item.decision,
+      }));
+      const retainExistingConsent = input.taskScheduleDecisions === undefined;
+      let decisionInputs = retainExistingConsent ? priorInputs : requestedTaskScheduleDecisions;
+      let assessment = await assessOwnerEventTaskScheduleConflicts({
+        supabaseAdmin: ctx.supabaseAdmin,
+        ownerProfileId: profile.profileId,
+        event: currentResult.data,
+        suppliedDecisions: decisionInputs,
+        now,
+      });
+
+      // Preserve prior approvals only while they remain bound to the same
+      // active reservation version. New/changed overlaps need fresh consent.
+      if (!assessment.ok && retainExistingConsent) {
+        const reusable = assessment.conflicts.flatMap((conflict) => {
+          const previous = priorById.get(String(conflict.taskScheduleId).toLowerCase());
+          if (!previous
+            || previous.taskScheduleUpdatedAt !== conflict.taskScheduleUpdatedAt
+            || previous.decision !== conflict.requiredDecision) return [];
+          return [{
+            taskScheduleId: conflict.taskScheduleId,
+            taskScheduleUpdatedAt: conflict.taskScheduleUpdatedAt,
+            decision: conflict.requiredDecision,
+          }];
+        });
+        decisionInputs = reusable;
+        assessment = await assessOwnerEventTaskScheduleConflicts({
+          supabaseAdmin: ctx.supabaseAdmin,
+          ownerProfileId: profile.profileId,
+          event: currentResult.data,
+          suppliedDecisions: decisionInputs,
+          now,
+        });
+      }
+      if (!assessment.ok) {
+        return json({
+          error: assessment.code,
+          conflicts: assessment.conflicts,
+        }, 409);
+      }
+
+      const decisionsToPersist = retainExistingConsent
+        ? assessment.assessment.conflicts.flatMap((conflict) => {
+          const previous = priorById.get(String(conflict.taskScheduleId).toLowerCase());
+          return previous ? [previous] : [];
+        })
+        : assessment.assessment.decisions;
+      eventPatch = {
+        protected_time_decisions: [...protectedDecisionsToPersist],
+        protected_time_snapshot: [...protectedAssessment.assessment.snapshot],
+        task_schedule_conflict_decisions: [...decisionsToPersist],
+        task_schedule_snapshot: [...assessment.assessment.snapshot],
+        task_schedule_window: assessment.assessment.candidate,
+      };
     }
 
     const result = await ctx.supabaseAdmin.rpc("mutate_calendar_event_once", {
@@ -356,7 +557,8 @@ export async function handleRequest(
       return json({ error: error.message }, 422);
     }
     if (error instanceof Error && (error.message === "AGENDA_TIME_ZONE_LOOKUP_FAILED"
-      || error.message === "PROTECTED_TIME_CONFLICT_LOOKUP_FAILED")) {
+      || error.message === "PROTECTED_TIME_CONFLICT_LOOKUP_FAILED"
+      || error.message === "TASK_SCHEDULE_CONFLICT_LOOKUP_FAILED")) {
       return json({ error: error.message }, 503);
     }
     return json({ error: "EVENT_MUTATION_FAILED" }, 500);

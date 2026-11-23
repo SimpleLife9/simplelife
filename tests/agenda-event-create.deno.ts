@@ -14,13 +14,19 @@ function assertEquals(actual: unknown, expected: unknown, label: string): void {
 async function body(response: Response): Promise<Record<string, unknown>> {
   return await response.json() as Record<string, unknown>;
 }
-function request(event: Record<string, unknown>, key = KEY, protectedTimeDecisions?: unknown): Request {
+function request(
+  event: Record<string, unknown>,
+  key = KEY,
+  protectedTimeDecisions?: unknown,
+  taskScheduleDecisions?: unknown,
+): Request {
   return new Request("https://local.test/agenda-event-create", {
     method: "POST",
     headers: { "content-type": "application/json", "idempotency-key": key },
     body: JSON.stringify({
       event,
       ...(protectedTimeDecisions === undefined ? {} : { protectedTimeDecisions }),
+      ...(taskScheduleDecisions === undefined ? {} : { taskScheduleDecisions }),
     }),
   });
 }
@@ -40,6 +46,7 @@ function mockContext({
   rpcResult = [{ http_status: 201, response_body: { eventId: EVENT_ID, createdAt: "2026-11-22T18:00:00.000Z", eventStatus: "confirmed" }, replayed: false }],
   rpcError = null as unknown,
   protectedBlocks = [] as Record<string, unknown>[],
+  taskSchedules = [] as Record<string, unknown>[],
 }: {
   profileStatus?: string;
   existing?: Record<string, unknown> | null;
@@ -47,6 +54,7 @@ function mockContext({
   rpcResult?: unknown;
   rpcError?: unknown;
   protectedBlocks?: Record<string, unknown>[];
+  taskSchedules?: Record<string, unknown>[];
 } = {}) {
   const calls: Record<string, unknown> = { rpc: 0, rpcArgs: null, profileLookup: 0, ledgerLookup: 0 };
   const supabase = {
@@ -111,6 +119,16 @@ function mockContext({
         };
         return query;
       }
+      if (table === "task_schedule") {
+        const query: any = {
+          select() { return this; },
+          eq() { return this; },
+          in() { return this; },
+          order() { return this; },
+          async limit() { return { data: taskSchedules, error: null }; },
+        };
+        return query;
+      }
       throw new Error("unexpected admin table " + table);
     },
     async rpc(name: string, args: Record<string, unknown>) {
@@ -152,7 +170,10 @@ Deno.test("creates an all-day Event through the atomic RPC with server-derived o
   assertEquals(record.updated_by_user_id, PROFILE_ID, "record updater");
   assertEquals(record.protected_time_decisions, [], "no unneeded conflict decisions");
   assertEquals(record.protected_time_snapshot, [], "complete empty owner block snapshot");
-  assertEquals(Object.keys(record).length, 28, "exact Event RPC record shape");
+  assertEquals(record.task_schedule_conflict_decisions, [], "no unneeded TaskSchedule decisions");
+  assertEquals(record.task_schedule_snapshot, [], "complete empty TaskSchedule snapshot");
+  assertEquals(Object.keys(record.task_schedule_window as Record<string, unknown>).length, 2, "resolved comparison window");
+  assertEquals(Object.keys(record).length, 31, "exact Event RPC record shape");
 });
 
 Deno.test("hard Protected Time overlap returns conflict before creating or claiming the Event", async () => {
@@ -216,6 +237,65 @@ Deno.test("hard Protected Time overlap can be saved only with the exact occurren
   assertEquals((record.protected_time_decisions as Array<Record<string, unknown>>)[0].decision,
     "override_hard", "explicit override stored");
   assertEquals((record.protected_time_snapshot as unknown[]).length, 1, "one block version snapshot");
+});
+
+Deno.test("an active TaskSchedule overlap blocks Event creation before the writer RPC", async () => {
+  const schedule = {
+    id: "019a0000-0000-7000-8000-000000000221",
+    updated_at: "2026-11-20T10:00:00.000000+00:00",
+    starts_at: "2026-12-24T06:00:00.000Z",
+    ends_at: "2026-12-24T07:00:00.000Z",
+    time_zone: "America/Havana",
+    schedule_status: "confirmed",
+  };
+  const { ctx, calls } = mockContext({ taskSchedules: [schedule] });
+  const response = await handleRequest(request(allDayEvent()), ctx, {
+    now: () => "2026-11-22T18:00:00.000Z",
+    newEventId: () => EVENT_ID,
+  });
+  assertEquals(response.status, 409, "TaskSchedule overlap conflict");
+  const payload = await body(response);
+  assertEquals(payload.error, "TASK_SCHEDULE_CONFLICTS", "TaskSchedule conflict code");
+  const conflicts = payload.conflicts as Array<Record<string, unknown>>;
+  assertEquals(conflicts.length, 1, "one active TaskSchedule overlap");
+  assertEquals(conflicts[0].taskScheduleId, schedule.id, "conflict identifies the reserved schedule");
+  assertEquals(calls.rpc, 0, "no Event write without consent");
+});
+
+Deno.test("Event create persists exact version-bound TaskSchedule consent and full snapshot", async () => {
+  const schedule = {
+    id: "019a0000-0000-7000-8000-000000000222",
+    updated_at: "2026-11-20T10:00:00.000000+00:00",
+    starts_at: "2026-12-24T06:00:00.000Z",
+    ends_at: "2026-12-24T07:00:00.000Z",
+    time_zone: "America/Havana",
+    schedule_status: "confirmed",
+  };
+  const decisions = [{
+    taskScheduleId: schedule.id,
+    taskScheduleUpdatedAt: schedule.updated_at,
+    decision: "keep_overlap",
+  }];
+  const { ctx, calls } = mockContext({ taskSchedules: [schedule] });
+  const response = await handleRequest(request(allDayEvent(), KEY, undefined, decisions), ctx, {
+    now: () => "2026-11-22T18:00:00.000Z",
+    newEventId: () => EVENT_ID,
+  });
+  assertEquals(response.status, 201, "explicit TaskSchedule overlap consent accepted");
+  const args = calls.rpcArgs as Record<string, unknown>;
+  const record = args.p_event_record as Record<string, unknown>;
+  const persisted = record.task_schedule_conflict_decisions as Array<Record<string, unknown>>;
+  assertEquals(persisted.length, 1, "one persisted consent record");
+  assertEquals(persisted[0].policyVersion, "event-task-schedule-decision-v1", "consent policy version");
+  assertEquals(persisted[0].taskScheduleId, schedule.id, "consent binds the exact TaskSchedule");
+  assertEquals(persisted[0].taskScheduleUpdatedAt, schedule.updated_at, "consent binds exact updated_at");
+  assertEquals(persisted[0].decision, "keep_overlap", "explicit decision");
+  const snapshot = record.task_schedule_snapshot as Array<Record<string, unknown>>;
+  assertEquals(snapshot.length, 1, "full owner snapshot");
+  assertEquals(snapshot[0].id, schedule.id, "snapshot contains conflicting schedule");
+  const window = record.task_schedule_window as Record<string, unknown>;
+  assertEquals(typeof window.startsAt, "string", "authoritative IANA comparison start");
+  assertEquals(typeof window.endsAt, "string", "authoritative IANA comparison end");
 });
 
 Deno.test("replays an existing receipt before resolver or RPC and returns the original Event", async () => {

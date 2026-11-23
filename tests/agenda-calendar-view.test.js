@@ -5,11 +5,15 @@ import {
   eventOccursOnDate,
   formatEventTime,
   getCalendarEventRange,
+  getCalendarTaskScheduleRange,
   getCalendarWindow,
+  getRecurringOccurrenceQueryWindow,
   monthGridDays,
   shiftCalendarPeriod,
   sortEventsForCalendar,
+  sortTaskSchedulesForCalendar,
   startOfWeekMonday,
+  taskScheduleOccursOnDate,
 } from '../src/features/agenda/domain/calendar-view.js';
 
 test('calendar week starts Monday and shifts dates without local-machine timezone dependence', () => {
@@ -39,6 +43,29 @@ test('day and week windows use exclusive end dates', () => {
     startDate: '2026-11-16',
     endDateExclusive: '2026-11-23',
   });
+});
+
+test('recurring occurrence query windows follow the visible day, week and six-week month grid with a bounded overlap buffer', () => {
+  assert.deepEqual(getRecurringOccurrenceQueryWindow('day', '2026-11-22'), {
+    startDate: '2026-10-23',
+    endDateExclusive: '2026-11-23',
+  });
+  assert.deepEqual(getRecurringOccurrenceQueryWindow('week', '2026-11-22'), {
+    startDate: '2026-10-17',
+    endDateExclusive: '2026-11-23',
+  });
+  assert.deepEqual(getRecurringOccurrenceQueryWindow('month', '2026-11-22'), {
+    startDate: '2026-09-26',
+    endDateExclusive: '2026-12-07',
+  });
+});
+
+test('recurring occurrence overlap buffer can be shortened but cannot exceed the approved 30 days', () => {
+  assert.deepEqual(getRecurringOccurrenceQueryWindow('day', '2026-11-22', 0), {
+    startDate: '2026-11-22',
+    endDateExclusive: '2026-11-23',
+  });
+  assert.throws(() => getRecurringOccurrenceQueryWindow('day', '2026-11-22', 31), /0 to 30/);
 });
 
 test('month navigation clamps dates such as January 31 to February end', () => {
@@ -113,4 +140,43 @@ test('calendar sorting puts all-day events first, then orders timed events by da
     { id: 'early', temporal_kind: 'zoned_civil', start_local: '2026-12-02T09:00:00', end_local: '2026-12-02T10:00:00', time_zone: 'America/Havana', starts_at: '2026-12-02T14:00:00Z', ends_at: '2026-12-02T15:00:00Z' },
   ];
   assert.deepEqual(sortEventsForCalendar(events, 'America/Havana').map((event) => event.id), ['all-day', 'early', 'late']);
+});
+
+test('TaskSchedule retains its stored wall time and appears on every overlapping local date', () => {
+  const schedule = {
+    start_local: '2026-12-24T22:30:00',
+    end_local: '2026-12-25T01:15:00',
+    time_zone: 'America/New_York',
+    starts_at: '2026-12-25T03:30:00.000Z',
+    ends_at: '2026-12-25T06:15:00.000Z',
+  };
+  assert.deepEqual(getCalendarTaskScheduleRange(schedule), {
+    startDate: '2026-12-24',
+    endDateExclusive: '2026-12-26',
+    startTime: '22:30',
+    endTime: '01:15',
+    endDate: '2026-12-25',
+    timeZone: 'America/New_York',
+  });
+  assert.equal(taskScheduleOccursOnDate(schedule, '2026-12-24'), true);
+  assert.equal(taskScheduleOccursOnDate(schedule, '2026-12-25'), true);
+  assert.equal(taskScheduleOccursOnDate(schedule, '2026-12-26'), false);
+});
+
+test('TaskSchedule ordering follows resolved instants across repeated DST wall times', () => {
+  const later = {
+    id: 'later',
+    start_local: '2026-11-01T01:15:00',
+    end_local: '2026-11-01T01:45:00',
+    time_zone: 'America/New_York',
+    starts_at: '2026-11-01T06:15:00.000Z',
+    ends_at: '2026-11-01T06:45:00.000Z',
+  };
+  const earlier = {
+    ...later,
+    id: 'earlier',
+    starts_at: '2026-11-01T05:15:00.000Z',
+    ends_at: '2026-11-01T05:45:00.000Z',
+  };
+  assert.deepEqual(sortTaskSchedulesForCalendar([later, earlier]).map((item) => item.id), ['earlier', 'later']);
 });

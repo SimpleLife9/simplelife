@@ -7,25 +7,42 @@ import {
   eventOccursOnDate,
   formatEventTime,
   getCalendarEventRange,
+  getCalendarTaskScheduleRange,
   getCalendarWindow,
+  getRecurringOccurrenceQueryWindow,
   monthGridDays,
   shiftCalendarPeriod,
   sortEventsForCalendar,
+  sortTaskSchedulesForCalendar,
+  taskScheduleOccursOnDate,
   startOfWeekMonday,
 } from './domain/calendar-view.js';
 import { createEventDraft } from './domain/event.js';
+import { buildRecurringEventCreatePayload } from './domain/recurring-event-form.js';
 import { formatInstantInTimeZone, isSupportedTimeZone } from './domain/temporal.js';
 import './AgendaPage.css';
 import { ProtectedTimePage } from './ProtectedTimePage.jsx';
+import { TaskSchedulePage } from './TaskSchedulePage.jsx';
 import './AgendaMutations.css';
+import { formatUpcomingCountdown, formatUpcomingStart, getUpcomingAgendaItems } from './domain/upcoming.js';
 
 const DEFAULT_TIME_ZONE = 'America/Havana';
+const RECURRENCE_OCCURRENCE_PAGE_SIZE = 500;
+const MAX_CALENDAR_RECURRENCE_OCCURRENCES = 10_000;
 const VIEW_OPTIONS = [
   { id: 'day', label: 'Día' },
   { id: 'week', label: 'Semana' },
   { id: 'month', label: 'Mes' },
 ];
 const WEEKDAY_LABELS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+const ISO_WEEKDAY_OPTIONS = [
+  { code: 'MO', label: 'L' }, { code: 'TU', label: 'M' }, { code: 'WE', label: 'X' },
+  { code: 'TH', label: 'J' }, { code: 'FR', label: 'V' }, { code: 'SA', label: 'S' }, { code: 'SU', label: 'D' },
+];
+function isoWeekdayForDate(value) {
+  const weekday = new Date(value + 'T12:00:00.000Z').getUTCDay();
+  return ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'][weekday];
+}
 
 function todayInZone(timeZone) {
   return formatInstantInTimeZone(new Date().toISOString(), timeZone).slice(0, 10);
@@ -134,9 +151,31 @@ function EventChip({ event, timeZone, onClick, compact = false }) {
   );
 }
 
+function TaskScheduleChip({ schedule, task, compact = false }) {
+  const range = getCalendarTaskScheduleRange(schedule);
+  const timeLabel = range.startDate === range.endDate
+    ? range.startTime + ' – ' + range.endTime
+    : range.startTime + ' · hasta ' + range.endDate + ' ' + range.endTime;
+  const title = task?.action || 'Tarea programada';
+  return (
+    <div
+      className={'agenda-task-schedule-chip' + (compact ? ' is-compact' : '')}
+      role="group"
+      aria-label={'Tarea reservada: ' + title}
+      title={title + ' · ' + timeLabel + ' · ' + (schedule.time_zone || '')}
+    >
+      <span className="agenda-task-schedule-chip-time">{range.startTime}</span>
+      <span className="agenda-task-schedule-chip-title">{title}</span>
+    </div>
+  );
+}
+
 function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
   const [events, setEvents] = useState([]);
+  const [taskSchedules, setTaskSchedules] = useState([]);
+  const [scheduledTasks, setScheduledTasks] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [clockNow, setClockNow] = useState(() => Date.now());
   const [localError, setLocalError] = useState('');
   const [timeZone, setTimeZone] = useState(DEFAULT_TIME_ZONE);
   const [timeZoneNotice, setTimeZoneNotice] = useState('');
@@ -147,9 +186,15 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
   const [editingEvent, setEditingEvent] = useState(null);
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [confirmAction, setConfirmAction] = useState(null);
+  const [occurrenceMutationMode, setOccurrenceMutationMode] = useState(null);
+  const [seriesEditScope, setSeriesEditScope] = useState(null);
+  const [occurrenceDateValue, setOccurrenceDateValue] = useState('');
+  const [occurrenceEndValue, setOccurrenceEndValue] = useState('');
   const [pendingKey, setPendingKey] = useState(null);
   const [protectedConflictPrompt, setProtectedConflictPrompt] = useState(null);
   const [protectedConflictChoices, setProtectedConflictChoices] = useState({});
+  const [taskScheduleConflictPrompt, setTaskScheduleConflictPrompt] = useState(null);
+  const [taskScheduleConflictChoices, setTaskScheduleConflictChoices] = useState({});
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [locationLabel, setLocationLabel] = useState('');
@@ -162,6 +207,16 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
   const [eventTimeZone, setEventTimeZone] = useState(DEFAULT_TIME_ZONE);
   const [fixedStartsAt, setFixedStartsAt] = useState('');
   const [fixedEndsAt, setFixedEndsAt] = useState('');
+  const [recurrenceFrequency, setRecurrenceFrequency] = useState('none');
+  const [recurrenceInterval, setRecurrenceInterval] = useState('1');
+  const [recurrenceCount, setRecurrenceCount] = useState('12');
+  const [recurrenceWeekdays, setRecurrenceWeekdays] = useState([]);
+  const [recurrenceWeekdaysTouched, setRecurrenceWeekdaysTouched] = useState(false);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -207,9 +262,123 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
         } else {
           query = query.not('deleted_at', 'is', null);
         }
-        const { data, error } = await query.order('created_at', { ascending: false });
-        if (error) throw error;
-        if (alive) setEvents(data || []);
+        const scheduleQuery = lifecycleView === 'active'
+          ? supabase.from('task_schedule')
+            .select('id,task_id,schedule_status,start_local,end_local,time_zone,starts_at,ends_at')
+            .eq('owner_user_id', profile.id)
+            .in('schedule_status', ['proposed', 'confirmed'])
+            .order('starts_at', { ascending: true })
+          : Promise.resolve({ data: [], error: null });
+        const [eventResult, scheduleResult] = await Promise.all([
+          query.order('created_at', { ascending: false }),
+          scheduleQuery,
+        ]);
+        if (eventResult.error) throw eventResult.error;
+        if (scheduleResult.error) throw scheduleResult.error;
+        const loadedEvents = eventResult.data || [];
+        const activeSeries = lifecycleView === 'active'
+          ? loadedEvents.filter((item) => item.recurrence_rule
+            && !['cancelled', 'finished'].includes(item.event_status))
+          : [];
+        let recurringOccurrences = [];
+        if (activeSeries.length > 0) {
+          // Keep the materializer request bounded and idempotent. A server-side
+          // owner lock + unique occurrence key prevents duplicate rows across tabs.
+          const materializationSeries = activeSeries.slice(0, 50);
+          for (let offset = 0; offset < materializationSeries.length; offset += 5) {
+            const seriesIds = materializationSeries.slice(offset, offset + 5).map((item) => item.id);
+            const materializationResult = await supabase.functions.invoke('agenda-event-series-materialize', {
+              body: { seriesIds },
+            });
+            if (materializationResult.error) {
+              let message = 'No se pudieron ampliar las ocurrencias recurrentes del calendario.';
+              try {
+                const response = materializationResult.error.context instanceof Response
+                  ? await materializationResult.error.context.clone().json()
+                  : null;
+                if (response?.error === 'PROTECTED_TIME_CONFLICTS') {
+                  message = 'Una ocurrencia recurrente coincide con Tiempo Protegido. Revisa ese compromiso antes de ampliar la serie.';
+                } else if (response?.error === 'TASK_SCHEDULE_CONFLICTS') {
+                  message = 'Una ocurrencia recurrente coincide con una tarea reservada. Revisa ese compromiso antes de ampliar la serie.';
+                } else if (response?.error) {
+                  message = response.error;
+                }
+              } catch { /* keep bounded default message */ }
+              setLocalError(message);
+              break;
+            }
+          }
+          if (activeSeries.length > materializationSeries.length) {
+            setLocalError('Hay más de 50 series activas; la ampliación del horizonte se limita a 50 por carga.');
+          }
+          const occurrenceWindow = getRecurringOccurrenceQueryWindow(view, activeDate);
+          // This excludes the rest of the 90-day materialized horizon while
+          // retaining occurrences whose maximum 30-day end offset overlaps the view.
+          const rows = [];
+          for (let offset = 0; offset <= MAX_CALENDAR_RECURRENCE_OCCURRENCES; offset += RECURRENCE_OCCURRENCE_PAGE_SIZE) {
+            const occurrenceResult = await supabase.from('calendar_event_occurrence')
+              .select('*')
+              .in('calendar_event_id', activeSeries.map((item) => item.id))
+              .in('occurrence_status', ['scheduled', 'needs_review'])
+              .gte('original_local_date', occurrenceWindow.startDate)
+              .lt('original_local_date', occurrenceWindow.endDateExclusive)
+              .order('original_local_date', { ascending: true })
+              .order('occurrence_key', { ascending: true })
+              .range(offset, offset + RECURRENCE_OCCURRENCE_PAGE_SIZE - 1);
+            if (occurrenceResult.error) throw occurrenceResult.error;
+            const pageRows = occurrenceResult.data || [];
+            if (offset === MAX_CALENDAR_RECURRENCE_OCCURRENCES && pageRows.length > 0) {
+              throw new Error('La vista actual contiene más de 10.000 ocurrencias recurrentes. Reduce el período o separa las series.');
+            }
+            rows.push(...pageRows);
+            if (pageRows.length < RECURRENCE_OCCURRENCE_PAGE_SIZE) break;
+          }
+          const seriesById = new Map(activeSeries.map((item) => [item.id, item]));
+          recurringOccurrences = rows.flatMap((row) => {
+            const series = seriesById.get(row.calendar_event_id);
+            if (!series) return [];
+            return [{
+              ...series,
+              id: 'recurring-occurrence:' + row.id,
+              series_event_id: series.id,
+              occurrence_id: row.id,
+              occurrence_key: row.occurrence_key,
+              occurrence_status: row.occurrence_status,
+              override_kind: row.override_kind,
+              review_candidate: row.review_candidate,
+              row_version: row.row_version,
+              is_recurring_occurrence: true,
+              temporal_kind: row.temporal_kind,
+              start_date: row.start_date,
+              end_date_exclusive: row.end_date_exclusive,
+              start_local: row.start_local,
+              end_local: row.end_local,
+              time_zone: row.time_zone,
+              starts_at: row.starts_at,
+              ends_at: row.ends_at,
+              start_disambiguation: row.start_disambiguation,
+              end_disambiguation: row.end_disambiguation,
+            }];
+          });
+        }
+        const oneOffOrNonActiveEvents = loadedEvents.filter((item) =>
+          !item.recurrence_rule || lifecycleView !== 'active');
+        const nextEvents = [...oneOffOrNonActiveEvents, ...recurringOccurrences];
+        const nextSchedules = scheduleResult.data || [];
+        const taskIds = [...new Set(nextSchedules.map((item) => item.task_id))];
+        let nextTasks = [];
+        if (taskIds.length > 0) {
+          const taskResult = await supabase.from('task')
+            .select('id,action')
+            .in('id', taskIds);
+          if (taskResult.error) throw taskResult.error;
+          nextTasks = taskResult.data || [];
+        }
+        if (alive) {
+          setEvents(nextEvents);
+          setTaskSchedules(nextSchedules);
+          setScheduledTasks(nextTasks);
+        }
       } catch (error) {
         if (alive) setLocalError(error?.message || 'No se pudieron cargar los eventos.');
       } finally {
@@ -223,8 +392,25 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
   const today = todayInZone(timeZone);
   const activeDate = selectedDate || today;
   const orderedEvents = useMemo(() => sortEventsForCalendar(events, timeZone), [events, timeZone]);
+  const orderedTaskSchedules = useMemo(
+    () => sortTaskSchedulesForCalendar(taskSchedules),
+    [taskSchedules],
+  );
+  const scheduledTaskById = useMemo(
+    () => new Map(scheduledTasks.map((task) => [task.id, task])),
+    [scheduledTasks],
+  );
+  const upcomingItems = useMemo(() => getUpcomingAgendaItems({
+    events,
+    taskSchedules,
+    tasks: scheduledTasks,
+    now: clockNow,
+    viewerTimeZone: timeZone,
+    maxItems: 4,
+  }), [events, taskSchedules, scheduledTasks, clockNow, timeZone]);
   const openComposer = () => {
     setEditingEvent(null);
+    setSeriesEditScope(null);
     setTitle('');
     setDescription('');
     setLocationLabel('');
@@ -237,6 +423,11 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
     setEventTimeZone(timeZone);
     setFixedStartsAt('');
     setFixedEndsAt('');
+    setRecurrenceFrequency('none');
+    setRecurrenceInterval('1');
+    setRecurrenceCount('12');
+    setRecurrenceWeekdays([]);
+    setRecurrenceWeekdaysTouched(false);
     setPendingKey(null);
     setShowComposer(true);
   };
@@ -244,7 +435,31 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
   const openEventDetail = (event) => {
     setPendingKey(null);
     setConfirmAction(null);
+    setOccurrenceMutationMode(null);
     setSelectedEvent(event);
+  };
+
+  const openOccurrenceEditor = (mode) => {
+    if (!selectedEvent?.is_recurring_occurrence) return;
+    setConfirmAction(null);
+    setOccurrenceMutationMode(mode);
+    if (selectedEvent.temporal_kind === 'all_day') {
+      setOccurrenceDateValue(mode === 'move'
+        ? String(selectedEvent.start_date || selectedEvent.actual_local_date || '')
+        : String(selectedEvent.end_date_exclusive || ''));
+      setOccurrenceEndValue('');
+    } else {
+      setOccurrenceDateValue(localInputValue(selectedEvent.start_local).slice(0, 16));
+      setOccurrenceEndValue(mode === 'modify'
+        ? localInputValue(selectedEvent.end_local).slice(0, 16)
+        : '');
+    }
+  };
+
+  const requestOccurrenceCancellation = () => {
+    setPendingKey(null);
+    setOccurrenceMutationMode(null);
+    setConfirmAction('cancel_occurrence');
   };
 
   // Keep seconds and milliseconds from the persisted civil-time intent.
@@ -252,6 +467,7 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
   const localInputValue = (value) => String(value || '').replace(' ', 'T').slice(0, 23);
 
   const openEditComposer = (event) => {
+    setSeriesEditScope(null);
     setEditingEvent(event);
     setTitle(event.title || '');
     setDescription(event.description || '');
@@ -269,6 +485,47 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
       setFixedEndsAt(event.ends_at);
     }
     setEventTimeZone(event.time_zone || timeZone);
+    setRecurrenceFrequency('none');
+    setRecurrenceInterval('1');
+    setRecurrenceCount('12');
+    setRecurrenceWeekdays([]);
+    setRecurrenceWeekdaysTouched(false);
+    setPendingKey(null);
+    setSelectedEvent(null);
+    setShowComposer(true);
+  };
+
+  const openRecurringSeriesComposer = (event, scope) => {
+    if (!event?.is_recurring_occurrence
+      || !['entire_series', 'this_and_following'].includes(scope)
+      || event.occurrence_status !== 'scheduled'
+      || event.override_kind != null
+      || !event.recurrence_rule
+      || !event.occurrence_id
+      || !event.series_event_id
+      || !event.updated_at) return;
+
+    const rule = event.recurrence_rule;
+    setEditingEvent(event);
+    setSeriesEditScope(scope);
+    setTitle(event.title || '');
+    setDescription(event.description || '');
+    setLocationLabel(event.location_label || '');
+    setLocationKind(event.location_kind || '');
+    setTemporalKind(event.temporal_kind);
+    if (event.temporal_kind === 'all_day') {
+      setStartDate(event.start_date);
+      setEndDate(addCalendarDays(event.end_date_exclusive, -1));
+    } else {
+      setStartLocalDateTime(localInputValue(event.start_local));
+      setEndLocalDateTime(localInputValue(event.end_local));
+    }
+    setEventTimeZone(event.time_zone || timeZone);
+    setRecurrenceFrequency(rule.frequency || 'DAILY');
+    setRecurrenceInterval(String(rule.interval ?? 1));
+    setRecurrenceCount(String(rule.count ?? 12));
+    setRecurrenceWeekdays(Array.isArray(rule.byWeekday) ? [...rule.byWeekday] : []);
+    setRecurrenceWeekdaysTouched(true);
     setPendingKey(null);
     setSelectedEvent(null);
     setShowComposer(true);
@@ -278,12 +535,22 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
     if (busy) return;
     setShowComposer(false);
     setEditingEvent(null);
+    setSeriesEditScope(null);
+    setRecurrenceFrequency('none');
+    setRecurrenceWeekdays([]);
+    setRecurrenceWeekdaysTouched(false);
     setPendingKey(null);
   };
 
-  const submitEvent = async (event, acceptedProtectedTimeDecisions = undefined) => {
+  const submitEvent = async (
+    event,
+    acceptedProtectedTimeDecisions = undefined,
+    acceptedTaskScheduleDecisions = undefined,
+  ) => {
     event.preventDefault();
     const key = pendingKey || uuidv7();
+    const editingRecurringSeries = Boolean(seriesEditScope && editingEvent?.is_recurring_occurrence);
+    const creatingRecurring = !editingEvent && recurrenceFrequency !== 'none';
     setPendingKey(key);
     const success = await runAction(async () => {
       let draftInput;
@@ -331,9 +598,92 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
         };
       }
       const draft = createEventDraft(draftInput);
+      if (editingRecurringSeries) {
+        if (!['entire_series', 'this_and_following'].includes(seriesEditScope)
+          || recurrenceFrequency === 'none') {
+          throw new Error('Selecciona un alcance y una regla válida para guardar la serie.');
+        }
+        const recurring = buildRecurringEventCreatePayload({
+          eventDraft: draft,
+          frequency: recurrenceFrequency,
+          interval: Number(recurrenceInterval),
+          count: Number(recurrenceCount),
+          weekdays: recurrenceWeekdays,
+        });
+        const { data, error } = await supabase.functions.invoke('agenda-event-series-mutate', {
+          body: {
+            seriesId: editingEvent.series_event_id,
+            expectedUpdatedAt: editingEvent.updated_at,
+            selectedOccurrenceId: editingEvent.occurrence_id,
+            scope: seriesEditScope,
+            event: buildEventRequest(draft),
+            recurrenceRule: recurring.recurrenceRule,
+            endLocalTime: recurring.endLocalTime,
+            endDayOffset: recurring.endDayOffset,
+          },
+          headers: { 'Idempotency-Key': key },
+        });
+        if (error) {
+          let message = error.message || 'No se pudo actualizar la serie recurrente.';
+          try {
+            const response = error.context instanceof Response ? await error.context.clone().json() : null;
+            if (response?.error === 'PROTECTED_TIME_CONFLICTS') {
+              message = 'La ocurrencia ' + (response.occurrenceKey || '') + ' coincide con Tiempo Protegido. No se modificó la serie.';
+            } else if (response?.error === 'TASK_SCHEDULE_CONFLICTS') {
+              message = 'La ocurrencia ' + (response.occurrenceKey || '') + ' coincide con una tarea reservada. No se modificó la serie.';
+            } else if (response?.error) {
+              message = response.error;
+            }
+          } catch { /* keep SDK error message */ }
+          throw new Error(message);
+        }
+        if (!data?.seriesEventId || data.scope !== seriesEditScope) {
+          throw new Error('El servidor no confirmó el alcance de edición de la serie.');
+        }
+        return;
+      }
+      if (creatingRecurring) {
+        const recurring = buildRecurringEventCreatePayload({
+          eventDraft: draft,
+          frequency: recurrenceFrequency,
+          interval: Number(recurrenceInterval),
+          count: Number(recurrenceCount),
+          weekdays: recurrenceWeekdays,
+        });
+        const { data, error } = await supabase.functions.invoke('agenda-event-series-create', {
+          body: {
+            event: buildEventRequest(draft),
+            recurrenceRule: recurring.recurrenceRule,
+            endLocalTime: recurring.endLocalTime,
+            endDayOffset: recurring.endDayOffset,
+          },
+          headers: { 'Idempotency-Key': key },
+        });
+        if (error) {
+          let message = error.message || 'No se pudo crear la serie recurrente.';
+          try {
+            const response = error.context instanceof Response ? await error.context.clone().json() : null;
+            if (response?.error === 'PROTECTED_TIME_CONFLICTS') {
+              message = 'La ocurrencia ' + (response.occurrenceKey || '') + ' coincide con Tiempo Protegido. No se guardó la serie.';
+            } else if (response?.error === 'TASK_SCHEDULE_CONFLICTS') {
+              message = 'La ocurrencia ' + (response.occurrenceKey || '') + ' coincide con una tarea reservada. No se guardó la serie.';
+            } else if (response?.error) {
+              message = response.error;
+            }
+          } catch { /* keep SDK error message */ }
+          throw new Error(message);
+        }
+        if (!data?.seriesEventId || typeof data.materializedCount !== 'number') {
+          throw new Error('El servidor no devolvió la serie y sus ocurrencias materializadas.');
+        }
+        return;
+      }
       const protectedTimeBody = acceptedProtectedTimeDecisions === undefined
         ? {}
         : { protectedTimeDecisions: acceptedProtectedTimeDecisions };
+      const taskScheduleBody = acceptedTaskScheduleDecisions === undefined
+        ? {}
+        : { taskScheduleDecisions: acceptedTaskScheduleDecisions };
       const { data, error } = editingEvent
         ? await supabase.functions.invoke('agenda-event-mutate', {
           body: {
@@ -342,6 +692,7 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
             action: 'edit',
             event: buildEventRequest(draft),
             ...protectedTimeBody,
+            ...taskScheduleBody,
           },
           headers: { 'Idempotency-Key': key },
         })
@@ -349,6 +700,7 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
           body: {
             event: buildEventRequest(draft),
             ...protectedTimeBody,
+            ...taskScheduleBody,
           },
           headers: { 'Idempotency-Key': key },
         });
@@ -359,11 +711,27 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
           response = error.context instanceof Response ? await error.context.clone().json() : null;
           if (response?.error) message = response.error;
         } catch { /* keep SDK error message */ }
+        if (response?.error === 'TASK_SCHEDULE_CONFLICTS'
+          || response?.error === 'TASK_SCHEDULE_CONFLICTS_CHANGED') {
+          if (response.error === 'TASK_SCHEDULE_CONFLICTS_CHANGED') setPendingKey(null);
+          setTaskScheduleConflictPrompt({
+            error: response.error,
+            action: 'submit',
+            conflicts: Array.isArray(response.conflicts) ? response.conflicts : [],
+            protectedTimeDecisions: acceptedProtectedTimeDecisions,
+          });
+          setTaskScheduleConflictChoices({});
+          message = response.error === 'TASK_SCHEDULE_CONFLICTS_CHANGED'
+            ? 'Las reservas de tareas cambiaron mientras guardabas. Revisa el horario y vuelve a guardar.'
+            : 'El evento coincide con una reserva de tarea. Decide explícitamente cómo conservar ambos compromisos.';
+        }
         if (response?.error === 'PROTECTED_TIME_CONFLICTS'
           || response?.error === 'PROTECTED_TIME_CONFLICTS_CHANGED') {
           setProtectedConflictPrompt({
             error: response.error,
+            action: 'submit',
             conflicts: Array.isArray(response.conflicts) ? response.conflicts : [],
+            taskScheduleDecisions: acceptedTaskScheduleDecisions,
           });
           setProtectedConflictChoices({});
           message = response.error === 'PROTECTED_TIME_CONFLICTS_CHANGED'
@@ -373,15 +741,18 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
         throw new Error(message);
       }
       if (!data?.eventId) throw new Error('El servidor no devolvió el identificador del evento.');
-    }, editingEvent ? 'Cambios guardados.' : 'Evento guardado en Agenda.');
+    }, editingRecurringSeries ? 'Serie recurrente actualizada en Agenda.' : creatingRecurring ? 'Serie recurrente creada en Agenda.' : editingEvent ? 'Cambios guardados.' : 'Evento guardado en Agenda.');
 
     if (success) {
       setShowComposer(false);
       setEditingEvent(null);
+      setSeriesEditScope(null);
       setSelectedEvent(null);
       setPendingKey(null);
       setProtectedConflictPrompt(null);
       setProtectedConflictChoices({});
+      setTaskScheduleConflictPrompt(null);
+      setTaskScheduleConflictChoices({});
     }
   };
 
@@ -406,11 +777,49 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
       occurrenceStartsAt: conflict.occurrenceStartsAt,
       decision: protectedConflictChoices[conflict.conflictKey],
     }));
+    const promptAction = protectedConflictPrompt.action;
+    const taskScheduleDecisions = protectedConflictPrompt.taskScheduleDecisions;
     setProtectedConflictPrompt(null);
-    void submitEvent({ preventDefault() {} }, decisions);
+    if (promptAction === 'reopen' || promptAction === 'restore') {
+      void mutateSelectedEvent(promptAction, taskScheduleDecisions, decisions);
+    } else {
+      void submitEvent({ preventDefault() {} }, decisions, taskScheduleDecisions);
+    }
   };
 
-  const mutateSelectedEvent = async (action) => {
+  const taskScheduleConflictItems = taskScheduleConflictPrompt?.conflicts ?? [];
+  const taskScheduleConflictDecisionsReady = taskScheduleConflictItems.length > 0
+    && taskScheduleConflictItems.every((conflict) =>
+      taskScheduleConflictChoices[conflict.taskScheduleId] === 'keep_overlap');
+
+  const closeTaskScheduleConflictPrompt = () => {
+    if (busy) return;
+    setTaskScheduleConflictPrompt(null);
+    setTaskScheduleConflictChoices({});
+  };
+
+  const saveWithTaskScheduleDecisions = () => {
+    if (!taskScheduleConflictDecisionsReady || busy) return;
+    const decisions = taskScheduleConflictItems.map((conflict) => ({
+      taskScheduleId: conflict.taskScheduleId,
+      taskScheduleUpdatedAt: conflict.taskScheduleUpdatedAt,
+      decision: taskScheduleConflictChoices[conflict.taskScheduleId],
+    }));
+    const promptAction = taskScheduleConflictPrompt.action;
+    const protectedDecisions = taskScheduleConflictPrompt.protectedTimeDecisions;
+    setTaskScheduleConflictPrompt(null);
+    if (promptAction === 'reopen' || promptAction === 'restore') {
+      void mutateSelectedEvent(promptAction, decisions, protectedDecisions);
+    } else {
+      void submitEvent({ preventDefault() {} }, protectedDecisions, decisions);
+    }
+  };
+
+  const mutateSelectedEvent = async (
+    action,
+    acceptedTaskScheduleDecisions = undefined,
+    acceptedProtectedTimeDecisions = undefined,
+  ) => {
     if (!selectedEvent) return;
     const key = pendingKey || uuidv7();
     setPendingKey(key);
@@ -429,15 +838,48 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
           eventId: target.id,
           expectedUpdatedAt: target.updated_at,
           action,
+          ...(acceptedTaskScheduleDecisions === undefined ? {} : { taskScheduleDecisions: acceptedTaskScheduleDecisions }),
+          ...(acceptedProtectedTimeDecisions === undefined ? {} : { protectedTimeDecisions: acceptedProtectedTimeDecisions }),
         },
         headers: { 'Idempotency-Key': key },
       });
       if (error) {
         let message = error.message || 'No se pudo actualizar el evento.';
+        let response = null;
         try {
-          const response = error.context instanceof Response ? await error.context.clone().json() : null;
+          response = error.context instanceof Response ? await error.context.clone().json() : null;
           if (response?.error) message = response.error;
         } catch { /* keep SDK error message */ }
+        if (response?.error === 'PROTECTED_TIME_CONFLICTS'
+          || response?.error === 'PROTECTED_TIME_CONFLICTS_CHANGED') {
+          if (response.error === 'PROTECTED_TIME_CONFLICTS_CHANGED') setPendingKey(null);
+          setProtectedConflictPrompt({
+            error: response.error,
+            action,
+            conflicts: Array.isArray(response.conflicts) ? response.conflicts : [],
+            taskScheduleDecisions: acceptedTaskScheduleDecisions,
+          });
+          setProtectedConflictChoices({});
+          message = response.error === 'PROTECTED_TIME_CONFLICTS_CHANGED'
+            ? 'Los bloques protegidos cambiaron mientras se reactivaba el evento. Revisa los cruces actuales.'
+            : 'El evento no se reabrió ni restauró. Decide explícitamente cómo conservar el tiempo protegido.';
+        }
+        if (response?.error === 'TASK_SCHEDULE_CONFLICTS'
+          || response?.error === 'TASK_SCHEDULE_CONFLICTS_CHANGED') {
+          if (response.error === 'TASK_SCHEDULE_CONFLICTS_CHANGED') setPendingKey(null);
+          setTaskScheduleConflictPrompt({
+            error: response.error,
+            action,
+            conflicts: Array.isArray(response.conflicts) ? response.conflicts : [],
+            protectedTimeDecisions: acceptedProtectedTimeDecisions,
+          });
+          setTaskScheduleConflictChoices({});
+          message = response.error === 'TASK_SCHEDULE_CONFLICTS_CHANGED'
+            ? 'Las reservas de tareas cambiaron mientras se reactivaba el evento. Revisa los cruces actuales.'
+            : action === 'restore'
+              ? 'El evento no se restauró. Decide explícitamente cómo conservar los horarios superpuestos.'
+              : 'El evento no se reabrió. Decide explícitamente cómo conservar los horarios superpuestos.';
+        }
         throw new Error(message);
       }
       if (!data?.eventId) throw new Error('El servidor no confirmó el cambio del evento.');
@@ -445,6 +887,69 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
     if (success) {
       setSelectedEvent(null);
       setConfirmAction(null);
+      setPendingKey(null);
+    }
+  };
+
+  const mutateSelectedOccurrence = async (action) => {
+    if (!selectedEvent?.is_recurring_occurrence || busy) return;
+    const target = selectedEvent;
+    const key = uuidv7();
+    setPendingKey(key);
+    const payload = {
+      occurrenceId: target.occurrence_id,
+      expectedRowVersion: target.row_version,
+      action,
+    };
+    if (action === 'move') {
+      if (target.temporal_kind === 'all_day') {
+        payload.actualLocalDate = occurrenceDateValue;
+      } else {
+        payload.actualLocalDate = occurrenceDateValue.slice(0, 10);
+        payload.actualLocalTime = occurrenceDateValue.slice(11);
+      }
+    } else if (action === 'modify') {
+      if (target.temporal_kind === 'all_day') {
+        payload.endDateExclusive = occurrenceDateValue;
+      } else {
+        payload.endLocalDateTime = occurrenceEndValue;
+      }
+    }
+
+    const messages = {
+      cancel: 'Esta ocurrencia fue cancelada. Las demás fechas de la serie se conservan.',
+      move: 'Esta ocurrencia fue reprogramada. Su identidad original se conserva.',
+      modify: 'La duración de esta ocurrencia fue modificada.',
+    };
+    const success = await runAction(async () => {
+      const { data, error } = await supabase.functions.invoke('agenda-event-occurrence-mutate', {
+        body: payload,
+        headers: { 'Idempotency-Key': key },
+      });
+      if (error) {
+        let message = error.message || 'No se pudo actualizar esta ocurrencia.';
+        try {
+          const response = error.context instanceof Response ? await error.context.clone().json() : null;
+          if (response?.error === 'PROTECTED_TIME_CONFLICTS') {
+            message = 'El cambio coincide con Tiempo Protegido. No se guardó la modificación.';
+          } else if (response?.error === 'TASK_SCHEDULE_CONFLICTS') {
+            message = 'El cambio coincide con una tarea reservada. No se guardó la modificación.';
+          } else if (response?.error === 'OCCURRENCE_VERSION_CONFLICT') {
+            message = 'La ocurrencia cambió en otra sesión. Recarga la Agenda y vuelve a intentarlo.';
+          } else if (response?.error) {
+            message = response.error;
+          }
+        } catch { /* keep SDK error message */ }
+        throw new Error(message);
+      }
+      if (!data?.occurrenceId) throw new Error('El servidor no confirmó el cambio de esta ocurrencia.');
+    }, messages[action] || 'Ocurrencia actualizada.');
+    if (success) {
+      setSelectedEvent(null);
+      setConfirmAction(null);
+      setOccurrenceMutationMode(null);
+      setPendingKey(null);
+    } else {
       setPendingKey(null);
     }
   };
@@ -485,12 +990,24 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
       description: 'El evento se conservará durante 30 días para permitir su restauración. No se borrará físicamente.',
       button: 'Mover a papelera',
     },
+    cancel_occurrence: {
+      title: 'Cancelar esta ocurrencia',
+      description: 'Solo se cancelará esta fecha. La serie y sus demás ocurrencias permanecerán intactas.',
+      button: 'Cancelar esta fecha',
+    },
   };
 
 
   const eventsForDate = (dateKey) => orderedEvents.filter((event) => eventOccursOnDate(event, dateKey, timeZone));
+  const taskSchedulesForDate = (dateKey) => orderedTaskSchedules
+    .filter((schedule) => taskScheduleOccursOnDate(schedule, dateKey));
   const allDayEvents = eventsForDate(activeDate).filter((event) => event.temporal_kind === 'all_day');
   const timedEvents = eventsForDate(activeDate).filter((event) => event.temporal_kind !== 'all_day');
+  const dayTaskSchedules = taskSchedulesForDate(activeDate);
+  const dayTimelineItems = [
+    ...timedEvents.map((item) => ({ kind: 'event', item, sortAt: Date.parse(item.starts_at) })),
+    ...dayTaskSchedules.map((item) => ({ kind: 'task_schedule', item, sortAt: Date.parse(item.starts_at) })),
+  ].sort((left, right) => left.sortAt - right.sortAt);
   const monthDays = view === 'month' ? monthGridDays(activeDate) : [];
   const weekDays = view === 'week'
     ? Array.from({ length: 7 }, (_, index) => addCalendarDays(startOfWeekMonday(activeDate), index))
@@ -546,6 +1063,51 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
       </nav>
 
       {timeZoneNotice && <div className="agenda-timezone-notice">{timeZoneNotice}</div>}
+      {!loading && !localError && (
+        <section className="agenda-upcoming-panel" aria-label="Próximos compromisos">
+          <div className="agenda-upcoming-heading">
+            <div>
+              <span className="agenda-section-kicker">AGENDA ACTIVA</span>
+              <h3>Próximos compromisos</h3>
+            </div>
+            <span>Se actualiza mientras la Agenda está abierta</span>
+          </div>
+          {upcomingItems.length > 0 ? (
+            <div className="agenda-upcoming-list">
+              {upcomingItems.map((item) => {
+                const content = (
+                  <>
+                    <span className={'agenda-upcoming-kind' + (item.kind === 'task_schedule' ? ' is-task' : '')}>
+                      {item.kind === 'task_schedule' ? 'TAREA RESERVADA' : item.allDay ? 'EVENTO · TODO EL DÍA' : 'EVENTO'}
+                    </span>
+                    <strong>{item.title}</strong>
+                    <span className="agenda-upcoming-start">{formatUpcomingStart(item, timeZone)}</span>
+                    <span className={'agenda-upcoming-countdown' + (item.state === 'ongoing' ? ' is-ongoing' : '')}>
+                      {formatUpcomingCountdown(item, clockNow)}
+                    </span>
+                  </>
+                );
+                return item.kind === 'event' ? (
+                  <button
+                    type="button"
+                    className="agenda-upcoming-card"
+                    key={item.kind + ':' + item.id}
+                    onClick={() => openEventDetail(item.source)}
+                  >
+                    {content}
+                  </button>
+                ) : (
+                  <div className="agenda-upcoming-card is-task" role="group" key={item.kind + ':' + item.id}>
+                    {content}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="agenda-upcoming-empty">No hay compromisos próximos. Tu calendario está despejado.</p>
+          )}
+        </section>
+      )}
       {loading && <p className="muted agenda-loading">Cargando Agenda…</p>}
       {!loading && localError && <div className="form-error agenda-error">{localError}</div>}
 
@@ -555,7 +1117,7 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
             <section className="agenda-day-view" aria-label="Agenda diaria">
               <div className="agenda-day-summary">
                 <div><span className="agenda-section-kicker">DÍA SELECCIONADO</span><strong>{formatDate(activeDate, { weekday: 'long', day: 'numeric', month: 'long' })}</strong></div>
-                <span>{eventsForDate(activeDate).length} {eventsForDate(activeDate).length === 1 ? 'evento' : 'eventos'}</span>
+                <span>{eventsForDate(activeDate).length} eventos · {dayTaskSchedules.length} tareas reservadas</span>
               </div>
               {allDayEvents.length > 0 && (
                 <div className="agenda-all-day-lane">
@@ -565,13 +1127,36 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
                   </div>
                 </div>
               )}
-              {timedEvents.length > 0 ? (
+              {dayTimelineItems.length > 0 ? (
                 <div className="agenda-timeline">
-                  {timedEvents.map((item) => {
+                  {dayTimelineItems.map(({ kind, item }) => {
+                    if (kind === 'task_schedule') {
+                      const range = getCalendarTaskScheduleRange(item);
+                      const continues = range.startDate < activeDate;
+                      return (
+                        <div className="agenda-timeline-row" key={'task-schedule:' + item.id}>
+                          <div className="agenda-timeline-time">{continues ? 'Sigue' : range.startTime}</div>
+                          <div className="agenda-timeline-track">
+                            <span className="agenda-timeline-marker is-task-schedule" />
+                            <div
+                              className="agenda-timeline-card is-task-schedule"
+                              role="group"
+                              aria-label={'Tarea reservada: ' + (scheduledTaskById.get(item.task_id)?.action || 'Tarea programada')}
+                            >
+                              <strong>{scheduledTaskById.get(item.task_id)?.action || 'Tarea programada'}</strong>
+                              <span>{continues ? 'Continúa · ' : ''}{range.startDate === range.endDate
+                                ? range.startTime + ' – ' + range.endTime
+                                : range.startTime + ' · hasta ' + range.endDate + ' ' + range.endTime}</span>
+                              <small>Tiempo reservado para una tarea</small>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
                     const range = getCalendarEventRange(item, timeZone);
                     const continues = range.startDate < activeDate;
                     return (
-                      <div className="agenda-timeline-row" key={item.id}>
+                      <div className="agenda-timeline-row" key={'event:' + item.id}>
                         <div className="agenda-timeline-time">{continues ? 'Sigue' : range.startTime}</div>
                         <div className="agenda-timeline-track">
                           <span className="agenda-timeline-marker" />
@@ -586,7 +1171,7 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
                   })}
                 </div>
               ) : allDayEvents.length === 0 ? (
-                <EmptyState title="Tu calendario está despejado" detail="Crea un evento para reservar un compromiso en este día." icon="◷" />
+                <EmptyState title="Tu calendario está despejado" detail="Crea un evento o programa una tarea para reservar tiempo en este día." icon="◷" />
               ) : null}
             </section>
           )}
@@ -596,6 +1181,17 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
               <div className="agenda-week-grid">
                 {weekDays.map((dateKey) => {
                   const dayEvents = eventsForDate(dateKey);
+                  const daySchedules = taskSchedulesForDate(dateKey);
+                  const dayItems = [
+                    ...dayEvents.map((item) => ({
+                      kind: 'event',
+                      item,
+                      sortAt: item.temporal_kind === 'all_day'
+                        ? Date.parse(item.start_date + 'T00:00:00.000Z')
+                        : Date.parse(item.starts_at),
+                    })),
+                    ...daySchedules.map((item) => ({ kind: 'task_schedule', item, sortAt: Date.parse(item.starts_at) })),
+                  ].sort((left, right) => left.sortAt - right.sortAt);
                   return (
                     <article className={'agenda-week-day' + (dateKey === today ? ' is-today' : '') + (dateKey === activeDate ? ' is-selected' : '')} key={dateKey}>
                       <button type="button" className="agenda-week-day-heading" onClick={() => { setSelectedDate(dateKey); setView('day'); }}>
@@ -603,9 +1199,11 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
                         <strong>{Number(dateKey.slice(8, 10))}</strong>
                       </button>
                       <div className="agenda-week-events">
-                        {dayEvents.slice(0, 6).map((item) => <EventChip key={item.id} event={item} timeZone={timeZone} onClick={openEventDetail} compact />)}
-                        {dayEvents.length > 6 && <span className="agenda-more-events">+{dayEvents.length - 6} más</span>}
-                        {!dayEvents.length && <span className="agenda-week-empty">—</span>}
+                        {dayItems.slice(0, 6).map(({ kind, item }) => kind === 'event'
+                          ? <EventChip key={'event:' + item.id} event={item} timeZone={timeZone} onClick={openEventDetail} compact />
+                          : <TaskScheduleChip key={'task-schedule:' + item.id} schedule={item} task={scheduledTaskById.get(item.task_id)} compact />)}
+                        {dayItems.length > 6 && <span className="agenda-more-events">+{dayItems.length - 6} más</span>}
+                        {!dayItems.length && <span className="agenda-week-empty">—</span>}
                       </div>
                     </article>
                   );
@@ -620,13 +1218,26 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
               <div className="agenda-month-grid">
                 {monthDays.map((dateKey) => {
                   const dayEvents = eventsForDate(dateKey);
+                  const daySchedules = taskSchedulesForDate(dateKey);
+                  const dayItems = [
+                    ...dayEvents.map((item) => ({
+                      kind: 'event',
+                      item,
+                      sortAt: item.temporal_kind === 'all_day'
+                        ? Date.parse(item.start_date + 'T00:00:00.000Z')
+                        : Date.parse(item.starts_at),
+                    })),
+                    ...daySchedules.map((item) => ({ kind: 'task_schedule', item, sortAt: Date.parse(item.starts_at) })),
+                  ].sort((left, right) => left.sortAt - right.sortAt);
                   const inMonth = dateKey.slice(0, 7) === activeDate.slice(0, 7);
                   return (
                     <article className={'agenda-month-day' + (!inMonth ? ' is-outside' : '') + (dateKey === today ? ' is-today' : '') + (dateKey === activeDate ? ' is-selected' : '')} key={dateKey}>
                       <button type="button" className="agenda-month-date" onClick={() => { setSelectedDate(dateKey); setView('day'); }}>{Number(dateKey.slice(8, 10))}</button>
                       <div className="agenda-month-events">
-                        {dayEvents.slice(0, 3).map((item) => <EventChip key={item.id} event={item} timeZone={timeZone} onClick={openEventDetail} compact />)}
-                        {dayEvents.length > 3 && <span className="agenda-more-events">+{dayEvents.length - 3}</span>}
+                        {dayItems.slice(0, 3).map(({ kind, item }) => kind === 'event'
+                          ? <EventChip key={'event:' + item.id} event={item} timeZone={timeZone} onClick={openEventDetail} compact />
+                          : <TaskScheduleChip key={'task-schedule:' + item.id} schedule={item} task={scheduledTaskById.get(item.task_id)} compact />)}
+                        {dayItems.length > 3 && <span className="agenda-more-events">+{dayItems.length - 3}</span>}
                       </div>
                     </article>
                   );
@@ -641,7 +1252,7 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
         <div className="agenda-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeComposer(); }}>
           <section className="agenda-dialog" role="dialog" aria-modal="true" aria-labelledby="agenda-create-title">
             <header className="agenda-dialog-header">
-              <div><span className="agenda-section-kicker">{editingEvent ? 'EDITAR COMPROMISO' : 'NUEVO COMPROMISO'}</span><h2 id="agenda-create-title">{editingEvent ? 'Editar evento' : 'Crear evento'}</h2></div>
+              <div><span className="agenda-section-kicker">{seriesEditScope ? 'EDITAR SERIE RECURRENTE' : editingEvent ? 'EDITAR COMPROMISO' : 'NUEVO COMPROMISO'}</span><h2 id="agenda-create-title">{seriesEditScope ? 'Editar serie recurrente' : editingEvent ? 'Editar evento' : 'Crear evento'}</h2></div>
               <button type="button" className="agenda-close-button" aria-label="Cerrar" onClick={closeComposer} disabled={busy}>×</button>
             </header>
             <form className="agenda-form" onSubmit={submitEvent}>
@@ -669,13 +1280,25 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
               </div>
               {temporalKind === 'all_day' ? (
                 <div className="agenda-form-row">
-                  <label className="agenda-field"><span>Desde</span><input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} required /></label>
+                  <label className="agenda-field"><span>Desde</span><input type="date" value={startDate} onChange={(event) => {
+                    const nextDate = event.target.value;
+                    setStartDate(nextDate);
+                    if (recurrenceFrequency === 'WEEKLY' && !recurrenceWeekdaysTouched && nextDate) {
+                      setRecurrenceWeekdays([isoWeekdayForDate(nextDate)]);
+                    }
+                  }} required /></label>
                   <label className="agenda-field"><span>Hasta (incluido)</span><input type="date" value={endDate} min={startDate} onChange={(event) => setEndDate(event.target.value)} required /></label>
                 </div>
               ) : temporalKind === 'zoned_civil' ? (
                 <>
                   <div className="agenda-form-row">
-                    <label className="agenda-field"><span>Comienza</span><input type="datetime-local" step="0.001" value={startLocalDateTime} onChange={(event) => setStartLocalDateTime(event.target.value)} required /></label>
+                    <label className="agenda-field"><span>Comienza</span><input type="datetime-local" step="0.001" value={startLocalDateTime} onChange={(event) => {
+                      const nextValue = event.target.value;
+                      setStartLocalDateTime(nextValue);
+                      if (recurrenceFrequency === 'WEEKLY' && !recurrenceWeekdaysTouched && nextValue) {
+                        setRecurrenceWeekdays([isoWeekdayForDate(nextValue.slice(0, 10))]);
+                      }
+                    }} required /></label>
                     <label className="agenda-field"><span>Termina</span><input type="datetime-local" step="0.001" value={endLocalDateTime} onChange={(event) => setEndLocalDateTime(event.target.value)} required /></label>
                   </div>
                   <label className="agenda-field agenda-field-full">
@@ -711,9 +1334,79 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
                 <span>Descripción (opcional)</span>
                 <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={3} maxLength={5000} placeholder="Detalles útiles para este compromiso…" />
               </label>
+              {(!editingEvent || seriesEditScope) && temporalKind !== 'fixed_instant' && (
+                <section className="agenda-recurrence-form" aria-label="Repetición del evento">
+                  <label className="agenda-field">
+                    <span>Repetición</span>
+                    <select
+                      value={recurrenceFrequency}
+                      onChange={(event) => {
+                        const next = event.target.value;
+                        setRecurrenceFrequency(next);
+                        if (next === 'WEEKLY' && recurrenceWeekdays.length === 0) {
+                          setRecurrenceWeekdays([isoWeekdayForDate(temporalKind === 'all_day' ? startDate : startLocalDateTime.slice(0, 10))]);
+                        }
+                      }}
+                    >
+                      <option value="none">No se repite</option>
+                      <option value="DAILY">Cada día</option>
+                      <option value="WEEKLY">Cada semana</option>
+                      <option value="MONTHLY">Cada mes</option>
+                      <option value="YEARLY">Cada año</option>
+                    </select>
+                  </label>
+                  {recurrenceFrequency !== 'none' && (
+                    <>
+                      <div className="agenda-form-row">
+                        <label className="agenda-field">
+                          <span>Cada</span>
+                          <input type="number" min="1" max="1000" value={recurrenceInterval}
+                            onChange={(event) => setRecurrenceInterval(event.target.value)} required />
+                        </label>
+                        <label className="agenda-field">
+                          <span>Ocurrencias</span>
+                          <input type="number" min="1" max="100000" value={recurrenceCount}
+                            onChange={(event) => setRecurrenceCount(event.target.value)} required />
+                        </label>
+                      </div>
+                      {recurrenceFrequency === 'WEEKLY' && (
+                        <fieldset className="agenda-recurrence-weekdays">
+                          <legend>Días de la semana</legend>
+                          <div>
+                            {ISO_WEEKDAY_OPTIONS.map((day) => (
+                              <label key={day.code} title={day.label}>
+                                <input
+                                  type="checkbox"
+                                  checked={recurrenceWeekdays.includes(day.code)}
+                                  onChange={(event) => {
+                                    setRecurrenceWeekdaysTouched(true);
+                                    setRecurrenceWeekdays((current) => event.target.checked
+                                      ? [...current, day.code]
+                                      : current.filter((value) => value !== day.code));
+                                  }}
+                                />
+                                <span>{day.label}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </fieldset>
+                      )}
+                      <p className="agenda-recurrence-note">
+                        Se guardarán las ocurrencias de los próximos 90 días. La hora final y el día de finalización se conservan como horas civiles; los cruces con Tiempo Protegido o tareas reservadas detienen la creación para evitar solapamientos silenciosos.
+                      </p>
+                    </>
+                  )}
+                </section>
+              )}
               <footer className="agenda-dialog-actions">
                 <button type="button" className="agenda-secondary-button" onClick={closeComposer} disabled={busy}>Cancelar</button>
-                <button type="submit" className="button button-primary" disabled={busy || !title.trim()}>{busy ? 'Guardando…' : editingEvent ? 'Guardar cambios' : 'Guardar evento'}</button>
+                <button
+                  type="submit"
+                  className="button button-primary"
+                  disabled={busy || !title.trim() || (recurrenceFrequency === 'WEEKLY' && recurrenceWeekdays.length === 0)}
+                >
+                  {busy ? 'Guardando…' : seriesEditScope ? 'Guardar cambios de la serie' : editingEvent ? 'Guardar cambios' : recurrenceFrequency !== 'none' ? 'Crear serie recurrente' : 'Guardar evento'}
+                </button>
               </footer>
             </form>
           </section>
@@ -729,13 +1422,94 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
             </header>
             <div className="agenda-detail-content">
               <div><span>Fecha y hora</span><strong>{getEventDateLabel(selectedEvent, timeZone)}</strong><small>{formatEventTime(selectedEvent, timeZone)}{selectedEvent.time_zone ? ' · ' + selectedEvent.time_zone : ''}</small></div>
+              {selectedEvent.is_recurring_occurrence && (
+                <div>
+                  <span>Ocurrencia recurrente</span>
+                  <strong>{selectedEvent.occurrence_status === 'needs_review' ? 'Requiere revisión de horario' : 'Parte de una serie'}</strong>
+                  <small>La hora de esta ocurrencia proviene de la regla de la serie y de su resolución horaria guardada.</small>
+                </div>
+              )}
               {selectedEvent.location_label && <div><span>Lugar</span><strong>{selectedEvent.location_label}</strong></div>}
               {selectedEvent.description && <div><span>Descripción</span><p>{selectedEvent.description}</p></div>}
               {selectedEvent.deleted_at && selectedEvent.purge_after && (
                 <div><span>Recuperación hasta</span><strong>{new Intl.DateTimeFormat('es', { dateStyle: 'medium', timeStyle: 'short', timeZone }).format(new Date(selectedEvent.purge_after))}</strong></div>
               )}
             </div>
+            {selectedEvent.is_recurring_occurrence && occurrenceMutationMode && (
+              <form
+                className="agenda-occurrence-editor"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void mutateSelectedOccurrence(occurrenceMutationMode);
+                }}
+              >
+                <h3>{occurrenceMutationMode === 'move' ? 'Mover esta ocurrencia' : 'Modificar esta ocurrencia'}</h3>
+                {selectedEvent.temporal_kind === 'all_day' ? (
+                  <label>
+                    {occurrenceMutationMode === 'move' ? 'Nueva fecha de inicio' : 'Nueva fecha final exclusiva'}
+                    <input
+                      type="date"
+                      value={occurrenceDateValue}
+                      onChange={(event) => setOccurrenceDateValue(event.target.value)}
+                      required
+                    />
+                  </label>
+                ) : occurrenceMutationMode === 'move' ? (
+                  <label>
+                    Nueva fecha y hora de inicio
+                    <input
+                      type="datetime-local"
+                      step="0.001"
+                      value={occurrenceDateValue}
+                      onChange={(event) => setOccurrenceDateValue(event.target.value)}
+                      required
+                    />
+                  </label>
+                ) : (
+                  <label>
+                    Nueva fecha y hora de finalización
+                    <input
+                      type="datetime-local"
+                      step="0.001"
+                      value={occurrenceEndValue}
+                      onChange={(event) => setOccurrenceEndValue(event.target.value)}
+                      required
+                    />
+                  </label>
+                )}
+                <p className="agenda-recurrence-note">
+                  El cambio afecta solo esta fecha; no modifica la regla ni las demás ocurrencias. Los conflictos con Tiempo Protegido o tareas reservadas bloquean el guardado.
+                </p>
+                <div className="agenda-dialog-actions">
+                  <button type="button" className="agenda-secondary-button" onClick={() => setOccurrenceMutationMode(null)} disabled={busy}>Volver</button>
+                  <button type="submit" className="button button-primary" disabled={busy || !occurrenceDateValue}>
+                    {busy ? 'Guardando…' : 'Guardar esta fecha'}
+                  </button>
+                </div>
+              </form>
+            )}
             <div className="agenda-event-actions">
+              {selectedEvent.is_recurring_occurrence ? (
+                <>
+                  <p className="agenda-recurrence-note">
+                    Puedes cambiar esta fecha de forma aislada o actualizar la regla desde aquí. Las ediciones de serie conservan el historial anterior y bloquean los conflictos de horario.
+                  </p>
+                  {selectedEvent.occurrence_status === 'scheduled' && selectedEvent.override_kind == null && (
+                    <>
+                      <button type="button" className="agenda-secondary-button" onClick={() => openRecurringSeriesComposer(selectedEvent, 'this_and_following')} disabled={busy}>Editar esta y las siguientes</button>
+                      <button type="button" className="agenda-secondary-button" onClick={() => openRecurringSeriesComposer(selectedEvent, 'entire_series')} disabled={busy}>Editar toda la serie</button>
+                    </>
+                  )}
+                  {['scheduled', 'needs_review'].includes(selectedEvent.occurrence_status) && !occurrenceMutationMode && (
+                    <>
+                      <button type="button" className="agenda-secondary-button" onClick={() => openOccurrenceEditor('move')} disabled={busy}>Mover esta fecha</button>
+                      <button type="button" className="agenda-secondary-button" onClick={() => openOccurrenceEditor('modify')} disabled={busy}>Modificar duración</button>
+                      <button type="button" className="agenda-secondary-button agenda-action-warning" onClick={requestOccurrenceCancellation} disabled={busy}>Cancelar esta fecha</button>
+                    </>
+                  )}
+                </>
+              ) : (
+                <>
               {canEditEvent(selectedEvent) && (
                 <button type="button" className="agenda-secondary-button" onClick={() => openEditComposer(selectedEvent)} disabled={busy}>Editar</button>
               )}
@@ -759,6 +1533,8 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
               )}
               {selectedEvent.deleted_at && !canRestoreEvent(selectedEvent) && (
                 <p className="agenda-expired-notice">La ventana de recuperación de 30 días ha vencido.</p>
+              )}
+                </>
               )}
             </div>
             <footer className="agenda-dialog-actions"><button type="button" className="agenda-secondary-button" onClick={() => { setSelectedEvent(null); setConfirmAction(null); setPendingKey(null); }}>Cerrar</button></footer>
@@ -858,6 +1634,85 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
           </section>
         </div>
       )}
+      {taskScheduleConflictPrompt && (
+        <div className="agenda-dialog-backdrop agenda-conflict-backdrop" role="presentation">
+          <section className="agenda-dialog agenda-conflict-dialog" role="alertdialog" aria-modal="true" aria-labelledby="agenda-task-schedule-conflict-title">
+            <header className="agenda-dialog-header">
+              <div>
+                <span className="agenda-section-kicker">RESERVAS DE TAREAS</span>
+                <h2 id="agenda-task-schedule-conflict-title">El evento coincide con tiempo reservado</h2>
+              </div>
+              <button type="button" className="agenda-close-button" aria-label="Cerrar" onClick={closeTaskScheduleConflictPrompt} disabled={busy}>×</button>
+            </header>
+            {taskScheduleConflictPrompt.error === 'TASK_SCHEDULE_CONFLICTS_CHANGED' && taskScheduleConflictItems.length === 0 ? (
+              <p className="agenda-confirm-copy">
+                Las reservas de tareas cambiaron durante el guardado. Ningún evento fue creado ni modificado.
+                Vuelve al evento y guarda de nuevo para revisar el estado actual.
+              </p>
+            ) : (
+              <>
+                <p className="agenda-confirm-copy">
+                  {taskScheduleConflictPrompt.action === 'restore'
+                    ? <>El evento no se restauró. Para reactivarlo, confirma cada cruce; ninguna reserva existente se moverá ni modificará.</>
+                    : taskScheduleConflictPrompt.action === 'reopen'
+                      ? <>El evento no se reabrió. Para reactivarlo, confirma cada cruce; ninguna reserva existente se moverá ni modificará.</>
+                      : <>El evento no se guardó. Para conservar el horario, confirma cada cruce. La reserva existente no se moverá ni modificará.</>}
+                </p>
+                <div className="agenda-conflict-list">
+                  {taskScheduleConflictItems.map((conflict) => (
+                    <article className="agenda-conflict-card" key={conflict.taskScheduleId}>
+                      <div className="agenda-conflict-card-heading">
+                        <div>
+                          <strong>Reserva de tarea</strong>
+                          <small>{conflict.timeZone || timeZone}</small>
+                        </div>
+                        <span className="protected-time-mode is-flexible">Activa</span>
+                      </div>
+                      <p>
+                        Reserva: {formatInstantInTimeZone(conflict.startsAt, conflict.timeZone || timeZone)}
+                        {' — '}
+                        {formatInstantInTimeZone(conflict.endsAt, conflict.timeZone || timeZone)}
+                        {' · Cruce: '}
+                        {formatInstantInTimeZone(conflict.overlapStartsAt, conflict.timeZone || timeZone)}
+                        {' — '}
+                        {formatInstantInTimeZone(conflict.overlapEndsAt, conflict.timeZone || timeZone)}
+                      </p>
+                      <label className="agenda-field">
+                        <span>Tu decisión</span>
+                        <select
+                          aria-label="Decisión para reserva de tarea"
+                          value={taskScheduleConflictChoices[conflict.taskScheduleId] || ''}
+                          onChange={(event) => setTaskScheduleConflictChoices((current) => ({
+                            ...current,
+                            [conflict.taskScheduleId]: event.target.value,
+                          }))}
+                          disabled={busy}
+                        >
+                          <option value="">Selecciona una decisión</option>
+                          <option value="keep_overlap">Mantener ambos compromisos</option>
+                        </select>
+                      </label>
+                    </article>
+                  ))}
+                </div>
+              </>
+            )}
+            <footer className="agenda-dialog-actions">
+              <button type="button" className="agenda-secondary-button" onClick={closeTaskScheduleConflictPrompt} disabled={busy}>
+                Volver al evento
+              </button>
+              <button
+                type="button"
+                className="button button-primary"
+                onClick={saveWithTaskScheduleDecisions}
+                disabled={busy || !taskScheduleConflictDecisionsReady}
+              >
+                {busy ? 'Guardando…' : 'Guardar y mantener ambos'}
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
       {selectedEvent && confirmAction && (
         <div className="agenda-dialog-backdrop agenda-confirm-backdrop" role="presentation">
           <section className="agenda-dialog agenda-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="agenda-confirm-title">
@@ -868,7 +1723,14 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
             <p className="agenda-confirm-copy">{confirmDetails[confirmAction]?.description}</p>
             <footer className="agenda-dialog-actions">
               <button type="button" className="agenda-secondary-button" onClick={() => setConfirmAction(null)} disabled={busy}>Volver</button>
-              <button type="button" className="button button-primary" onClick={() => mutateSelectedEvent(confirmAction)} disabled={busy}>
+              <button
+                type="button"
+                className="button button-primary"
+                onClick={() => confirmAction === 'cancel_occurrence'
+                  ? mutateSelectedOccurrence('cancel')
+                  : mutateSelectedEvent(confirmAction)}
+                disabled={busy}
+              >
                 {busy ? 'Procesando…' : confirmDetails[confirmAction]?.button}
               </button>
             </footer>
@@ -888,13 +1750,18 @@ export function AgendaPage(props) {
         <button type="button" aria-pressed={panel === 'calendar'} onClick={() => setPanel('calendar')}>
           Calendario
         </button>
+        <button type="button" aria-pressed={panel === 'tasks'} onClick={() => setPanel('tasks')}>
+          Tareas programadas
+        </button>
         <button type="button" aria-pressed={panel === 'protected'} onClick={() => setPanel('protected')}>
           Tiempo protegido
         </button>
       </nav>
       {panel === 'calendar'
         ? <AgendaCalendarPage {...props} />
-        : <ProtectedTimePage {...props} />}
+        : panel === 'tasks'
+          ? <TaskSchedulePage {...props} />
+          : <ProtectedTimePage {...props} />}
     </div>
   );
 }

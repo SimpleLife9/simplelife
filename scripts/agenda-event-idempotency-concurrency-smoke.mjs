@@ -39,6 +39,12 @@ function eventRecord(eventId, title) {
     updated_at: "2026-11-22T18:00:00.000Z",
     protected_time_decisions: [],
     protected_time_snapshot: [],
+    task_schedule_conflict_decisions: [],
+    task_schedule_snapshot: [],
+    task_schedule_window: {
+      startsAt: "2026-11-23T05:00:00.000Z",
+      endsAt: "2026-11-24T05:00:00.000Z",
+    },
   };
 }
 

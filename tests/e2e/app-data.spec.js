@@ -48,8 +48,17 @@ async function mockSupabaseSession(page, initialData = {}) {
   const insertedTasks = [];
   const updatedTasks = [];
   const calendarEvents = [...(initialData.calendarEvents || [])];
+  const calendarEventOccurrences = [...(initialData.calendarEventOccurrences || [])];
+  const recurringEventRequests = [];
+  const recurringSeriesMutationRequests = [];
   const protectedTimeBlocks = [...(initialData.protectedTimeBlocks || [])];
   const protectedTimeMutationRequests = [];
+  const protectedTimeTaskScheduleConflictResponses = [...(initialData.protectedTimeTaskScheduleConflictResponses || [])];
+  const taskSchedules = [...(initialData.taskSchedules || [])];
+  const taskScheduleMutationRequests = [];
+  const taskScheduleConflictResponses = [...(initialData.taskScheduleConflictResponses || [])];
+  const eventTaskScheduleConflictResponses = [...(initialData.eventTaskScheduleConflictResponses || [])];
+  let pendingEventTaskScheduleConflicts = [];
   const protectedTimeConflicts = [...(initialData.protectedTimeConflicts || [])];
   const insertedAgendaEvents = [];
   const idempotencyRequests = [];
@@ -210,6 +219,13 @@ async function mockSupabaseSession(page, initialData = {}) {
       return;
     }
 
+    if (url.pathname === '/rest/v1/task_schedule' && method === 'GET') {
+      const ownerFilter = url.searchParams.get('owner_user_id') || '';
+      const rows = taskSchedules.filter((row) => !ownerFilter || ownerFilter === 'eq.' + row.owner_user_id);
+      await json(200, rows);
+      return;
+    }
+
     if (url.pathname === '/rest/v1/calendar_event' && method === 'GET') {
       const archivedFilter = url.searchParams.get('archived_at') || '';
       const deletedFilter = url.searchParams.get('deleted_at') || '';
@@ -222,6 +238,22 @@ async function mockSupabaseSession(page, initialData = {}) {
           : deletedFilter === 'is.null' ? row.deleted_at == null : true;
         return archivedMatch && deletedMatch;
       });
+      await json(200, rows);
+      return;
+    }
+
+    if (url.pathname === '/rest/v1/calendar_event_occurrence' && method === 'GET') {
+      const eventFilter = url.searchParams.get('calendar_event_id') || '';
+      const statusFilter = url.searchParams.get('occurrence_status') || '';
+      const ids = eventFilter.startsWith('in.(')
+        ? eventFilter.slice(4, -1).split(',')
+        : eventFilter.startsWith('eq.') ? [eventFilter.slice(3)] : [];
+      const statuses = statusFilter.startsWith('in.(')
+        ? statusFilter.slice(4, -1).split(',')
+        : statusFilter.startsWith('eq.') ? [statusFilter.slice(3)] : [];
+      const rows = calendarEventOccurrences.filter((row) =>
+        (!ids.length || ids.includes(row.calendar_event_id))
+        && (!statuses.length || statuses.includes(row.occurrence_status)));
       await json(200, rows);
       return;
     }
@@ -292,6 +324,7 @@ async function mockSupabaseSession(page, initialData = {}) {
 
     if (url.pathname === '/rest/v1/task' && method === 'GET') {
       const idFilter = url.searchParams.get('id') || '';
+      const includedIds = idFilter.startsWith('in.(') ? idFilter.slice(4, -1).split(',') : [];
       const statusFilter = url.searchParams.get('status') || '';
       const archivedFilter = url.searchParams.get('archived_at') || '';
       const deletedFilter = url.searchParams.get('deleted_at') || '';
@@ -303,7 +336,7 @@ async function mockSupabaseSession(page, initialData = {}) {
         ? statusFilter.slice(4, -1).split(',')
         : [];
       const rows = taskRows.filter((task) => !task.deleted_at
-        && (!idFilter || idFilter === 'eq.' + task.id)
+        && (!idFilter || idFilter === 'eq.' + task.id || includedIds.includes(task.id))
         && (!deletedFilter || deletedFilter !== 'is.null' || task.deleted_at == null)
         && (!archivedFilter || (archivedFilter === 'is.null' && task.archived_at == null) || (archivedFilter === 'not.is.null' && task.archived_at != null))
         && (!statusEquals || task.status === statusEquals)
@@ -613,6 +646,11 @@ async function mockSupabaseSession(page, initialData = {}) {
       const payload = request.postDataJSON();
       const key = request.headers()['idempotency-key'] || '';
       protectedTimeMutationRequests.push({ key, payload });
+      const queuedTaskScheduleConflict = protectedTimeTaskScheduleConflictResponses.shift();
+      if (queuedTaskScheduleConflict) {
+        await json(queuedTaskScheduleConflict.status || 409, queuedTaskScheduleConflict.body);
+        return;
+      }
       const now = new Date(Date.now() + protectedTimeMutationRequests.length * 3).toISOString();
       let row = payload.action === 'create'
         ? null
@@ -648,6 +686,7 @@ async function mockSupabaseSession(page, initialData = {}) {
           end_time_local: block.endLocalTime ?? null,
           ends_next_day: block.endsNextDay ?? null,
           resolver_metadata: { rulesSource: 'iana-tzdb', rulesVersion: '2026f', resolverVersion: 'agenda-iana-resolver-v1', authoritative: true },
+          task_schedule_conflict_decisions: payload.taskScheduleDecisions || [],
           archived_at: null,
           deleted_at: null,
           created_at: now,
@@ -677,12 +716,14 @@ async function mockSupabaseSession(page, initialData = {}) {
             start_time_local: block.startLocalTime ?? null,
             end_time_local: block.endLocalTime ?? null,
             ends_next_day: block.endsNextDay ?? null,
+            task_schedule_conflict_decisions: payload.taskScheduleDecisions || [],
           });
         } else if (payload.action === 'archive') {
           row.archived_at = now;
         } else if (payload.action === 'restore') {
           row.archived_at = null;
           row.deleted_at = null;
+          if (payload.taskScheduleDecisions) row.task_schedule_conflict_decisions = payload.taskScheduleDecisions;
         } else if (payload.action === 'delete') {
           row.archived_at = null;
           row.deleted_at = now;
@@ -692,6 +733,79 @@ async function mockSupabaseSession(page, initialData = {}) {
       }
       await json(payload.action === 'create' ? 201 : 200, {
         blockId: row.id, updatedAt: row.updated_at, lifecycle: row.deleted_at ? 'trash' : row.archived_at ? 'archived' : 'active', replayed: false,
+      });
+      return;
+    }
+
+    if (url.pathname === '/functions/v1/agenda-task-schedule-mutate' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const key = request.headers()['idempotency-key'] || '';
+      taskScheduleMutationRequests.push({ key, payload });
+      const queuedConflict = taskScheduleConflictResponses.shift();
+      if (queuedConflict) {
+        await json(queuedConflict.status || 409, queuedConflict.body);
+        return;
+      }
+      const now = new Date(Date.now() + taskScheduleMutationRequests.length * 3).toISOString();
+      let row = payload.action === 'create'
+        ? null
+        : taskSchedules.find((item) => item.id === payload.taskScheduleId && item.owner_user_id === profile.id);
+      if (payload.action !== 'create' && !row) {
+        await json(404, { error: 'TASK_SCHEDULE_NOT_FOUND' });
+        return;
+      }
+      if (payload.action !== 'create' && row.updated_at !== payload.expectedUpdatedAt) {
+        await json(409, { error: 'TASK_SCHEDULE_VERSION_CONFLICT' });
+        return;
+      }
+      if (payload.action === 'create') {
+        const schedule = payload.schedule;
+        const created = {
+          id: '019a0000-0000-7000-8000-000000000501',
+          owner_user_id: profile.id,
+          created_by_user_id: profile.id,
+          updated_by_user_id: profile.id,
+          task_id: payload.taskId,
+          schedule_status: 'proposed',
+          start_local: schedule.startLocalDateTime,
+          end_local: schedule.endLocalDateTime,
+          time_zone: schedule.timeZone,
+          starts_at: new Date(schedule.startLocalDateTime + ':00-05:00').toISOString(),
+          ends_at: new Date(schedule.endLocalDateTime + ':00-05:00').toISOString(),
+          start_disambiguation: schedule.startDisambiguation,
+          end_disambiguation: schedule.endDisambiguation,
+          start_gap_strategy: 'next-valid',
+          end_gap_strategy: 'next-valid',
+          resolver_metadata: { rulesSource: 'iana-tzdb', rulesVersion: '2026f', resolverVersion: 'agenda-iana-resolver-v1', authoritative: true },
+          conflict_decisions: [],
+          conflict_snapshot: [],
+          created_at: now,
+          updated_at: now,
+        };
+        taskSchedules.unshift(created);
+        await json(201, {
+          taskScheduleId: created.id, taskId: created.task_id,
+          scheduleStatus: created.schedule_status, updatedAt: created.updated_at,
+          startsAt: created.starts_at, endsAt: created.ends_at, replayed: false,
+        });
+        return;
+      }
+      if (payload.action === 'edit') {
+        Object.assign(row, {
+          start_local: payload.schedule.startLocalDateTime,
+          end_local: payload.schedule.endLocalDateTime,
+          starts_at: new Date(payload.schedule.startLocalDateTime + ':00-05:00').toISOString(),
+          ends_at: new Date(payload.schedule.endLocalDateTime + ':00-05:00').toISOString(),
+          time_zone: payload.schedule.timeZone,
+        });
+      } else if (payload.action === 'confirm') row.schedule_status = 'confirmed';
+      else if (payload.action === 'cancel') row.schedule_status = 'cancelled';
+      else if (payload.action === 'release') row.schedule_status = 'released';
+      else if (payload.action === 'elapsed') row.schedule_status = 'elapsed';
+      row.updated_at = now;
+      await json(200, {
+        taskScheduleId: row.id, taskId: row.task_id, scheduleStatus: row.schedule_status,
+        updatedAt: row.updated_at, startsAt: row.starts_at, endsAt: row.ends_at, replayed: false,
       });
       return;
     }
@@ -710,7 +824,7 @@ async function mockSupabaseSession(page, initialData = {}) {
         return;
       }
       const decisions = Array.isArray(payload.protectedTimeDecisions) ? payload.protectedTimeDecisions : [];
-      if (payload.action === 'edit' && protectedTimeConflicts.length) {
+      if (['edit', 'reopen', 'restore'].includes(payload.action) && protectedTimeConflicts.length) {
         const accepted = new Map(decisions.map((item) => [item.blockId + ':' + item.occurrenceStartsAt, item]));
         const complete = protectedTimeConflicts.every((conflict) => {
           const choice = accepted.get(conflict.conflictKey);
@@ -721,6 +835,25 @@ async function mockSupabaseSession(page, initialData = {}) {
           await json(409, { error: 'PROTECTED_TIME_CONFLICTS', conflicts: protectedTimeConflicts });
           return;
         }
+      }
+      const taskDecisions = Array.isArray(payload.taskScheduleDecisions) ? payload.taskScheduleDecisions : [];
+      const queuedTaskConflict = eventTaskScheduleConflictResponses.shift();
+      if (queuedTaskConflict) pendingEventTaskScheduleConflicts = queuedTaskConflict.body?.conflicts || [];
+      if (['edit', 'reopen', 'restore'].includes(payload.action) && pendingEventTaskScheduleConflicts.length) {
+        const acceptedTaskDecisions = new Map(taskDecisions.map((item) => [item.taskScheduleId, item]));
+        const allAccepted = pendingEventTaskScheduleConflicts.every((conflict) => {
+          const choice = acceptedTaskDecisions.get(conflict.taskScheduleId);
+          return choice && choice.taskScheduleUpdatedAt === conflict.taskScheduleUpdatedAt
+            && choice.decision === conflict.requiredDecision;
+        });
+        if (!allAccepted) {
+          await json(queuedTaskConflict?.status || 409, queuedTaskConflict?.body || {
+            error: 'TASK_SCHEDULE_CONFLICTS',
+            conflicts: pendingEventTaskScheduleConflicts,
+          });
+          return;
+        }
+        pendingEventTaskScheduleConflicts = [];
       }
       const updatedAt = new Date(Date.now() + mutationRequests.length * 2).toISOString();
       if (payload.action === 'edit') {
@@ -749,6 +882,7 @@ async function mockSupabaseSession(page, initialData = {}) {
           starts_at: event.startsAt ?? (unchangedZonedCivilRange ? row.starts_at : null),
           ends_at: event.endsAt ?? (unchangedZonedCivilRange ? row.ends_at : null),
           protected_time_decisions: decisions,
+          task_schedule_conflict_decisions: taskDecisions,
         });
       } else if (payload.action === 'cancel') {
         row.event_status = 'cancelled';
@@ -767,6 +901,10 @@ async function mockSupabaseSession(page, initialData = {}) {
         row.deleted_at = null;
         row.purge_after = null;
       }
+      if (['reopen', 'restore'].includes(payload.action)) {
+        row.protected_time_decisions = decisions;
+        row.task_schedule_conflict_decisions = taskDecisions;
+      }
       row.updated_at = updatedAt;
       row.updated_by_user_id = profile.id;
       await json(200, {
@@ -782,12 +920,298 @@ async function mockSupabaseSession(page, initialData = {}) {
       return;
     }
 
+    if (url.pathname === '/functions/v1/agenda-event-series-materialize' && method === 'POST') {
+      const payload = request.postDataJSON();
+      await json(200, {
+        processedSeriesCount: Array.isArray(payload.seriesIds) ? payload.seriesIds.length : 0,
+        materializedCount: 0,
+        horizonDays: 90,
+      });
+      return;
+    }
+
+    if (url.pathname === '/functions/v1/agenda-event-occurrence-mutate' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const row = calendarEventOccurrences.find((item) =>
+        item.id === payload.occurrenceId && item.owner_user_id === profile.id);
+      if (!row) {
+        await json(404, { error: 'OCCURRENCE_NOT_FOUND' });
+        return;
+      }
+      if (Number(row.row_version) !== Number(payload.expectedRowVersion)) {
+        await json(409, { error: 'OCCURRENCE_VERSION_CONFLICT', rowVersion: row.row_version });
+        return;
+      }
+      if (payload.action === 'cancel') {
+        row.occurrence_status = 'cancelled';
+        row.override_kind = 'cancelled';
+      } else if (payload.action === 'move') {
+        row.actual_local_date = payload.actualLocalDate;
+        if (row.temporal_kind === 'all_day') {
+          const [year, month, day] = payload.actualLocalDate.split('-').map(Number);
+          row.start_date = payload.actualLocalDate;
+          row.end_date_exclusive = new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
+        }
+        row.override_kind = 'moved';
+      } else if (payload.action === 'modify') {
+        if (row.temporal_kind === 'all_day') row.end_date_exclusive = payload.endDateExclusive;
+        row.override_kind = 'modified';
+      }
+      row.occurrence_status = payload.action === 'cancel' ? 'cancelled' : 'scheduled';
+      row.review_candidate = null;
+      row.row_version = Number(row.row_version || 1) + 1;
+      row.updated_at = new Date().toISOString();
+      await json(200, {
+        occurrenceId: row.id,
+        seriesEventId: row.calendar_event_id,
+        occurrenceStatus: row.occurrence_status,
+        overrideKind: row.override_kind,
+        rowVersion: row.row_version,
+        updatedAt: row.updated_at,
+        replayed: false,
+      });
+      return;
+    }
+
+    if (url.pathname === '/functions/v1/agenda-event-series-mutate' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const key = request.headers()['idempotency-key'] || '';
+      const series = calendarEvents.find((row) => row.id === payload.seriesId && row.owner_user_id === profile.id);
+      const selected = calendarEventOccurrences.find((row) =>
+        row.id === payload.selectedOccurrenceId
+        && row.calendar_event_id === payload.seriesId
+        && row.owner_user_id === profile.id);
+      if (!series || !selected) {
+        await json(404, { error: 'SERIES_OR_OCCURRENCE_NOT_FOUND' });
+        return;
+      }
+      if (series.updated_at !== payload.expectedUpdatedAt) {
+        await json(409, { error: 'RECURRING_SERIES_VERSION_CONFLICT' });
+        return;
+      }
+      if (selected.occurrence_status !== 'scheduled' || selected.override_kind != null) {
+        await json(409, { error: 'SELECTED_OCCURRENCE_NOT_EDITABLE' });
+        return;
+      }
+      if (!['entire_series', 'this_and_following'].includes(payload.scope)) {
+        await json(422, { error: 'INVALID_SERIES_EDIT_SCOPE' });
+        return;
+      }
+      recurringSeriesMutationRequests.push({ key, payload });
+      const updatedAt = new Date().toISOString();
+      const event = payload.event;
+      const recurrenceRule = payload.recurrenceRule;
+      let childSeriesEventId = null;
+      let materializedCount = 0;
+      if (payload.scope === 'entire_series') {
+        Object.assign(series, {
+          title: event.title,
+          description: event.description ?? null,
+          location_label: event.locationLabel ?? null,
+          location_kind: event.locationKind ?? null,
+          event_status: event.eventStatus,
+          temporal_kind: event.temporalKind,
+          start_date: event.startDate ?? null,
+          end_date_exclusive: event.endDateExclusive ?? null,
+          start_local: event.startLocalDateTime ?? null,
+          end_local: event.endLocalDateTime ?? null,
+          time_zone: event.timeZone ?? null,
+          recurrence_rule: recurrenceRule,
+          recurrence_end_local_time: payload.endLocalTime ?? null,
+          recurrence_end_day_offset: Number(payload.endDayOffset ?? 0),
+          updated_at: updatedAt,
+        });
+      } else {
+        series.recurrence_effective_through = selected.original_local_date;
+        series.updated_at = updatedAt;
+        calendarEventOccurrences.forEach((row) => {
+          if (row.calendar_event_id === series.id
+            && row.owner_user_id === profile.id
+            && row.original_local_date > selected.original_local_date
+            && row.occurrence_status === 'scheduled'
+            && row.override_kind == null
+            && row.review_candidate == null) {
+            row.occurrence_status = 'superseded';
+          }
+        });
+        childSeriesEventId = '019a0000-0000-7000-8000-000000009399';
+        const childRule = {
+          ...recurrenceRule,
+          excludedDates: [selected.original_local_date],
+        };
+        const child = {
+          ...series,
+          id: childSeriesEventId,
+          title: event.title,
+          description: event.description ?? null,
+          location_label: event.locationLabel ?? null,
+          location_kind: event.locationKind ?? null,
+          event_status: event.eventStatus,
+          temporal_kind: event.temporalKind,
+          start_date: event.startDate ?? null,
+          end_date_exclusive: event.endDateExclusive ?? null,
+          start_local: event.startLocalDateTime ?? null,
+          end_local: event.endLocalDateTime ?? null,
+          time_zone: event.timeZone ?? null,
+          recurrence_rule: childRule,
+          recurrence_end_local_time: payload.endLocalTime ?? null,
+          recurrence_end_day_offset: Number(payload.endDayOffset ?? 0),
+          recurrence_effective_from: selected.original_local_date,
+          recurrence_effective_through: null,
+          recurrence_parent_event_id: series.id,
+          recurrence_inherited_occurrence_id: selected.id,
+          created_at: updatedAt,
+          updated_at: updatedAt,
+        };
+        calendarEvents.unshift(child);
+        const [year, month, day] = selected.original_local_date.split('-').map(Number);
+        const count = Math.min(Number(recurrenceRule.count || 1), 20);
+        for (let index = 1; index < count; index += 1) {
+          const interval = Number(recurrenceRule.interval || 1);
+          const date = new Date(Date.UTC(year, month - 1, day + index * interval)).toISOString().slice(0, 10);
+          const [slotYear, slotMonth, slotDay] = date.split('-').map(Number);
+          const endExclusive = new Date(Date.UTC(slotYear, slotMonth - 1, slotDay + Number(payload.endDayOffset ?? 0) + 1)).toISOString().slice(0, 10);
+          const occurrenceId = '019a0000-0000-7000-8000-' + String(9400 + index).padStart(12, '0');
+          calendarEventOccurrences.push({
+            id: occurrenceId,
+            owner_user_id: profile.id,
+            created_by_user_id: profile.id,
+            updated_by_user_id: profile.id,
+            calendar_event_id: childSeriesEventId,
+            occurrence_key: 'v1:' + childSeriesEventId + ':' + date + ':ALL_DAY',
+            original_local_date: date,
+            original_local_time: null,
+            actual_local_date: date,
+            actual_local_time: null,
+            temporal_kind: 'all_day',
+            start_date: date,
+            end_date_exclusive: endExclusive,
+            start_local: null,
+            end_local: null,
+            time_zone: null,
+            starts_at: null,
+            ends_at: null,
+            occurrence_status: 'scheduled',
+            override_kind: null,
+            review_candidate: null,
+            row_version: 1,
+            created_at: updatedAt,
+            updated_at: updatedAt,
+          });
+          materializedCount += 1;
+        }
+      }
+      await json(200, {
+        seriesEventId: series.id,
+        scope: payload.scope,
+        childSeriesEventId,
+        selectedOccurrenceId: selected.id,
+        materializedCount,
+        supersededCount: 0,
+        updatedAt,
+        replayed: false,
+      });
+      return;
+    }
+
+    if (url.pathname === '/functions/v1/agenda-event-series-create' && method === 'POST') {
+      const requestBody = request.postDataJSON();
+      const event = requestBody.event;
+      const recurrenceRule = requestBody.recurrenceRule;
+      const endDayOffset = Number(requestBody.endDayOffset ?? 0);
+      const key = request.headers()['idempotency-key'] || '';
+      recurringEventRequests.push({ key, event, recurrenceRule, endDayOffset, endLocalTime: requestBody.endLocalTime ?? null });
+      const seriesId = '019a0000-0000-7000-8000-000000009301';
+      const series = {
+        id: seriesId,
+        owner_user_id: profile.id,
+        created_by_user_id: profile.id,
+        updated_by_user_id: profile.id,
+        title: event.title,
+        description: event.description ?? null,
+        location_label: event.locationLabel ?? null,
+        location_kind: event.locationKind ?? null,
+        event_status: event.eventStatus || 'confirmed',
+        temporal_kind: event.temporalKind,
+        start_date: event.startDate ?? null,
+        end_date_exclusive: event.endDateExclusive ?? null,
+        start_local: event.startLocalDateTime ?? null,
+        end_local: event.endLocalDateTime ?? null,
+        time_zone: event.timeZone ?? null,
+        starts_at: null,
+        ends_at: null,
+        recurrence_rule: recurrenceRule,
+        recurrence_end_local_time: requestBody.endLocalTime ?? null,
+        recurrence_end_day_offset: endDayOffset,
+        archived_at: null,
+        deleted_at: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      const startDate = recurrenceRule.startDate;
+      const dateFromOffset = (date, offset) => {
+        const [year, month, day] = date.split('-').map(Number);
+        return new Date(Date.UTC(year, month - 1, day + offset)).toISOString().slice(0, 10);
+      };
+      const count = Math.min(Number(recurrenceRule.count || 1), 20);
+      const generated = [];
+      for (let index = 0; index < count; index += 1) {
+        const offset = recurrenceRule.frequency === 'DAILY'
+          ? index * Number(recurrenceRule.interval || 1)
+          : index;
+        const occurrenceDate = dateFromOffset(startDate, offset);
+        const endExclusive = dateFromOffset(occurrenceDate, endDayOffset + 1);
+        generated.push({
+          id: '019a0000-0000-7000-8000-' + String(9302 + index).padStart(12, '0'),
+          owner_user_id: profile.id,
+          created_by_user_id: profile.id,
+          updated_by_user_id: profile.id,
+          calendar_event_id: seriesId,
+          occurrence_key: 'v1:' + seriesId + ':' + occurrenceDate + ':ALL_DAY',
+          original_local_date: occurrenceDate,
+          original_local_time: null,
+          actual_local_date: occurrenceDate,
+          actual_local_time: null,
+          temporal_kind: 'all_day',
+          start_date: occurrenceDate,
+          end_date_exclusive: endExclusive,
+          start_local: null,
+          end_local: null,
+          time_zone: null,
+          starts_at: null,
+          ends_at: null,
+          occurrence_status: 'scheduled',
+          override_kind: null,
+          review_candidate: null,
+          row_version: 1,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+      }
+      calendarEvents.unshift(series);
+      calendarEventOccurrences.push(...generated);
+      await json(201, {
+        seriesEventId: seriesId,
+        materializedCount: generated.length,
+        horizonStart: generated[0]?.original_local_date ?? null,
+        horizonEnd: generated.at(-1)?.original_local_date ?? null,
+        replayed: false,
+      });
+      return;
+    }
+
     if (url.pathname === '/functions/v1/agenda-event-create' && method === 'POST') {
       const requestBody = request.postDataJSON();
       const event = requestBody.event;
       const key = request.headers()['idempotency-key'] || '';
       const decisions = Array.isArray(requestBody.protectedTimeDecisions) ? requestBody.protectedTimeDecisions : [];
-      idempotencyRequests.push({ key, event, protectedTimeDecisions: decisions });
+      const taskDecisions = Array.isArray(requestBody.taskScheduleDecisions) ? requestBody.taskScheduleDecisions : [];
+      idempotencyRequests.push({
+        key,
+        event,
+        protectedTimeDecisions: decisions,
+        taskScheduleDecisions: taskDecisions,
+      });
       const accepted = new Map(decisions.map((item) => [
         item.blockId + ':' + item.occurrenceStartsAt,
         item,
@@ -802,6 +1226,30 @@ async function mockSupabaseSession(page, initialData = {}) {
         await json(409, { error: 'PROTECTED_TIME_CONFLICTS', conflicts: protectedTimeConflicts });
         return;
       }
+      const queuedTaskConflict = eventTaskScheduleConflictResponses.shift();
+      if (queuedTaskConflict) {
+        pendingEventTaskScheduleConflicts = queuedTaskConflict.body?.conflicts || [];
+      }
+      let taskScheduleConflictsForCommit = [];
+      if (pendingEventTaskScheduleConflicts.length) {
+        const acceptedTaskDecisions = new Map(taskDecisions.map((item) => [item.taskScheduleId, item]));
+        const allAccepted = pendingEventTaskScheduleConflicts.every((conflict) => {
+          const choice = acceptedTaskDecisions.get(conflict.taskScheduleId);
+          return choice
+            && choice.taskScheduleUpdatedAt === conflict.taskScheduleUpdatedAt
+            && choice.decision === conflict.requiredDecision;
+        });
+        if (!allAccepted) {
+          const responseBody = queuedTaskConflict?.body || {
+            error: 'TASK_SCHEDULE_CONFLICTS',
+            conflicts: pendingEventTaskScheduleConflicts,
+          };
+          await json(queuedTaskConflict?.status || 409, responseBody);
+          return;
+        }
+        taskScheduleConflictsForCommit = [...pendingEventTaskScheduleConflicts];
+      }
+      pendingEventTaskScheduleConflicts = [];
       const createdAt = '2026-11-22T18:00:00.000Z';
       const row = {
         id: '0190f47a-7b2c-7abc-8def-0123456789be',
@@ -822,6 +1270,17 @@ async function mockSupabaseSession(page, initialData = {}) {
         starts_at: event.startsAt ?? null,
         ends_at: event.endsAt ?? null,
         protected_time_decisions: decisions,
+        task_schedule_conflict_decisions: taskScheduleConflictsForCommit.map((conflict) => ({
+          policyVersion: 'event-task-schedule-decision-v1',
+          taskScheduleId: conflict.taskScheduleId,
+          taskScheduleUpdatedAt: conflict.taskScheduleUpdatedAt,
+          startsAt: conflict.startsAt,
+          endsAt: conflict.endsAt,
+          overlapStartsAt: conflict.overlapStartsAt,
+          overlapEndsAt: conflict.overlapEndsAt,
+          decision: 'keep_overlap',
+          consentedAt: new Date().toISOString(),
+        })),
         archived_at: null,
         deleted_at: null,
         created_at: createdAt,
@@ -841,7 +1300,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     await json(404, { message: `Unexpected mocked Supabase request: ${method} ${url.pathname}` });
   });
 
-  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, protectedTimeBlocks, protectedTimeMutationRequests, protectedTimeConflicts, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
+  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, calendarEventOccurrences, recurringEventRequests, recurringSeriesMutationRequests, protectedTimeBlocks, protectedTimeMutationRequests, taskSchedules, taskScheduleMutationRequests, protectedTimeConflicts, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
 }
 
 test('mock-authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
@@ -2661,8 +3120,52 @@ test('Agenda navigates day, week and month views and creates a confirmed all-day
     created_at: '2026-11-22T17:00:00.000Z',
     updated_at: '2026-11-22T17:00:00.000Z',
   }];
+  const scheduledTask = {
+    id: '019a0000-0000-7000-8000-000000000521',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    action: 'Preparar informe semanal',
+    description: 'Reserva visible en el calendario.',
+    status: 'todo',
+    due_date: tomorrow,
+    priority: 2,
+    archived_at: null,
+    deleted_at: null,
+  };
+  const seedTaskSchedule = {
+    id: '019a0000-0000-7000-8000-000000000522',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    updated_by_user_id: profile.id,
+    task_id: scheduledTask.id,
+    schedule_status: 'confirmed',
+    updated_at: '2026-11-22T17:00:00.000Z',
+    start_local: today + 'T10:00:00',
+    end_local: today + 'T11:00:00',
+    time_zone: 'America/Havana',
+    starts_at: today + 'T15:00:00.000Z',
+    ends_at: today + 'T16:00:00.000Z',
+  };
   const { calendarEvents, insertedAgendaEvents, idempotencyRequests } = await mockSupabaseSession(page, {
     calendarEvents: seedEvents,
+    tasks: [scheduledTask],
+    taskSchedules: [seedTaskSchedule],
+    eventTaskScheduleConflictResponses: [{
+      status: 409,
+      body: {
+        error: 'TASK_SCHEDULE_CONFLICTS',
+        conflicts: [{
+          taskScheduleId: seedTaskSchedule.id,
+          taskScheduleUpdatedAt: seedTaskSchedule.updated_at,
+          startsAt: seedTaskSchedule.starts_at,
+          endsAt: seedTaskSchedule.ends_at,
+          timeZone: seedTaskSchedule.time_zone,
+          overlapStartsAt: seedTaskSchedule.starts_at,
+          overlapEndsAt: seedTaskSchedule.ends_at,
+          requiredDecision: 'keep_overlap',
+        }],
+      },
+    }],
   });
   await page.goto('/');
   await page.getByLabel('Correo electrónico').fill(authUser.email);
@@ -2672,15 +3175,25 @@ test('Agenda navigates day, week and month views and creates a confirmed all-day
   const sideNavigation = page.getByRole('navigation', { name: 'Navegación principal' });
   await sideNavigation.getByRole('button', { name: /Agenda/ }).click();
   await expect(page.locator('.page-heading h1')).toHaveText('Agenda');
-  await expect(page.getByText('Día de familia')).toBeVisible();
+  const upcomingPanel = page.getByRole('region', { name: 'Próximos compromisos' });
+  await expect(upcomingPanel).toBeVisible();
+  await expect(upcomingPanel.getByRole('button', { name: /Día de familia/ })).toBeVisible();
+  await upcomingPanel.getByRole('button', { name: /Día de familia/ }).click();
+  const upcomingEventDetail = page.getByRole('dialog', { name: 'Día de familia' });
+  await expect(upcomingEventDetail).toBeVisible();
+  await upcomingEventDetail.getByLabel('Cerrar').click();
+  await expect(page.getByRole('button', { name: 'Día de familia', exact: true })).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Tarea reservada: Preparar informe semanal' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Día', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Agenda diaria' })).toBeVisible();
-  await expect(page.getByRole('button', { name: /Día de familia/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Día de familia', exact: true })).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Tarea reservada: Preparar informe semanal' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Mes', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Agenda mensual' })).toBeVisible();
-  await expect(page.getByText('Día de familia')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Día de familia', exact: true })).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Tarea reservada: Preparar informe semanal' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Nuevo evento' }).click();
   const dialog = page.getByRole('dialog', { name: 'Crear evento' });
@@ -2691,9 +3204,16 @@ test('Agenda navigates day, week and month views and creates a confirmed all-day
   await dialog.getByLabel('Hasta (incluido)', { exact: true }).fill(today);
   await dialog.getByRole('button', { name: 'Guardar evento' }).click();
 
+  const scheduleConflictDialog = page.getByRole('alertdialog', { name: 'El evento coincide con tiempo reservado' });
+  await expect(scheduleConflictDialog).toBeVisible();
+  await expect(scheduleConflictDialog).toContainText('La reserva existente no se moverá ni modificará.');
+  await expect(scheduleConflictDialog.getByRole('button', { name: 'Guardar y mantener ambos' })).toBeDisabled();
+  await scheduleConflictDialog.getByLabel('Decisión para reserva de tarea').selectOption('keep_overlap');
+  await scheduleConflictDialog.getByRole('button', { name: 'Guardar y mantener ambos' }).click();
+
   await expect(page.getByText('Evento guardado en Agenda.')).toBeVisible();
   await expect(dialog).toHaveCount(0);
-  await expect(page.getByText('Mi compromiso nuevo')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Mi compromiso nuevo', exact: true })).toBeVisible();
   expect(insertedAgendaEvents).toHaveLength(1);
   expect(calendarEvents).toHaveLength(2);
   expect(insertedAgendaEvents[0]).toMatchObject({
@@ -2705,15 +3225,258 @@ test('Agenda navigates day, week and month views and creates a confirmed all-day
     temporal_kind: 'all_day',
     start_date: today,
     end_date_exclusive: tomorrow,
+    task_schedule_conflict_decisions: [{
+      policyVersion: 'event-task-schedule-decision-v1',
+      taskScheduleId: seedTaskSchedule.id,
+      taskScheduleUpdatedAt: seedTaskSchedule.updated_at,
+      startsAt: seedTaskSchedule.starts_at,
+      endsAt: seedTaskSchedule.ends_at,
+      overlapStartsAt: seedTaskSchedule.starts_at,
+      overlapEndsAt: seedTaskSchedule.ends_at,
+      decision: 'keep_overlap',
+      consentedAt: expect.any(String),
+    }],
   });
-  expect(idempotencyRequests).toHaveLength(1);
+  expect(idempotencyRequests).toHaveLength(2);
   expect(idempotencyRequests[0].key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  expect(idempotencyRequests[1].key).toBe(idempotencyRequests[0].key);
+  expect(idempotencyRequests[0].taskScheduleDecisions).toEqual([]);
+  expect(idempotencyRequests[1].taskScheduleDecisions).toEqual([{
+    taskScheduleId: seedTaskSchedule.id,
+    taskScheduleUpdatedAt: seedTaskSchedule.updated_at,
+    decision: 'keep_overlap',
+  }]);
   expect(idempotencyRequests[0].event).toMatchObject({
     title: 'Mi compromiso nuevo',
     temporalKind: 'all_day',
     startDate: today,
     endDateExclusive: tomorrow,
   });
+});
+
+test('Agenda schedules an existing Task without changing its deadline or execution state', async ({ page }) => {
+  const today = await todayInBrowserHavana(page);
+  const tomorrow = await page.evaluate((value) => {
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
+  }, today);
+  const task = {
+    id: '019a0000-0000-7000-8000-000000000511',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    action: 'Preparar propuesta comercial',
+    description: 'Tarea que conserva su identidad.',
+    status: 'todo',
+    due_date: tomorrow,
+    priority: 2,
+    archived_at: null,
+    deleted_at: null,
+  };
+  const { taskSchedules, taskScheduleMutationRequests } = await mockSupabaseSession(page, { tasks: [task] });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.getByRole('navigation', { name: 'Navegación principal' })
+    .getByRole('button', { name: /Agenda/ }).click();
+
+  await page.getByRole('button', { name: 'Tareas programadas', exact: true }).click();
+  const section = page.getByRole('region', { name: 'Reservas de tareas' });
+  await expect(section.getByRole('heading', { name: 'Tiempo reservado para tus tareas' })).toBeVisible();
+  await section.getByRole('button', { name: 'Programar tarea' }).click();
+
+  const taskSelect = section.getByLabel('Tarea');
+  await expect(taskSelect).toHaveValue(task.id);
+  await expect(taskSelect.locator('option:checked')).toHaveText('Preparar propuesta comercial');
+  await taskSelect.selectOption(task.id);
+  await section.getByLabel('Comienza').fill(tomorrow + 'T09:00');
+  await section.getByLabel('Termina').fill(tomorrow + 'T10:00');
+  await section.getByRole('button', { name: 'Crear reserva' }).click();
+
+  await expect(page.getByText('Reserva de tarea creada.')).toBeVisible();
+  await expect(section.getByText('Preparar propuesta comercial').last()).toBeVisible();
+  expect(taskScheduleMutationRequests).toHaveLength(1);
+  expect(taskScheduleMutationRequests[0].key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  expect(taskScheduleMutationRequests[0].payload).toMatchObject({
+    action: 'create',
+    taskId: task.id,
+    schedule: {
+      startLocalDateTime: tomorrow + 'T09:00',
+      endLocalDateTime: tomorrow + 'T10:00',
+      timeZone: 'America/Havana',
+    },
+  });
+  expect(taskScheduleMutationRequests[0].payload).not.toHaveProperty('ownerUserId');
+  expect(taskScheduleMutationRequests[0].payload).not.toHaveProperty('due_date');
+  expect(taskSchedules).toHaveLength(1);
+  expect(taskSchedules[0]).toMatchObject({
+    task_id: task.id,
+    schedule_status: 'proposed',
+    owner_user_id: profile.id,
+  });
+  expect(task.status).toBe('todo');
+  expect(task.due_date).toBe(tomorrow);
+
+  await section.getByRole('button', { name: 'Confirmar' }).click();
+  await expect(page.getByText('Estado de la reserva actualizado.')).toBeVisible();
+  expect(taskSchedules[0].schedule_status).toBe('confirmed');
+  expect(task.status).toBe('todo');
+  expect(task.due_date).toBe(tomorrow);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const dimensions = await page.evaluate(() => ({
+    viewport: document.documentElement.clientWidth,
+    document: document.documentElement.scrollWidth,
+  }));
+  expect(dimensions.document).toBeLessThanOrEqual(dimensions.viewport + 1);
+});
+
+test('Agenda retries TaskSchedule with a fresh idempotency key after conflict snapshot changes', async ({ page }) => {
+  const today = await todayInBrowserHavana(page);
+  const tomorrow = await page.evaluate((value) => {
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
+  }, today);
+  const task = {
+    id: '019a0000-0000-7000-8000-000000000512',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    action: 'Revisar contrato',
+    description: 'Reintento tras cambio del snapshot.',
+    status: 'todo',
+    due_date: tomorrow,
+    priority: 2,
+    archived_at: null,
+    deleted_at: null,
+  };
+  const { taskSchedules, taskScheduleMutationRequests } = await mockSupabaseSession(page, {
+    tasks: [task],
+    taskScheduleConflictResponses: [{
+      status: 409,
+      body: {
+        error: 'TASK_SCHEDULE_CONFLICTS_CHANGED',
+        eventConflicts: [],
+        protectedTimeConflicts: [],
+      },
+    }],
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.getByRole('navigation', { name: 'Navegación principal' })
+    .getByRole('button', { name: /Agenda/ }).click();
+
+  await page.getByRole('button', { name: 'Tareas programadas', exact: true }).click();
+  const section = page.getByRole('region', { name: 'Reservas de tareas' });
+  await section.getByRole('button', { name: 'Programar tarea' }).click();
+  await section.getByLabel('Tarea').selectOption(task.id);
+  await section.getByLabel('Comienza').fill(tomorrow + 'T09:00');
+  await section.getByLabel('Termina').fill(tomorrow + 'T10:00');
+  await section.getByRole('button', { name: 'Crear reserva' }).click();
+
+  const conflictDialog = page.getByRole('alertdialog');
+  await expect(conflictDialog).toContainText('Los compromisos cambiaron mientras guardabas.');
+  await expect(conflictDialog).toContainText('Ninguna reserva fue creada.');
+  await conflictDialog.getByRole('button', { name: 'Volver al horario' }).click();
+  await expect(conflictDialog).toHaveCount(0);
+
+  await section.getByRole('button', { name: 'Crear reserva' }).click();
+  await expect(page.getByText('Reserva de tarea creada.')).toBeVisible();
+  expect(taskScheduleMutationRequests).toHaveLength(2);
+  expect(taskScheduleMutationRequests[0].key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  expect(taskScheduleMutationRequests[1].key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  expect(taskScheduleMutationRequests[1].key).not.toBe(taskScheduleMutationRequests[0].key);
+  expect(taskSchedules).toHaveLength(1);
+  expect(taskSchedules[0]).toMatchObject({
+    task_id: task.id,
+    schedule_status: 'proposed',
+    owner_user_id: profile.id,
+  });
+  expect(task.status).toBe('todo');
+  expect(task.due_date).toBe(tomorrow);
+});
+
+test('Agenda requires explicit version-bound consent before overlapping an active TaskSchedule', async ({ page }) => {
+  const today = await todayInBrowserHavana(page);
+  const tomorrow = await page.evaluate((value) => {
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
+  }, today);
+  const task = {
+    id: '019a0000-0000-7000-8000-000000000513',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    action: 'Preparar presupuesto',
+    description: 'Reserva con cruce explícito.',
+    status: 'todo',
+    due_date: tomorrow,
+    priority: 2,
+    archived_at: null,
+    deleted_at: null,
+  };
+  const existingScheduleId = '019a0000-0000-7000-8000-000000000599';
+  const existingScheduleUpdatedAt = '2026-11-22T18:00:00.000Z';
+  const { taskSchedules, taskScheduleMutationRequests } = await mockSupabaseSession(page, {
+    tasks: [task],
+    taskScheduleConflictResponses: [{
+      status: 409,
+      body: {
+        error: 'TASK_SCHEDULE_OVERLAPS',
+        eventConflicts: [],
+        protectedTimeConflicts: [],
+        taskScheduleConflicts: [{
+          taskScheduleId: existingScheduleId,
+          taskScheduleUpdatedAt: existingScheduleUpdatedAt,
+          startsAt: tomorrow + 'T14:30:00.000Z',
+          endsAt: tomorrow + 'T15:30:00.000Z',
+          timeZone: 'America/Havana',
+          requiredDecision: 'keep_overlap',
+        }],
+      },
+    }],
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.getByRole('navigation', { name: 'Navegación principal' })
+    .getByRole('button', { name: /Agenda/ }).click();
+
+  await page.getByRole('button', { name: 'Tareas programadas', exact: true }).click();
+  const section = page.getByRole('region', { name: 'Reservas de tareas' });
+  await section.getByRole('button', { name: 'Programar tarea' }).click();
+  await section.getByLabel('Tarea').selectOption(task.id);
+  await section.getByLabel('Comienza').fill(tomorrow + 'T09:00');
+  await section.getByLabel('Termina').fill(tomorrow + 'T10:00');
+  await section.getByRole('button', { name: 'Crear reserva' }).click();
+
+  const conflictDialog = page.getByRole('alertdialog');
+  await expect(conflictDialog).toContainText('Otra reserva de tarea');
+  await expect(conflictDialog).toContainText('se conservará sin moverla');
+  const decisionSelect = conflictDialog.getByLabel('Tu decisión');
+  await expect(decisionSelect).toBeVisible();
+  await expect(decisionSelect.locator('option[value="keep_overlap"]')).toHaveText('Mantener ambas reservas');
+  await expect(conflictDialog.getByRole('button', { name: 'Guardar con mis decisiones' })).toBeDisabled();
+  await decisionSelect.selectOption('keep_overlap');
+  await conflictDialog.getByRole('button', { name: 'Guardar con mis decisiones' }).click();
+
+  await expect(page.getByText('Reserva de tarea creada.')).toBeVisible();
+  expect(taskScheduleMutationRequests).toHaveLength(2);
+  expect(taskScheduleMutationRequests[0].key).toBe(taskScheduleMutationRequests[1].key);
+  expect(taskScheduleMutationRequests[1].payload.taskScheduleDecisions).toEqual([{
+    taskScheduleId: existingScheduleId,
+    taskScheduleUpdatedAt: existingScheduleUpdatedAt,
+    decision: 'keep_overlap',
+  }]);
+  expect(taskSchedules).toHaveLength(1);
+  expect(taskSchedules[0]).toMatchObject({
+    task_id: task.id,
+    schedule_status: 'proposed',
+    owner_user_id: profile.id,
+  });
+  expect(task.status).toBe('todo');
+  expect(task.due_date).toBe(tomorrow);
 });
 
 test('Agenda keeps day, week and month controls usable on a 390px mobile screen without page overflow', async ({ page }) => {
@@ -3088,6 +3851,314 @@ test('Tiempo protegido funciona en móvil a 390px sin desbordar el documento', a
 });
 
 
+test('Protected Time exige consentimiento explícito antes de cruzar reservas de tareas', async ({ page }) => {
+  const scheduleId = '019a0000-0000-7000-8000-000000000611';
+  const scheduleUpdatedAt = '2026-11-22T18:00:00.000000Z';
+  const occurrenceStartsAt = '2026-12-25T03:00:00.000Z';
+  const { protectedTimeBlocks, protectedTimeMutationRequests } = await mockSupabaseSession(page, {
+    protectedTimeTaskScheduleConflictResponses: [{
+      status: 409,
+      body: {
+        error: 'TASK_SCHEDULE_CONFLICTS',
+        taskScheduleConflicts: [{
+          conflictKey: scheduleId + ':' + occurrenceStartsAt,
+          taskScheduleId: scheduleId,
+          taskScheduleUpdatedAt: scheduleUpdatedAt,
+          startsAt: '2026-12-25T03:00:00.000Z',
+          endsAt: '2026-12-25T04:00:00.000Z',
+          overlapStartsAt: '2026-12-25T03:15:00.000Z',
+          overlapEndsAt: '2026-12-25T03:45:00.000Z',
+          occurrenceDate: '2026-12-25',
+          occurrenceStartsAt,
+          occurrenceEndsAt: '2026-12-25T04:00:00.000Z',
+          protectionMode: 'hard',
+          protectedTimeLabel: 'Gimnasio protegido',
+          patternKind: 'one_off',
+          timeZone: 'America/Havana',
+          requiredDecision: 'keep_overlap',
+        }],
+      },
+    }],
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.getByRole('navigation', { name: 'Navegación principal' })
+    .getByRole('button', { name: /Agenda/ }).click();
+  await page.getByRole('button', { name: 'Tiempo protegido', exact: true }).click();
+
+  await page.getByRole('button', { name: 'Nuevo bloque' }).click();
+  const composer = page.getByRole('dialog', { name: 'Proteger tiempo' });
+  await composer.getByLabel('Nombre del bloque').fill('Gimnasio protegido');
+  await composer.getByRole('button', { name: 'Guardar bloque' }).click();
+
+  const decisionDialog = page.getByRole('alertdialog', { name: 'Hay reservas de tareas que se cruzan' });
+  await expect(decisionDialog).toBeVisible();
+  await expect(decisionDialog.getByText('Gimnasio protegido')).toBeVisible();
+  await expect(composer).toBeVisible();
+  expect(protectedTimeMutationRequests).toHaveLength(1);
+  expect(protectedTimeMutationRequests[0].payload.taskScheduleDecisions).toBeUndefined();
+  expect(protectedTimeBlocks).toHaveLength(0);
+
+  await decisionDialog.getByRole('checkbox', {
+    name: 'Acepto mantener esta reserva dentro del tiempo protegido',
+  }).check();
+  await decisionDialog.getByRole('button', { name: 'Guardar con estas decisiones' }).click();
+
+  await expect(page.getByText('Tiempo protegido guardado.')).toBeVisible();
+  await expect(decisionDialog).toHaveCount(0);
+  expect(protectedTimeMutationRequests).toHaveLength(2);
+  expect(protectedTimeMutationRequests[1].key).toBe(protectedTimeMutationRequests[0].key);
+  expect(protectedTimeMutationRequests[1].payload.taskScheduleDecisions).toEqual([{
+    taskScheduleId: scheduleId,
+    taskScheduleUpdatedAt: scheduleUpdatedAt,
+    occurrenceStartsAt,
+    decision: 'keep_overlap',
+  }]);
+  expect(protectedTimeBlocks).toHaveLength(1);
+  expect(protectedTimeBlocks[0].task_schedule_conflict_decisions).toHaveLength(1);
+});
+
+
+test('Protected Time restore rechecks TaskSchedule overlaps and records explicit consent', async ({ page }) => {
+  const blockId = '019a0000-0000-7000-8000-000000000621';
+  const scheduleId = '019a0000-0000-7000-8000-000000000622';
+  const blockUpdatedAt = '2026-11-22T18:00:00.000000Z';
+  const scheduleUpdatedAt = '2026-12-25T04:00:00.000000Z';
+  const occurrenceStartsAt = '2026-12-25T03:00:00.000Z';
+  const archivedBlock = {
+    id: blockId,
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    updated_by_user_id: profile.id,
+    label: 'Descanso protegido archivado',
+    category: 'Salud',
+    protection_mode: 'hard',
+    pattern_kind: 'one_off',
+    time_zone: 'America/Havana',
+    start_local: '2026-12-24 22:00:00',
+    end_local: '2026-12-25 06:30:00',
+    starts_at: occurrenceStartsAt,
+    ends_at: '2026-12-25T11:30:00.000Z',
+    start_date: null,
+    end_date_exclusive: null,
+    weekdays: null,
+    start_time_local: null,
+    end_time_local: null,
+    ends_next_day: null,
+    resolver_metadata: { rulesSource: 'iana-tzdb', rulesVersion: '2026f', resolverVersion: 'agenda-iana-resolver-v1', authoritative: true },
+    task_schedule_conflict_decisions: [],
+    archived_at: '2026-11-21T18:00:00.000Z',
+    deleted_at: null,
+    created_at: '2026-11-20T18:00:00.000Z',
+    updated_at: blockUpdatedAt,
+  };
+  const { protectedTimeBlocks, protectedTimeMutationRequests } = await mockSupabaseSession(page, {
+    protectedTimeBlocks: [archivedBlock],
+    protectedTimeTaskScheduleConflictResponses: [{
+      status: 409,
+      body: {
+        error: 'TASK_SCHEDULE_CONFLICTS',
+        taskScheduleConflicts: [{
+          conflictKey: scheduleId + ':' + occurrenceStartsAt,
+          taskScheduleId: scheduleId,
+          taskScheduleUpdatedAt: scheduleUpdatedAt,
+          startsAt: occurrenceStartsAt,
+          endsAt: '2026-12-25T04:00:00.000Z',
+          overlapStartsAt: '2026-12-25T03:15:00.000Z',
+          overlapEndsAt: '2026-12-25T03:45:00.000Z',
+          occurrenceDate: '2026-12-25',
+          occurrenceStartsAt,
+          occurrenceEndsAt: '2026-12-25T04:00:00.000Z',
+          protectionMode: 'hard',
+          protectedTimeLabel: archivedBlock.label,
+          patternKind: 'one_off',
+          timeZone: 'America/Havana',
+          requiredDecision: 'keep_overlap',
+        }],
+      },
+    }],
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.getByRole('navigation', { name: 'Navegación principal' })
+    .getByRole('button', { name: /Agenda/ }).click();
+  await page.getByRole('button', { name: 'Tiempo protegido', exact: true }).click();
+  await page.getByRole('button', { name: 'Archivados', exact: true }).click();
+
+  await page.getByRole('button', { name: 'Restaurar', exact: true }).click();
+  const decisionDialog = page.getByRole('alertdialog', { name: 'Hay reservas de tareas que se cruzan' });
+  await expect(decisionDialog).toBeVisible();
+  await expect(decisionDialog.locator('.agenda-conflict-card')).toContainText(archivedBlock.label);
+  expect(protectedTimeMutationRequests).toHaveLength(1);
+  expect(protectedTimeMutationRequests[0].payload.action).toBe('restore');
+  expect(protectedTimeMutationRequests[0].payload.taskScheduleDecisions).toBeUndefined();
+
+  await decisionDialog.getByRole('checkbox', {
+    name: 'Acepto mantener esta reserva dentro del tiempo protegido',
+  }).check();
+  await decisionDialog.getByRole('button', { name: 'Guardar con estas decisiones' }).click();
+
+  await expect(page.getByText('Bloque restaurado.')).toBeVisible();
+  await expect(decisionDialog).toHaveCount(0);
+  expect(protectedTimeMutationRequests).toHaveLength(2);
+  expect(protectedTimeMutationRequests[1].key).toBe(protectedTimeMutationRequests[0].key);
+  expect(protectedTimeMutationRequests[1].payload.taskScheduleDecisions).toEqual([{
+    taskScheduleId: scheduleId,
+    taskScheduleUpdatedAt: scheduleUpdatedAt,
+    occurrenceStartsAt,
+    decision: 'keep_overlap',
+  }]);
+  expect(protectedTimeBlocks[0].archived_at).toBeNull();
+  expect(protectedTimeBlocks[0].task_schedule_conflict_decisions).toHaveLength(1);
+});
+
+
+
+test('Agenda requires explicit Protected Time consent before reopening a cancelled Event', async ({ page }) => {
+  const today = await todayInBrowserHavana(page);
+  const tomorrow = await page.evaluate((value) => {
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
+  }, today);
+  const eventId = '0190f47a-7b2c-7abc-8def-0123456789f3';
+  const blockId = '0190f47a-7b2c-7abc-8def-0123456789f4';
+  const blockUpdatedAt = '2026-11-21T10:00:00.000000Z';
+  const occurrenceStartsAt = today + 'T14:00:00.000Z';
+  const seedEvent = {
+    id: eventId, owner_user_id: profile.id, created_by_user_id: profile.id, updated_by_user_id: profile.id,
+    title: 'Reunión cancelada con descanso', description: 'Reabrir sin romper tiempo protegido',
+    location_label: null, location_kind: null, event_status: 'cancelled', temporal_kind: 'all_day',
+    start_date: today, end_date_exclusive: tomorrow, start_local: null, end_local: null, time_zone: null,
+    starts_at: null, ends_at: null, archived_at: null, deleted_at: null, purge_after: null,
+    protected_time_decisions: [], task_schedule_conflict_decisions: [],
+    created_at: '2026-11-22T17:00:00.000Z', updated_at: '2026-11-22T18:00:00.000000Z',
+  };
+  const conflict = {
+    conflictKey: blockId + ':' + occurrenceStartsAt,
+    blockId,
+    blockUpdatedAt,
+    label: 'Sueño protegido',
+    category: 'Salud',
+    protectionMode: 'hard',
+    patternKind: 'one_off',
+    occurrenceDate: today,
+    occurrenceStartsAt,
+    occurrenceEndsAt: today + 'T15:00:00.000Z',
+    overlapStartsAt: today + 'T14:15:00.000Z',
+    overlapEndsAt: today + 'T14:45:00.000Z',
+    timeZone: 'America/Havana',
+    requiredDecision: 'override_hard',
+  };
+  const { calendarEvents, mutationRequests } = await mockSupabaseSession(page, {
+    calendarEvents: [seedEvent],
+    protectedTimeConflicts: [conflict],
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.getByRole('navigation', { name: 'Navegación principal' })
+    .getByRole('button', { name: /Agenda/ }).click();
+  await page.locator('.agenda-event-chip').filter({ hasText: seedEvent.title }).first().click();
+  const detail = page.getByRole('dialog', { name: seedEvent.title });
+  await detail.getByRole('button', { name: 'Reabrir' }).click();
+
+  const conflictDialog = page.getByRole('alertdialog', { name: 'Hay compromisos que se cruzan' });
+  await expect(conflictDialog).toBeVisible();
+  await expect(conflictDialog.getByText('Sueño protegido')).toBeVisible();
+  expect(mutationRequests).toHaveLength(1);
+  expect(mutationRequests[0].payload.action).toBe('reopen');
+  expect(mutationRequests[0].payload.protectedTimeDecisions).toBeUndefined();
+  expect(calendarEvents[0].event_status).toBe('cancelled');
+
+  await conflictDialog.getByLabel('Tu decisión para este cruce').selectOption('override_hard');
+  await conflictDialog.getByRole('button', { name: 'Guardar con estas decisiones' }).click();
+  await expect(page.getByText('Evento reabierto.')).toBeVisible();
+  expect(mutationRequests).toHaveLength(2);
+  expect(mutationRequests[1].key).toBe(mutationRequests[0].key);
+  expect(mutationRequests[1].payload).toMatchObject({
+    action: 'reopen',
+    protectedTimeDecisions: [{
+      blockId,
+      blockUpdatedAt,
+      occurrenceStartsAt,
+      decision: 'override_hard',
+    }],
+  });
+  expect(calendarEvents[0].event_status).toBe('confirmed');
+  expect(calendarEvents[0].protected_time_decisions).toHaveLength(1);
+});
+
+test('Agenda requires current TaskSchedule consent before reopening a cancelled Event', async ({ page }) => {
+  const today = await todayInBrowserHavana(page);
+  const tomorrow = await page.evaluate((value) => {
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
+  }, today);
+  const eventId = '0190f47a-7b2c-7abc-8def-0123456789f1';
+  const scheduleId = '0190f47a-7b2c-7abc-8def-0123456789f2';
+  const scheduleUpdatedAt = '2026-12-20T10:00:00.000Z';
+  const seedEvent = {
+    id: eventId, owner_user_id: profile.id, created_by_user_id: profile.id, updated_by_user_id: profile.id,
+    title: 'Reunión cancelada', description: 'Evento que se va a reabrir',
+    location_label: null, location_kind: null, event_status: 'cancelled', temporal_kind: 'all_day',
+    start_date: today, end_date_exclusive: tomorrow, start_local: null, end_local: null, time_zone: null,
+    starts_at: null, ends_at: null, archived_at: null, deleted_at: null, purge_after: null,
+    task_schedule_conflict_decisions: [],
+    created_at: '2026-11-22T17:00:00.000Z', updated_at: '2026-11-22T18:00:00.000000Z',
+  };
+  const { calendarEvents, mutationRequests } = await mockSupabaseSession(page, {
+    calendarEvents: [seedEvent],
+    eventTaskScheduleConflictResponses: [{
+      status: 409,
+      body: {
+        error: 'TASK_SCHEDULE_CONFLICTS',
+        conflicts: [{
+          taskScheduleId: scheduleId, taskScheduleUpdatedAt: scheduleUpdatedAt,
+          startsAt: '2026-12-24T10:00:00.000Z', endsAt: '2026-12-24T11:00:00.000Z',
+          overlapStartsAt: '2026-12-24T10:00:00.000Z', overlapEndsAt: '2026-12-24T11:00:00.000Z',
+          timeZone: 'America/Havana', requiredDecision: 'keep_overlap',
+        }],
+      },
+    }],
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.getByRole('navigation', { name: 'Navegación principal' })
+    .getByRole('button', { name: /Agenda/ }).click();
+  await page.locator('.agenda-event-chip').filter({ hasText: 'Reunión cancelada' }).first().click();
+  const detail = page.getByRole('dialog', { name: 'Reunión cancelada' });
+  await detail.getByRole('button', { name: 'Reabrir' }).click();
+
+  const dialog = page.getByRole('alertdialog', { name: 'El evento coincide con tiempo reservado' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText('El evento no se reabrió.')).toBeVisible();
+  expect(mutationRequests).toHaveLength(1);
+  expect(mutationRequests[0].payload.action).toBe('reopen');
+  expect(mutationRequests[0].payload.taskScheduleDecisions).toBeUndefined();
+  expect(calendarEvents[0].event_status).toBe('cancelled');
+
+  await dialog.getByRole('combobox', { name: 'Decisión para reserva de tarea' }).selectOption('keep_overlap');
+  await dialog.getByRole('button', { name: 'Guardar y mantener ambos' }).click();
+  await expect(page.getByText('Evento reabierto.')).toBeVisible();
+  expect(mutationRequests).toHaveLength(2);
+  expect(mutationRequests[1].key).toBe(mutationRequests[0].key);
+  expect(mutationRequests[1].payload).toMatchObject({
+    action: 'reopen', eventId,
+    taskScheduleDecisions: [{
+      taskScheduleId: scheduleId, taskScheduleUpdatedAt: scheduleUpdatedAt, decision: 'keep_overlap',
+    }],
+  });
+  expect(calendarEvents[0].event_status).toBe('confirmed');
+  expect(calendarEvents[0].task_schedule_conflict_decisions).toHaveLength(1);
+});
+
 test('Agenda requires one explicit Protected Time decision per hard/flexible overlap before Event creation', async ({ page }) => {
   const today = await todayInBrowserHavana(page);
   const occurrenceStartsAt = today + 'T14:00:00.000Z';
@@ -3181,7 +4252,7 @@ test('Agenda requires one explicit Protected Time decision per hard/flexible ove
 
   await expect(page.getByText('Evento guardado en Agenda.')).toBeVisible();
   await expect(decisionDialog).toHaveCount(0);
-  await expect(page.getByText('Reunión que cruza tiempo protegido')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Reunión que cruza tiempo protegido', exact: true })).toBeVisible();
   expect(idempotencyRequests).toHaveLength(2);
   expect(idempotencyRequests[1].key).toBe(idempotencyRequests[0].key);
   expect(idempotencyRequests[1].protectedTimeDecisions).toMatchObject([
@@ -3200,6 +4271,104 @@ test('Agenda requires one explicit Protected Time decision per hard/flexible ove
   ]);
   expect(insertedAgendaEvents).toHaveLength(1);
   expect(insertedAgendaEvents[0].protected_time_decisions).toHaveLength(2);
+});
+
+
+test('Agenda preserves Protected Time consent when TaskSchedule asks for a second decision', async ({ page }) => {
+  const today = await todayInBrowserHavana(page);
+  const taskScheduleId = '019a0000-0000-7000-8000-000000000691';
+  const taskScheduleUpdatedAt = '2026-11-22T18:00:00.000000Z';
+  const blockId = '019a0000-0000-7000-8000-000000000692';
+  const blockUpdatedAt = '2026-11-21T10:00:00.000000Z';
+  const occurrenceStartsAt = today + 'T14:00:00.000Z';
+  const protectedTimeConflicts = [{
+    conflictKey: blockId + ':' + occurrenceStartsAt,
+    blockId,
+    blockUpdatedAt,
+    label: 'Sueño protegido',
+    category: 'Salud',
+    protectionMode: 'hard',
+    patternKind: 'one_off',
+    occurrenceDate: today,
+    occurrenceStartsAt,
+    occurrenceEndsAt: today + 'T15:00:00.000Z',
+    overlapStartsAt: today + 'T14:15:00.000Z',
+    overlapEndsAt: today + 'T14:45:00.000Z',
+    timeZone: 'America/Havana',
+    requiredDecision: 'override_hard',
+  }];
+  const { calendarEvents, insertedAgendaEvents, idempotencyRequests } = await mockSupabaseSession(page, {
+    protectedTimeConflicts,
+    eventTaskScheduleConflictResponses: [{
+      status: 409,
+      body: {
+        error: 'TASK_SCHEDULE_CONFLICTS',
+        conflicts: [{
+          taskScheduleId,
+          taskScheduleUpdatedAt,
+          startsAt: today + 'T14:00:00.000Z',
+          endsAt: today + 'T15:00:00.000Z',
+          overlapStartsAt: today + 'T14:15:00.000Z',
+          overlapEndsAt: today + 'T14:45:00.000Z',
+          timeZone: 'America/Havana',
+          requiredDecision: 'keep_overlap',
+        }],
+      },
+    }],
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.getByRole('navigation', { name: 'Navegación principal' })
+    .getByRole('button', { name: /Agenda/ }).click();
+
+  await page.getByRole('button', { name: 'Nuevo evento' }).click();
+  const composer = page.getByRole('dialog', { name: 'Crear evento' });
+  await composer.getByLabel('Nombre del evento').fill('Reunión con doble consentimiento');
+  await composer.getByLabel('Desde', { exact: true }).fill(today);
+  await composer.getByLabel('Hasta (incluido)', { exact: true }).fill(today);
+  await composer.getByRole('button', { name: 'Guardar evento' }).click();
+
+  const protectedDialog = page.getByRole('alertdialog', { name: 'Hay compromisos que se cruzan' });
+  await expect(protectedDialog).toBeVisible();
+  await protectedDialog.getByLabel('Tu decisión para este cruce').selectOption('override_hard');
+  expect(idempotencyRequests).toHaveLength(1);
+  expect(idempotencyRequests[0].protectedTimeDecisions).toEqual([]);
+  expect(idempotencyRequests[0].taskScheduleDecisions).toEqual([]);
+  await protectedDialog.getByRole('button', { name: 'Guardar con estas decisiones' }).click();
+
+  const taskDialog = page.getByRole('alertdialog', { name: 'El evento coincide con tiempo reservado' });
+  await expect(taskDialog).toBeVisible();
+  await taskDialog.getByLabel('Decisión para reserva de tarea').selectOption('keep_overlap');
+  expect(idempotencyRequests).toHaveLength(2);
+  expect(idempotencyRequests[1].key).toBe(idempotencyRequests[0].key);
+  expect(idempotencyRequests[1].protectedTimeDecisions).toEqual([{
+    blockId,
+    blockUpdatedAt,
+    occurrenceStartsAt,
+    decision: 'override_hard',
+  }]);
+  expect(idempotencyRequests[1].taskScheduleDecisions).toEqual([]);
+  await taskDialog.getByRole('button', { name: 'Guardar y mantener ambos' }).click();
+
+  await expect(page.getByText('Evento guardado en Agenda.')).toBeVisible();
+  expect(idempotencyRequests).toHaveLength(3);
+  expect(idempotencyRequests[2].key).toBe(idempotencyRequests[0].key);
+  expect(idempotencyRequests[2].protectedTimeDecisions).toEqual([{
+    blockId,
+    blockUpdatedAt,
+    occurrenceStartsAt,
+    decision: 'override_hard',
+  }]);
+  expect(idempotencyRequests[2].taskScheduleDecisions).toEqual([{
+    taskScheduleId,
+    taskScheduleUpdatedAt,
+    decision: 'keep_overlap',
+  }]);
+  expect(insertedAgendaEvents).toHaveLength(1);
+  expect(calendarEvents[0].task_schedule_conflict_decisions).toHaveLength(1);
+  expect(calendarEvents[0].protected_time_decisions).toHaveLength(1);
 });
 
 
@@ -3290,4 +4459,227 @@ test('Agenda Event edits recheck Protected Time and persist the selected hard ov
   }]);
   expect(calendarEvents[0].description).toBe('Detalles actualizados; el horario sigue protegido.');
   expect(calendarEvents[0].protected_time_decisions).toHaveLength(1);
+});
+
+
+test('Agenda creates a recurring all-day series and renders each persisted occurrence instead of the master as a one-off', async ({ page }) => {
+  const today = await todayInBrowserHavana(page);
+  const { calendarEvents, calendarEventOccurrences, recurringEventRequests } = await mockSupabaseSession(page);
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.getByRole('navigation', { name: 'Navegación principal' })
+    .getByRole('button', { name: /Agenda/ }).click();
+
+  await page.getByRole('button', { name: 'Nuevo evento' }).click();
+  const composer = page.getByRole('dialog', { name: 'Crear evento' });
+  await composer.getByLabel('Nombre del evento').fill('Rutina diaria');
+  await composer.getByLabel('Desde', { exact: true }).fill(today);
+  await composer.getByLabel('Hasta (incluido)', { exact: true }).fill(today);
+  await composer.locator('label').filter({ hasText: 'Repetición' }).locator('select').selectOption('DAILY');
+  await composer.getByLabel('Ocurrencias').fill('2');
+  await composer.getByRole('button', { name: 'Crear serie recurrente' }).click();
+
+  await expect(page.getByText('Serie recurrente creada en Agenda.')).toBeVisible();
+  await expect(composer).toHaveCount(0);
+  const upcoming = page.getByRole('region', { name: 'Próximos compromisos' });
+  await expect(upcoming.getByRole('button', { name: 'Rutina diaria' })).toHaveCount(2);
+  await upcoming.getByRole('button', { name: 'Rutina diaria' }).first().click();
+  let detail = page.getByRole('dialog', { name: 'Rutina diaria' });
+  await expect(detail).toContainText('Parte de una serie');
+  await expect(detail.getByRole('button', { name: 'Editar', exact: true })).toHaveCount(0);
+  const originalOccurrenceKey = calendarEventOccurrences[0].occurrence_key;
+
+  const movedDate = await page.evaluate((value) => {
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(Date.UTC(year, month - 1, day + 2)).toISOString().slice(0, 10);
+  }, today);
+  await detail.getByRole('button', { name: 'Mover esta fecha' }).click();
+  await page.getByLabel('Nueva fecha de inicio').fill(movedDate);
+  await page.getByRole('button', { name: 'Guardar esta fecha' }).click();
+  await expect(page.getByText('Esta ocurrencia fue reprogramada. Su identidad original se conserva.')).toBeVisible();
+  await expect(detail).toHaveCount(0);
+
+  await expect(upcoming.getByRole('button', { name: 'Rutina diaria' })).toHaveCount(2);
+  await upcoming.getByRole('button', { name: 'Rutina diaria' }).last().click();
+  detail = page.getByRole('dialog', { name: 'Rutina diaria' });
+  await expect(detail).toContainText('Parte de una serie');
+  expect(calendarEventOccurrences.find((row) => row.occurrence_key === originalOccurrenceKey).actual_local_date)
+    .toBe(movedDate);
+
+  await detail.getByRole('button', { name: 'Cancelar esta fecha' }).click();
+  const cancellation = page.getByRole('alertdialog', { name: 'Cancelar esta ocurrencia' });
+  await cancellation.getByRole('button', { name: 'Cancelar esta fecha' }).click();
+  await expect(page.getByText('Esta ocurrencia fue cancelada. Las demás fechas de la serie se conservan.')).toBeVisible();
+  await expect(detail).toHaveCount(0);
+  await expect(upcoming.getByRole('button', { name: 'Rutina diaria' })).toHaveCount(1);
+  expect(calendarEventOccurrences.find((row) => row.occurrence_key === originalOccurrenceKey).occurrence_status)
+    .toBe('cancelled');
+  expect(calendarEvents).toHaveLength(1);
+  expect(calendarEventOccurrences.filter((row) => row.occurrence_status === 'scheduled')).toHaveLength(1);
+
+  expect(recurringEventRequests).toHaveLength(1);
+  expect(recurringEventRequests[0].key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  expect(recurringEventRequests[0].recurrenceRule).toMatchObject({
+    version: 1,
+    frequency: 'DAILY',
+    interval: 1,
+    startDate: today,
+    temporalKind: 'all_day',
+    count: 2,
+  });
+  expect(recurringEventRequests[0].endDayOffset).toBe(0);
+  expect(calendarEvents).toHaveLength(1);
+  expect(calendarEvents[0].recurrence_rule.frequency).toBe('DAILY');
+  expect(calendarEventOccurrences.map((row) => row.original_local_date)).toEqual([
+    today,
+    await page.evaluate((value) => {
+      const [year, month, day] = value.split('-').map(Number);
+      return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
+    }, today),
+  ]);
+});
+
+
+
+test('Agenda edits recurring series using explicit this-and-following and entire-series scopes', async ({ page }) => {
+  const today = await todayInBrowserHavana(page);
+  const addDay = (value, amount) => {
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(Date.UTC(year, month - 1, day + amount)).toISOString().slice(0, 10);
+  };
+  const seriesId = '019a0000-0000-7000-8000-000000009381';
+  const seriesUpdatedAt = '2026-11-23T11:00:00.000Z';
+  const series = {
+    id: seriesId,
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    updated_by_user_id: profile.id,
+    title: 'Serie editable',
+    description: 'Compromiso original',
+    location_label: null,
+    location_kind: null,
+    event_status: 'confirmed',
+    temporal_kind: 'all_day',
+    start_date: today,
+    end_date_exclusive: addDay(today, 1),
+    start_local: null,
+    end_local: null,
+    time_zone: null,
+    starts_at: null,
+    ends_at: null,
+    recurrence_rule: {
+      version: 1, frequency: 'DAILY', interval: 1,
+      startDate: today, temporalKind: 'all_day', count: 4, excludedDates: [],
+    },
+    recurrence_end_local_time: null,
+    recurrence_end_day_offset: 0,
+    recurrence_effective_from: null,
+    recurrence_effective_through: null,
+    recurrence_parent_event_id: null,
+    recurrence_inherited_occurrence_id: null,
+    archived_at: null,
+    deleted_at: null,
+    created_at: seriesUpdatedAt,
+    updated_at: seriesUpdatedAt,
+  };
+  const occurrences = [0, 1, 2].map((offset) => {
+    const date = addDay(today, offset);
+    const id = '019a0000-0000-7000-8000-' + String(9382 + offset).padStart(12, '0');
+    return {
+      id,
+      owner_user_id: profile.id,
+      created_by_user_id: profile.id,
+      updated_by_user_id: profile.id,
+      calendar_event_id: seriesId,
+      occurrence_key: 'v1:' + seriesId + ':' + date + ':ALL_DAY',
+      original_local_date: date,
+      original_local_time: null,
+      actual_local_date: date,
+      actual_local_time: null,
+      temporal_kind: 'all_day',
+      start_date: date,
+      end_date_exclusive: addDay(date, 1),
+      start_local: null,
+      end_local: null,
+      time_zone: null,
+      starts_at: null,
+      ends_at: null,
+      occurrence_status: 'scheduled',
+      override_kind: null,
+      review_candidate: null,
+      row_version: 1,
+      created_at: seriesUpdatedAt,
+      updated_at: seriesUpdatedAt,
+    };
+  });
+  const { calendarEvents, calendarEventOccurrences, recurringSeriesMutationRequests } =
+    await mockSupabaseSession(page, {
+      calendarEvents: [series],
+      calendarEventOccurrences: occurrences,
+    });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.getByRole('navigation', { name: 'Navegación principal' })
+    .getByRole('button', { name: /Agenda/ }).click();
+
+  const upcoming = page.getByRole('region', { name: 'Próximos compromisos' });
+  await expect(upcoming.getByRole('button', { name: /Serie editable/ })).toHaveCount(3);
+  await upcoming.getByRole('button', { name: /Serie editable/ }).first().click();
+  let detail = page.getByRole('dialog', { name: 'Serie editable' });
+  await expect(detail).toContainText('Parte de una serie');
+
+  await detail.getByRole('button', { name: 'Editar esta y las siguientes' }).click();
+  let composer = page.getByRole('dialog', { name: 'Editar serie recurrente' });
+  await composer.getByLabel('Nombre del evento').fill('Segmento futuro editado');
+  await composer.getByLabel('Ocurrencias').fill('3');
+  await composer.getByRole('button', { name: 'Guardar cambios de la serie' }).click();
+  await expect(page.getByText('Serie recurrente actualizada en Agenda.')).toBeVisible();
+  await expect(composer).toHaveCount(0);
+
+  expect(recurringSeriesMutationRequests).toHaveLength(1);
+  expect(recurringSeriesMutationRequests[0].key).toMatch(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+  );
+  expect(recurringSeriesMutationRequests[0].payload).toMatchObject({
+    seriesId,
+    scope: 'this_and_following',
+    selectedOccurrenceId: occurrences[0].id,
+    event: { title: 'Segmento futuro editado', temporalKind: 'all_day', startDate: today },
+    recurrenceRule: { frequency: 'DAILY', interval: 1, startDate: today, count: 3 },
+    endDayOffset: 0,
+  });
+  expect(calendarEvents).toHaveLength(2);
+  const child = calendarEvents.find((row) => row.recurrence_parent_event_id === seriesId);
+  expect(child).toMatchObject({
+    title: 'Segmento futuro editado',
+    recurrence_inherited_occurrence_id: occurrences[0].id,
+    recurrence_effective_from: today,
+    recurrence_rule: { excludedDates: [today] },
+  });
+  expect(calendarEventOccurrences.find((row) => row.id === occurrences[0].id).calendar_event_id).toBe(seriesId);
+
+  await expect(upcoming.getByRole('button', { name: /Serie editable/ })).toHaveCount(1);
+  await upcoming.getByRole('button', { name: /Serie editable/ }).first().click();
+  detail = page.getByRole('dialog', { name: 'Serie editable' });
+  await detail.getByRole('button', { name: 'Editar toda la serie' }).click();
+  composer = page.getByRole('dialog', { name: 'Editar serie recurrente' });
+  await composer.getByLabel('Nombre del evento').fill('Serie completa editada');
+  await composer.getByRole('button', { name: 'Guardar cambios de la serie' }).click();
+  await expect(page.getByText('Serie recurrente actualizada en Agenda.')).toBeVisible();
+
+  expect(recurringSeriesMutationRequests).toHaveLength(2);
+  expect(recurringSeriesMutationRequests[1].payload).toMatchObject({
+    seriesId,
+    scope: 'entire_series',
+    selectedOccurrenceId: occurrences[0].id,
+    event: { title: 'Serie completa editada' },
+  });
+  expect(calendarEvents.find((row) => row.id === seriesId)).toMatchObject({
+    title: 'Serie completa editada',
+    recurrence_rule: { frequency: 'DAILY' },
+  });
 });

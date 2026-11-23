@@ -15,6 +15,7 @@ import {
 } from "../_shared/agenda-event-profile.ts";
 import { resolveLocalDateTimeRange, TzdbVersionError } from "../agenda-time-resolve/resolver.ts";
 import { assessOwnerProtectedTimeConflicts } from "../_shared/protected-time-conflicts.ts";
+import { assessOwnerEventTaskScheduleConflicts } from "../_shared/event-task-schedule-conflicts.ts";
 
 export const MAX_REQUEST_BYTES = 32 * 1024;
 const JSON_HEADERS = {
@@ -118,13 +119,17 @@ export async function handleRequest(
   try { body = JSON.parse(raw); } catch { return json({ error: "VALID_JSON_REQUIRED" }, 400); }
   if (!body || typeof body !== "object" || Array.isArray(body)
     || !("event" in body)
-    || Object.keys(body).some((key) => !["event", "protectedTimeDecisions"].includes(key))) {
+    || Object.keys(body).some((key) => !["event", "protectedTimeDecisions", "taskScheduleDecisions"].includes(key))) {
     return json({ error: "BODY_MUST_CONTAIN_EVENT_AND_OPTIONAL_PROTECTED_TIME_DECISIONS" }, 422);
   }
-  const input = body as { event: unknown; protectedTimeDecisions?: unknown };
+  const input = body as { event: unknown; protectedTimeDecisions?: unknown; taskScheduleDecisions?: unknown };
   const requestedProtectedTimeDecisions = input.protectedTimeDecisions ?? [];
   if (!Array.isArray(requestedProtectedTimeDecisions)) {
     return json({ error: "PROTECTED_TIME_DECISIONS_MUST_BE_AN_ARRAY" }, 422);
+  }
+  const requestedTaskScheduleDecisions = input.taskScheduleDecisions ?? [];
+  if (!Array.isArray(requestedTaskScheduleDecisions)) {
+    return json({ error: "TASK_SCHEDULE_DECISIONS_MUST_BE_AN_ARRAY" }, 422);
   }
 
   try {
@@ -133,6 +138,7 @@ export async function handleRequest(
       eventDraft,
       undefined,
       requestedProtectedTimeDecisions,
+      requestedTaskScheduleDecisions,
     );
 
     // Fast replay path: no IANA resolution, new Event ID or mutable resolver
@@ -184,6 +190,19 @@ export async function handleRequest(
         conflicts: conflictAssessment.conflicts,
       }, 409);
     }
+    const taskScheduleAssessment = await assessOwnerEventTaskScheduleConflicts({
+      supabaseAdmin: ctx.supabaseAdmin,
+      ownerProfileId: profile.profileId,
+      event: candidateRecord,
+      suppliedDecisions: requestedTaskScheduleDecisions,
+      now,
+    });
+    if (!taskScheduleAssessment.ok) {
+      return json({
+        error: taskScheduleAssessment.code,
+        conflicts: taskScheduleAssessment.conflicts,
+      }, 409);
+    }
     const eventRecord = buildEventInsertRecord({
       eventDraft: readyDraft,
       eventId,
@@ -191,6 +210,9 @@ export async function handleRequest(
       now,
       protectedTimeDecisions: [...conflictAssessment.assessment.decisions],
       protectedTimeSnapshot: [...conflictAssessment.assessment.snapshot],
+      taskScheduleDecisions: [...taskScheduleAssessment.assessment.decisions],
+      taskScheduleSnapshot: [...taskScheduleAssessment.assessment.snapshot],
+      taskScheduleWindow: taskScheduleAssessment.assessment.candidate,
     });
     const result = await ctx.supabaseAdmin.rpc("create_calendar_event_once", {
       p_owner_user_id: profile.profileId,
@@ -214,7 +236,8 @@ export async function handleRequest(
       return json({ error: error.message }, 422);
     }
     if (error instanceof Error && (error.message === "AGENDA_TIME_ZONE_LOOKUP_FAILED"
-      || error.message === "PROTECTED_TIME_CONFLICT_LOOKUP_FAILED")) {
+      || error.message === "PROTECTED_TIME_CONFLICT_LOOKUP_FAILED"
+      || error.message === "TASK_SCHEDULE_CONFLICT_LOOKUP_FAILED")) {
       return json({ error: error.message }, 503);
     }
     return json({ error: "EVENT_CREATE_FAILED" }, 500);

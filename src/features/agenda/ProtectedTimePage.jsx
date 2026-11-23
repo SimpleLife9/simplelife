@@ -96,11 +96,19 @@ async function invokeMutation(body, key) {
   });
   if (error) {
     let message = error.message || 'No se pudo actualizar el tiempo protegido.';
+    let responseBody = null;
+    let status = null;
     try {
-      const response = error.context instanceof Response ? await error.context.clone().json() : null;
-      if (response?.error) message = response.error;
+      if (error.context instanceof Response) {
+        status = error.context.status;
+        responseBody = await error.context.clone().json();
+      }
+      if (responseBody?.error) message = responseBody.error;
     } catch { /* keep SDK error message */ }
-    throw new Error(message);
+    const failure = new Error(message);
+    failure.status = status;
+    failure.responseBody = responseBody;
+    throw failure;
   }
   if (!data?.blockId) throw new Error('El servidor no confirmó el bloque protegido.');
   return data;
@@ -117,6 +125,8 @@ export function ProtectedTimePage({ profile, refreshKey, runAction, busy }) {
   const [draft, setDraft] = useState(() => defaultDraft(DEFAULT_TIME_ZONE));
   const [pendingKey, setPendingKey] = useState(null);
   const [confirmTarget, setConfirmTarget] = useState(null);
+  const [conflictPrompt, setConflictPrompt] = useState(null);
+  const [conflictChoices, setConflictChoices] = useState({});
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -178,6 +188,8 @@ export function ProtectedTimePage({ profile, refreshKey, runAction, busy }) {
   const setField = (name, value) => {
     setDraft((current) => ({ ...current, [name]: value }));
     setPendingKey(null);
+    setConflictPrompt(null);
+    setConflictChoices({});
     setLocalError('');
   };
 
@@ -186,6 +198,8 @@ export function ProtectedTimePage({ profile, refreshKey, runAction, busy }) {
     setEditingBlock(null);
     setDraft(defaultDraft(timeZone));
     setPendingKey(null);
+    setConflictPrompt(null);
+    setConflictChoices({});
     setShowForm(true);
   };
 
@@ -210,6 +224,8 @@ export function ProtectedTimePage({ profile, refreshKey, runAction, busy }) {
       endsNextDay: block.ends_next_day === true,
     });
     setPendingKey(null);
+    setConflictPrompt(null);
+    setConflictChoices({});
     setShowForm(true);
   };
 
@@ -218,6 +234,8 @@ export function ProtectedTimePage({ profile, refreshKey, runAction, busy }) {
     setShowForm(false);
     setEditingBlock(null);
     setPendingKey(null);
+    setConflictPrompt(null);
+    setConflictChoices({});
   };
 
   const buildDraftPayload = () => {
@@ -247,18 +265,18 @@ export function ProtectedTimePage({ profile, refreshKey, runAction, busy }) {
       });
   };
 
-  const submitForm = async (event) => {
-    event.preventDefault();
+  const submitDraft = async (taskScheduleDecisions = []) => {
     let block;
     try {
       block = buildDraftPayload();
     } catch (error) {
       setLocalError(error.message || 'Revisa los datos del bloque.');
-      return;
+      return false;
     }
     const key = pendingKey || uuidv7();
     setPendingKey(key);
     setSaving(true);
+    setConflictPrompt(null);
     const body = editingBlock
       ? {
         action: 'edit',
@@ -267,38 +285,105 @@ export function ProtectedTimePage({ profile, refreshKey, runAction, busy }) {
         block,
       }
       : { action: 'create', block };
-    const success = await runAction(
-      () => invokeMutation(body, key),
-      editingBlock ? 'Tiempo protegido actualizado.' : 'Tiempo protegido guardado.',
-    );
+    if (taskScheduleDecisions.length) body.taskScheduleDecisions = taskScheduleDecisions;
+    const success = await runAction(async () => {
+      try {
+        return await invokeMutation(body, key);
+      } catch (error) {
+        const response = error?.responseBody;
+        if (response && ['TASK_SCHEDULE_CONFLICTS', 'TASK_SCHEDULE_CONFLICTS_CHANGED'].includes(response.error)) {
+          setConflictPrompt(response);
+          setConflictChoices({});
+          throw new Error(response.error === 'TASK_SCHEDULE_CONFLICTS_CHANGED'
+            ? 'Las reservas cambiaron mientras revisabas los cruces. Revisa la lista actualizada.'
+            : 'Hay reservas de tareas que se cruzan. Revisa cada cruce antes de guardar.');
+        }
+        throw error;
+      }
+    }, editingBlock ? 'Tiempo protegido actualizado.' : 'Tiempo protegido guardado.');
     setSaving(false);
     if (success) {
       setShowForm(false);
       setEditingBlock(null);
       setPendingKey(null);
+      setConflictPrompt(null);
+      setConflictChoices({});
       setLocalError('');
     }
+    return success;
   };
 
-  const mutateBlock = async (action, block) => {
+  const submitForm = (event) => {
+    event.preventDefault();
+    void submitDraft();
+  };
+
+  const saveWithTaskScheduleDecisions = () => {
+    if (!conflictPrompt || busy || saving || confirmTarget) return;
+    const conflicts = conflictPrompt.taskScheduleConflicts || [];
+    if (!conflicts.length || conflicts.some((item) => !conflictChoices[item.conflictKey])) return;
+    const decisions = conflicts.map((item) => ({
+      taskScheduleId: item.taskScheduleId,
+      taskScheduleUpdatedAt: item.taskScheduleUpdatedAt,
+      occurrenceStartsAt: item.occurrenceStartsAt,
+      decision: 'keep_overlap',
+    }));
+    void submitDraft(decisions);
+  };
+
+  const mutateBlock = async (action, block, taskScheduleDecisions = []) => {
     if (!block) return;
     const key = pendingKey || uuidv7();
     setPendingKey(key);
     setSaving(true);
-    const success = await runAction(
-      () => invokeMutation({
-        action,
-        blockId: block.id,
-        expectedUpdatedAt: block.updated_at,
-      }, key),
-      action === 'archive' ? 'Bloque archivado.'
-        : action === 'restore' ? 'Bloque restaurado.'
-          : 'Bloque enviado a la papelera.',
-    );
+    setConflictPrompt(null);
+    const body = {
+      action,
+      blockId: block.id,
+      expectedUpdatedAt: block.updated_at,
+    };
+    if (taskScheduleDecisions.length) body.taskScheduleDecisions = taskScheduleDecisions;
+    const success = await runAction(async () => {
+      try {
+        return await invokeMutation(body, key);
+      } catch (error) {
+        const response = error?.responseBody;
+        if (response && ['TASK_SCHEDULE_CONFLICTS', 'TASK_SCHEDULE_CONFLICTS_CHANGED'].includes(response.error)) {
+          setConfirmTarget(null);
+          setConflictPrompt({ ...response, action, block });
+          setConflictChoices({});
+          throw new Error(response.error === 'TASK_SCHEDULE_CONFLICTS_CHANGED'
+            ? 'Las reservas cambiaron mientras revisabas los cruces. Revisa la lista actualizada.'
+            : 'Restaurar este bloque se cruza con reservas de tareas. Revisa cada cruce antes de continuar.');
+        }
+        throw error;
+      }
+    }, action === 'archive' ? 'Bloque archivado.'
+      : action === 'restore' ? 'Bloque restaurado.'
+        : 'Bloque enviado a la papelera.');
     setSaving(false);
     if (success) {
       setConfirmTarget(null);
+      setConflictPrompt(null);
+      setConflictChoices({});
       setPendingKey(null);
+    }
+  };
+
+  const saveTaskScheduleConflicts = () => {
+    if (!conflictPrompt || busy || saving) return;
+    const conflicts = conflictPrompt.taskScheduleConflicts || [];
+    if (!conflicts.length || conflicts.some((item) => !conflictChoices[item.conflictKey])) return;
+    const decisions = conflicts.map((item) => ({
+      taskScheduleId: item.taskScheduleId,
+      taskScheduleUpdatedAt: item.taskScheduleUpdatedAt,
+      occurrenceStartsAt: item.occurrenceStartsAt,
+      decision: 'keep_overlap',
+    }));
+    if (conflictPrompt.action === 'restore' && conflictPrompt.block) {
+      void mutateBlock('restore', conflictPrompt.block, decisions);
+    } else {
+      void submitDraft(decisions);
     }
   };
 
@@ -517,6 +602,83 @@ export function ProtectedTimePage({ profile, refreshKey, runAction, busy }) {
                 </button>
               </footer>
             </form>
+          </section>
+        </div>
+      )}
+
+      {conflictPrompt && (
+        <div className="agenda-dialog-backdrop agenda-conflict-backdrop" role="presentation">
+          <section className="agenda-dialog agenda-conflict-dialog" role="alertdialog" aria-modal="true" aria-labelledby="protected-time-task-conflict-title">
+            <header className="agenda-dialog-header">
+              <div>
+                <span className="agenda-section-kicker">CONSENTIMIENTO EXPLÍCITO</span>
+                <h2 id="protected-time-task-conflict-title">Hay reservas de tareas que se cruzan</h2>
+              </div>
+              <button
+                type="button"
+                className="agenda-close-button"
+                aria-label="Cerrar"
+                onClick={() => { setConflictPrompt(null); setConflictChoices({}); }}
+                disabled={busy || saving}
+              >×</button>
+            </header>
+            {conflictPrompt.error === 'TASK_SCHEDULE_CONFLICTS_CHANGED' && (
+              <p className="agenda-conflict-note" role="status">
+                Las reservas cambiaron desde la última revisión. Esta lista refleja los cruces actuales; vuelve a comprobar cada uno.
+              </p>
+            )}
+            <p className="agenda-confirm-copy">
+              {conflictPrompt.action === 'restore'
+                ? <>Restaurar <strong>{conflictPrompt.block?.label}</strong> no moverá ni cancelará ninguna reserva.</>
+                : <>Guardar este bloque no moverá ni cancelará ninguna reserva de tarea.</>}
+              {' '}Debes aceptar cada cruce de forma individual.
+            </p>
+            <div className="agenda-conflict-list">
+              {(conflictPrompt.taskScheduleConflicts || []).map((item) => (
+                <article className="agenda-conflict-card protected-time-task-conflict" key={item.conflictKey}>
+                  <div className="agenda-conflict-card-heading">
+                    <div>
+                      <strong>{item.protectedTimeLabel || 'Tiempo protegido'}</strong>
+                      <small>{item.timeZone || DEFAULT_TIME_ZONE}</small>
+                    </div>
+                    <span className="protected-time-mode is-flexible">Reserva activa</span>
+                  </div>
+                  <p>
+                    Reserva: {formatInstant(item.overlapStartsAt, item.timeZone || DEFAULT_TIME_ZONE)}
+                    {' — '}{formatInstant(item.overlapEndsAt, item.timeZone || DEFAULT_TIME_ZONE)}
+                  </p>
+                  <label className="protected-time-task-conflict-choice">
+                    <input
+                      type="checkbox"
+                      checked={conflictChoices[item.conflictKey] === true}
+                      onChange={(event) => setConflictChoices((current) => ({
+                        ...current,
+                        [item.conflictKey]: event.target.checked,
+                      }))}
+                    />
+                    Acepto mantener esta reserva dentro del tiempo protegido
+                  </label>
+                </article>
+              ))}
+            </div>
+            <p className="agenda-conflict-note">
+              La decisión se guardará junto con la versión exacta de cada reserva y quedará registrada en auditoría.
+            </p>
+            <footer className="agenda-dialog-actions">
+              <button
+                type="button"
+                className="agenda-secondary-button"
+                onClick={() => { setConflictPrompt(null); setConflictChoices({}); }}
+                disabled={busy || saving}
+              >Volver</button>
+              <button
+                type="button"
+                className="button button-primary"
+                onClick={saveTaskScheduleConflicts}
+                disabled={busy || saving || !(conflictPrompt.taskScheduleConflicts || []).length
+                  || (conflictPrompt.taskScheduleConflicts || []).some((item) => conflictChoices[item.conflictKey] !== true)}
+              >{saving ? 'Guardando…' : 'Guardar con estas decisiones'}</button>
+            </footer>
           </section>
         </div>
       )}

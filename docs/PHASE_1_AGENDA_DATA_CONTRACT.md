@@ -83,7 +83,7 @@ Do not model every temporal value as a UTC timestamp. The database and domain la
 
 - Recurring calendar events preserve local wall-clock time and IANA zone; they are not repeated as rigid 24-hour intervals.
 - Approved v1 grammar is versioned and constrained: DAILY, WEEKLY (Monday-based intervals and explicit ISO weekdays), MONTHLY (numeric day or ordinal weekday), YEARLY (selected month plus numeric day or ordinal weekday). Numeric days missing from a month are skipped; LAST is explicit. COUNT and inclusive local-date UNTIL are mutually exclusive.
-- Timed recurrence defaults to gap-next-valid and fold-earlier; later fold is explicit. All-day recurrence remains date-only.
+- Timed recurrence defaults to gap-next-valid and fold-earlier; later fold is explicit. All-day recurrence remains date-only. For timed series, capture an explicit local end clock (`endLocalTime`) and calendar-day offset (`endDayOffset`, 0–30) alongside the start clock. Resolve start and end together through the same pinned IANA TZDB batch. `durationMinutes` remains duration metadata/override data and must never be used to guess the end wall time; this preserves the user's selected local endpoints while the authoritative UTC elapsed interval may vary at DST transitions.
 - Recurrence edits support this occurrence, this and following, and entire series. Past/completed history is not silently rewritten.
 - The complete approved recurrence policy, including horizon, batch, trigger, overrides and TZDB review, is specified in `AGENDA_RECURRING_SERIES_CONTRACT.md`.
 
@@ -125,7 +125,7 @@ Checks enforce title length, allowed status/mode, a complete all-day date range 
 - Canonical row for one materialized occurrence inside the rolling horizon; unique `(calendar_event_id, occurrence_key)`.
 - Stores owner, series/Event ID, stable key version, original local date/time and effective local date/time, occurrence status, override kind, and optimistic row version.
 - Timed rows also store IANA zone, resolved UTC start/end, resolver/TZDB versions and resolution metadata. All-day rows store date-only values and no UTC instants.
-- Series-level duration is inherited; an occurrence may override duration/end semantics. Moved and modified instances retain the original occurrence key.
+- The series retains explicit local start/end clocks and `endDayOffset`; an occurrence may override its local end endpoint while retaining its original occurrence key. `durationMinutes` remains metadata and is not a substitute for the explicit end endpoint. The authoritative resolved UTC interval must remain positive.
 - The materialized row is authoritative for that slot. Recalculation must not overwrite it; a TZDB difference moves it to `needs_review` until explicit version-bound acceptance.
 - Rows are owner-scoped and written only through the trusted authenticated server path. This is a schema proposal only, not DDL authorization.
 

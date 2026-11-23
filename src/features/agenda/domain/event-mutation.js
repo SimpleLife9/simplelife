@@ -44,10 +44,11 @@ export function normalizeExpectedEventVersion(value) {
  *   expectedUpdatedAt: unknown,
  *   action: string,
  *   eventDraft?: NormalizedEventDraft | null,
- *   protectedTimeDecisions?: Record<string, unknown>[]
+ *   protectedTimeDecisions?: Record<string, unknown>[],
+ *   taskScheduleDecisions?: Record<string, unknown>[]
  * }} input
  */
-export function normalizeEventMutation({ eventId, expectedUpdatedAt, action, eventDraft = null, protectedTimeDecisions = /** @type {Record<string, unknown>[]} */ ([]) }) {
+export function normalizeEventMutation({ eventId, expectedUpdatedAt, action, eventDraft = null, protectedTimeDecisions = /** @type {Record<string, unknown>[]} */ ([]), taskScheduleDecisions = /** @type {Record<string, unknown>[]} */ ([]) }) {
   const normalizedEventId = normalizeEventMutationId(eventId);
   const normalizedVersion = normalizeExpectedEventVersion(expectedUpdatedAt);
   assert(EVENT_MUTATION_ACTIONS.includes(action), 'Unsupported Event mutation action.');
@@ -59,16 +60,36 @@ export function normalizeEventMutation({ eventId, expectedUpdatedAt, action, eve
   }
   assert(Array.isArray(protectedTimeDecisions) && protectedTimeDecisions.length <= 500,
     'protectedTimeDecisions must be an array with at most 500 entries.');
-  assert(action === 'edit' || protectedTimeDecisions.length === 0,
-    'Only an Event edit may include Protected Time decisions.');
+  assert(['edit', 'reopen', 'restore'].includes(action) || protectedTimeDecisions.length === 0,
+    'Protected Time decisions are only valid for Event edit, reopen or restore.');
   assert(protectedTimeDecisions.every((item) => item && typeof item === 'object' && !Array.isArray(item)),
     'Every Protected Time decision must be an object.');
+  assert(Array.isArray(taskScheduleDecisions) && taskScheduleDecisions.length <= 500,
+    'taskScheduleDecisions must be an array with at most 500 entries.');
+  assert(['edit', 'reopen', 'restore'].includes(action) || taskScheduleDecisions.length === 0,
+    'TaskSchedule decisions are only valid for Event edit, reopen or restore.');
+  assert(taskScheduleDecisions.every((item) => item && typeof item === 'object' && !Array.isArray(item)),
+    'Every TaskSchedule decision must be an object.');
+  for (const item of taskScheduleDecisions) {
+    const keys = ['taskScheduleId', 'taskScheduleUpdatedAt', 'decision'];
+    assert(Object.keys(item).length === 3 && Object.keys(item).every((key) => keys.includes(key)),
+      'TaskSchedule decision contains unsupported or missing fields.');
+    assert(typeof item.taskScheduleId === 'string' && UUID_V7_PATTERN.test(item.taskScheduleId),
+      'TaskSchedule decision ID must be a UUIDv7.');
+    assert(typeof item.taskScheduleUpdatedAt === 'string' && OFFSET_INSTANT_PATTERN.test(item.taskScheduleUpdatedAt)
+      && Number.isFinite(Date.parse(item.taskScheduleUpdatedAt)),
+    'TaskSchedule decision version must be an ISO timestamp with an explicit offset.');
+    assert(item.decision === 'keep_overlap', 'TaskSchedule decision must be keep_overlap.');
+  }
+  assert(new Set(taskScheduleDecisions.map((item) => item.taskScheduleId.toLowerCase())).size === taskScheduleDecisions.length,
+    'TaskSchedule decisions cannot contain duplicates.');
   return Object.freeze({
     eventId: normalizedEventId,
     expectedUpdatedAt: normalizedVersion,
     action,
     eventDraft,
     protectedTimeDecisions: Object.freeze(protectedTimeDecisions.map((item) => Object.freeze({ ...item }))),
+    taskScheduleDecisions: Object.freeze(taskScheduleDecisions.map((item) => Object.freeze({ ...item }))),
   });
 }
 
@@ -78,14 +99,19 @@ export function buildEventMutationIntent(mutation) {
     ? buildEventCreateIntent(normalized.eventDraft).canonicalPayload
     : null;
   // Fixed positional tuple avoids object-property-order ambiguity.
-  const canonicalPayload = JSON.stringify([
+  const canonicalTuple = [
     EVENT_MUTATION_INTENT_VERSION,
     normalized.eventId,
     normalized.expectedUpdatedAt,
     normalized.action,
     draftIntent,
     normalized.protectedTimeDecisions,
-  ]);
+  ];
+  const scheduleDecisions = normalized.taskScheduleDecisions
+    .map((item) => [item.taskScheduleId.toLowerCase(), item.taskScheduleUpdatedAt, item.decision])
+    .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+  if (scheduleDecisions.length) canonicalTuple.push('event-task-schedule-decision-v1', scheduleDecisions);
+  const canonicalPayload = JSON.stringify(canonicalTuple);
   return Object.freeze({
     version: EVENT_MUTATION_INTENT_VERSION,
     canonicalPayload,

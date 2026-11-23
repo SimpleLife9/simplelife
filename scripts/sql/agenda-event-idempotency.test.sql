@@ -74,7 +74,13 @@ AS $function$
     'created_at', p_created_at,
     'updated_at', p_created_at,
     'protected_time_decisions', '[]'::jsonb,
-    'protected_time_snapshot', '[]'::jsonb
+    'protected_time_snapshot', '[]'::jsonb,
+    'task_schedule_conflict_decisions', '[]'::jsonb,
+    'task_schedule_snapshot', '[]'::jsonb,
+    'task_schedule_window', jsonb_build_object(
+      'startsAt', '2026-11-23T00:00:00.000Z',
+      'endsAt', '2026-11-24T00:00:00.000Z'
+    )
   );
 $function$;
 
