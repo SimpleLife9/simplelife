@@ -913,6 +913,20 @@ async function mockSupabaseSession(page, initialData = {}) {
         protectedTimeDecisions: decisions,
         taskScheduleDecisions: taskDecisions,
       });
+      const accepted = new Map(decisions.map((item) => [
+        item.blockId + ':' + item.occurrenceStartsAt,
+        item,
+      ]));
+      const hasExplicitDecisions = protectedTimeConflicts.every((conflict) => {
+        const choice = accepted.get(conflict.conflictKey);
+        return choice
+          && choice.blockUpdatedAt === conflict.blockUpdatedAt
+          && choice.decision === conflict.requiredDecision;
+      });
+      if (protectedTimeConflicts.length && !hasExplicitDecisions) {
+        await json(409, { error: 'PROTECTED_TIME_CONFLICTS', conflicts: protectedTimeConflicts });
+        return;
+      }
       const queuedTaskConflict = eventTaskScheduleConflictResponses.shift();
       if (queuedTaskConflict) {
         pendingEventTaskScheduleConflicts = queuedTaskConflict.body?.conflicts || [];
@@ -935,20 +949,6 @@ async function mockSupabaseSession(page, initialData = {}) {
           return;
         }
         taskScheduleConflictsForCommit = [...pendingEventTaskScheduleConflicts];
-      }
-      const accepted = new Map(decisions.map((item) => [
-        item.blockId + ':' + item.occurrenceStartsAt,
-        item,
-      ]));
-      const hasExplicitDecisions = protectedTimeConflicts.every((conflict) => {
-        const choice = accepted.get(conflict.conflictKey);
-        return choice
-          && choice.blockUpdatedAt === conflict.blockUpdatedAt
-          && choice.decision === conflict.requiredDecision;
-      });
-      if (protectedTimeConflicts.length && !hasExplicitDecisions) {
-        await json(409, { error: 'PROTECTED_TIME_CONFLICTS', conflicts: protectedTimeConflicts });
-        return;
       }
       pendingEventTaskScheduleConflicts = [];
       const createdAt = '2026-11-22T18:00:00.000Z';
@@ -3968,7 +3968,7 @@ test('Agenda requires one explicit Protected Time decision per hard/flexible ove
 });
 
 
-test('Agenda preserves TaskSchedule consent when Protected Time asks for a second decision', async ({ page }) => {
+test('Agenda preserves Protected Time consent when TaskSchedule asks for a second decision', async ({ page }) => {
   const today = await todayInBrowserHavana(page);
   const taskScheduleId = '019a0000-0000-7000-8000-000000000691';
   const taskScheduleUpdatedAt = '2026-11-22T18:00:00.000000Z';
@@ -4024,36 +4024,41 @@ test('Agenda preserves TaskSchedule consent when Protected Time asks for a secon
   await composer.getByLabel('Hasta (incluido)', { exact: true }).fill(today);
   await composer.getByRole('button', { name: 'Guardar evento' }).click();
 
-  const taskDialog = page.getByRole('alertdialog', { name: 'El evento coincide con tiempo reservado' });
-  await expect(taskDialog).toBeVisible();
-  await taskDialog.getByLabel('Decisión para reserva de tarea').selectOption('keep_overlap');
-  await taskDialog.getByRole('button', { name: 'Guardar y mantener ambos' }).click();
-
   const protectedDialog = page.getByRole('alertdialog', { name: 'Hay compromisos que se cruzan' });
   await expect(protectedDialog).toBeVisible();
   await protectedDialog.getByLabel('Tu decisión para este cruce').selectOption('override_hard');
-  expect(idempotencyRequests).toHaveLength(2);
-  expect(idempotencyRequests[1].taskScheduleDecisions).toEqual([{
-    taskScheduleId,
-    taskScheduleUpdatedAt,
-    decision: 'keep_overlap',
-  }]);
-  expect(idempotencyRequests[1].protectedTimeDecisions).toEqual([]);
+  expect(idempotencyRequests).toHaveLength(1);
+  expect(idempotencyRequests[0].protectedTimeDecisions).toEqual([]);
+  expect(idempotencyRequests[0].taskScheduleDecisions).toEqual([]);
   await protectedDialog.getByRole('button', { name: 'Guardar con estas decisiones' }).click();
+
+  const taskDialog = page.getByRole('alertdialog', { name: 'El evento coincide con tiempo reservado' });
+  await expect(taskDialog).toBeVisible();
+  await taskDialog.getByLabel('Decisión para reserva de tarea').selectOption('keep_overlap');
+  expect(idempotencyRequests).toHaveLength(2);
+  expect(idempotencyRequests[1].key).toBe(idempotencyRequests[0].key);
+  expect(idempotencyRequests[1].protectedTimeDecisions).toEqual([{
+    blockId,
+    blockUpdatedAt,
+    occurrenceStartsAt,
+    decision: 'override_hard',
+  }]);
+  expect(idempotencyRequests[1].taskScheduleDecisions).toEqual([]);
+  await taskDialog.getByRole('button', { name: 'Guardar y mantener ambos' }).click();
 
   await expect(page.getByText('Evento guardado en Agenda.')).toBeVisible();
   expect(idempotencyRequests).toHaveLength(3);
   expect(idempotencyRequests[2].key).toBe(idempotencyRequests[0].key);
-  expect(idempotencyRequests[2].taskScheduleDecisions).toEqual([{
-    taskScheduleId,
-    taskScheduleUpdatedAt,
-    decision: 'keep_overlap',
-  }]);
   expect(idempotencyRequests[2].protectedTimeDecisions).toEqual([{
     blockId,
     blockUpdatedAt,
     occurrenceStartsAt,
     decision: 'override_hard',
+  }]);
+  expect(idempotencyRequests[2].taskScheduleDecisions).toEqual([{
+    taskScheduleId,
+    taskScheduleUpdatedAt,
+    decision: 'keep_overlap',
   }]);
   expect(insertedAgendaEvents).toHaveLength(1);
   expect(calendarEvents[0].task_schedule_conflict_decisions).toHaveLength(1);
