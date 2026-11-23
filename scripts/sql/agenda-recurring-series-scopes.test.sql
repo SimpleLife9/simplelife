@@ -23,6 +23,8 @@ VALUES ('019a0000-0000-7000-8000-000000000001',
 ON CONFLICT (id) DO NOTHING;
 
 -- Test-only audit probe. service_role intentionally has no direct audit SELECT grant.
+CREATE TEMP TABLE series_scope_test_context (marker boolean) ON COMMIT DROP;
+
 CREATE FUNCTION pg_temp.series_scope_audit_count(
   p_owner uuid,
   p_entity_type text,
