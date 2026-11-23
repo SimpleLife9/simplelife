@@ -1313,10 +1313,16 @@ test('Inbox recovers and organizes a saved text capture whose first fragment ins
 
 test('Inbox refuses to invent fragments for an already processed capture', async ({ page }) => {
   const capture = {
-    ...defaultCaptures[0],
     id: '00000000-0000-7000-8000-000000000777',
-    processing_status: 'processed',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    input_type: 'text',
     content_original: 'Processed capture with missing part history',
+    attention_status: 'needs_review',
+    processing_status: 'processed',
+    sync_status: 'synced',
+    captured_at: '2026-11-23T12:00:00.000Z',
+    deleted_at: null,
   };
   const { captures, insertedCaptureParts } = await mockSupabaseSession(page, {
     captures: [capture],
