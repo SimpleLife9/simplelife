@@ -919,6 +919,59 @@ async function mockSupabaseSession(page, initialData = {}) {
       return;
     }
 
+    if (url.pathname === '/functions/v1/agenda-event-series-materialize' && method === 'POST') {
+      const payload = request.postDataJSON();
+      await json(200, {
+        processedSeriesCount: Array.isArray(payload.seriesIds) ? payload.seriesIds.length : 0,
+        materializedCount: 0,
+        horizonDays: 90,
+      });
+      return;
+    }
+
+    if (url.pathname === '/functions/v1/agenda-event-occurrence-mutate' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const row = calendarEventOccurrences.find((item) =>
+        item.id === payload.occurrenceId && item.owner_user_id === profile.id);
+      if (!row) {
+        await json(404, { error: 'OCCURRENCE_NOT_FOUND' });
+        return;
+      }
+      if (Number(row.row_version) !== Number(payload.expectedRowVersion)) {
+        await json(409, { error: 'OCCURRENCE_VERSION_CONFLICT', rowVersion: row.row_version });
+        return;
+      }
+      if (payload.action === 'cancel') {
+        row.occurrence_status = 'cancelled';
+        row.override_kind = 'cancelled';
+      } else if (payload.action === 'move') {
+        row.actual_local_date = payload.actualLocalDate;
+        if (row.temporal_kind === 'all_day') {
+          const [year, month, day] = payload.actualLocalDate.split('-').map(Number);
+          row.start_date = payload.actualLocalDate;
+          row.end_date_exclusive = new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
+        }
+        row.override_kind = 'moved';
+      } else if (payload.action === 'modify') {
+        if (row.temporal_kind === 'all_day') row.end_date_exclusive = payload.endDateExclusive;
+        row.override_kind = 'modified';
+      }
+      row.occurrence_status = payload.action === 'cancel' ? 'cancelled' : 'scheduled';
+      row.review_candidate = null;
+      row.row_version = Number(row.row_version || 1) + 1;
+      row.updated_at = new Date().toISOString();
+      await json(200, {
+        occurrenceId: row.id,
+        seriesEventId: row.calendar_event_id,
+        occurrenceStatus: row.occurrence_status,
+        overrideKind: row.override_kind,
+        rowVersion: row.row_version,
+        updatedAt: row.updated_at,
+        replayed: false,
+      });
+      return;
+    }
+
     if (url.pathname === '/functions/v1/agenda-event-series-create' && method === 'POST') {
       const requestBody = request.postDataJSON();
       const event = requestBody.event;
@@ -986,6 +1039,11 @@ async function mockSupabaseSession(page, initialData = {}) {
           starts_at: null,
           ends_at: null,
           occurrence_status: 'scheduled',
+          override_kind: null,
+          review_candidate: null,
+          row_version: 1,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
         });
       }
       calendarEvents.unshift(series);
@@ -4286,10 +4344,38 @@ test('Agenda creates a recurring all-day series and renders each persisted occur
   const upcoming = page.getByRole('region', { name: 'Próximos compromisos' });
   await expect(upcoming.getByRole('button', { name: 'Rutina diaria' })).toHaveCount(2);
   await upcoming.getByRole('button', { name: 'Rutina diaria' }).first().click();
-  const detail = page.getByRole('dialog', { name: 'Rutina diaria' });
+  let detail = page.getByRole('dialog', { name: 'Rutina diaria' });
   await expect(detail).toContainText('Parte de una serie');
   await expect(detail.getByRole('button', { name: 'Editar' })).toHaveCount(0);
-  await detail.getByLabel('Cerrar').click();
+  const originalOccurrenceKey = calendarEventOccurrences[0].occurrence_key;
+
+  const movedDate = await page.evaluate((value) => {
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(Date.UTC(year, month - 1, day + 2)).toISOString().slice(0, 10);
+  }, today);
+  await detail.getByRole('button', { name: 'Mover esta fecha' }).click();
+  await page.getByLabel('Nueva fecha de inicio').fill(movedDate);
+  await page.getByRole('button', { name: 'Guardar esta fecha' }).click();
+  await expect(page.getByText('Esta ocurrencia fue reprogramada. Su identidad original se conserva.')).toBeVisible();
+  await expect(detail).toHaveCount(0);
+
+  await expect(upcoming.getByRole('button', { name: 'Rutina diaria' })).toHaveCount(2);
+  await upcoming.getByRole('button', { name: 'Rutina diaria' }).last().click();
+  detail = page.getByRole('dialog', { name: 'Rutina diaria' });
+  await expect(detail).toContainText('Parte de una serie');
+  expect(calendarEventOccurrences.find((row) => row.occurrence_key === originalOccurrenceKey).actual_local_date)
+    .toBe(movedDate);
+
+  await detail.getByRole('button', { name: 'Cancelar esta fecha' }).click();
+  const cancellation = page.getByRole('alertdialog', { name: 'Cancelar esta ocurrencia' });
+  await cancellation.getByRole('button', { name: 'Cancelar esta fecha' }).click();
+  await expect(page.getByText('Esta ocurrencia fue cancelada. Las demás fechas de la serie se conservan.')).toBeVisible();
+  await expect(detail).toHaveCount(0);
+  await expect(upcoming.getByRole('button', { name: 'Rutina diaria' })).toHaveCount(1);
+  expect(calendarEventOccurrences.find((row) => row.occurrence_key === originalOccurrenceKey).occurrence_status)
+    .toBe('cancelled');
+  expect(calendarEvents).toHaveLength(1);
+  expect(calendarEventOccurrences.filter((row) => row.occurrence_status === 'scheduled')).toHaveLength(1);
 
   expect(recurringEventRequests).toHaveLength(1);
   expect(recurringEventRequests[0].key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
