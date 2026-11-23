@@ -339,7 +339,6 @@ DECLARE
   v_claimed_rows integer;
   v_payload_hash bytea;
   v_response jsonb;
-  v_protected_result text;
 BEGIN
   IF current_user <> 'service_role' THEN
     RAISE EXCEPTION 'create_recurring_calendar_event_once requires service_role'
@@ -440,6 +439,73 @@ BEGIN
        CASE WHEN v_event.temporal_kind = 'all_day' THEN v_event.start_date::text
        ELSE to_char(v_event.start_local, 'YYYY-MM-DD') END THEN
     RAISE EXCEPTION 'Recurring Event identity, owner or recurrence anchor is invalid'
+      USING ERRCODE = '22023';
+  END IF;
+
+  IF (v_event.temporal_kind = 'all_day' AND (
+       v_event.recurrence_end_local_time IS NOT NULL
+       OR v_event.end_date_exclusive IS DISTINCT FROM
+         (v_event.start_date + v_event.recurrence_end_day_offset + 1)
+     ))
+     OR (v_event.temporal_kind = 'zoned_civil' AND (
+       v_event.recurrence_end_local_time IS NULL
+       OR v_event.time_zone IS DISTINCT FROM v_event.recurrence_rule->>'timeZone'
+       OR v_event.start_local::time IS DISTINCT FROM (v_event.recurrence_rule->>'localTime')::time
+       OR v_event.end_local::time IS DISTINCT FROM v_event.recurrence_end_local_time
+       OR v_event.end_local::date IS DISTINCT FROM
+         (v_event.start_local::date + v_event.recurrence_end_day_offset)
+     )) THEN
+    RAISE EXCEPTION 'Recurring Event master local start/end do not match its recurrence rule'
+      USING ERRCODE = '22023';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements(p_occurrence_rows) AS item(value)
+    WHERE item.value->>'calendar_event_id' IS DISTINCT FROM v_event.id::text
+       OR item.value->>'owner_user_id' IS DISTINCT FROM p_owner_user_id::text
+       OR item.value->>'created_by_user_id' IS DISTINCT FROM p_owner_user_id::text
+       OR item.value->>'updated_by_user_id' IS DISTINCT FROM p_owner_user_id::text
+       OR item.value->>'occurrence_status' IS DISTINCT FROM 'scheduled'
+       OR item.value->>'override_kind' IS NOT NULL
+       OR item.value->'review_candidate' IS DISTINCT FROM 'null'::jsonb
+       OR (item.value->>'row_version')::bigint IS DISTINCT FROM 1
+       OR item.value->>'temporal_kind' IS DISTINCT FROM v_event.temporal_kind
+       OR item.value->>'occurrence_key' NOT LIKE 'v1:' || v_event.id::text || ':%'
+       OR item.value->>'actual_local_date' IS DISTINCT FROM item.value->>'original_local_date'
+       OR (
+         v_event.temporal_kind = 'all_day'
+         AND (
+           item.value->>'original_local_time' IS NOT NULL
+           OR item.value->>'actual_local_time' IS NOT NULL
+           OR item.value->>'start_date' IS DISTINCT FROM item.value->>'actual_local_date'
+           OR item.value->>'end_date_exclusive' IS DISTINCT FROM
+             ((item.value->>'actual_local_date')::date + v_event.recurrence_end_day_offset + 1)::text
+           OR item.value->>'starts_at' IS NOT NULL
+           OR item.value->>'ends_at' IS NOT NULL
+           OR item.value->>'time_zone' IS NOT NULL
+         )
+       )
+       OR (
+         v_event.temporal_kind = 'zoned_civil'
+         AND (
+           (item.value->>'original_local_time')::time IS DISTINCT FROM (v_event.recurrence_rule->>'localTime')::time
+           OR (item.value->>'actual_local_time')::time IS DISTINCT FROM (v_event.recurrence_rule->>'localTime')::time
+           OR (item.value->>'start_local')::timestamp IS DISTINCT FROM
+             ((item.value->>'original_local_date')::date + (v_event.recurrence_rule->>'localTime')::time)
+           OR (item.value->>'end_local')::timestamp IS DISTINCT FROM
+             (((item.value->>'original_local_date')::date + v_event.recurrence_end_day_offset)
+               + v_event.recurrence_end_local_time)
+           OR item.value->>'time_zone' IS DISTINCT FROM v_event.time_zone
+           OR (item.value->>'starts_at')::timestamptz >= (item.value->>'ends_at')::timestamptz
+           OR item.value->'resolver_metadata'->>'rulesSource' IS DISTINCT FROM 'iana-tzdb'
+           OR item.value->'resolver_metadata'->>'authoritative' IS DISTINCT FROM 'true'
+           OR nullif(item.value->'resolver_metadata'->>'rulesVersion', '') IS NULL
+           OR nullif(item.value->'resolver_metadata'->>'resolverVersion', '') IS NULL
+         )
+       )
+  ) THEN
+    RAISE EXCEPTION 'Recurring Event occurrence rows do not match the master rule or authoritative time contract'
       USING ERRCODE = '22023';
   END IF;
 
