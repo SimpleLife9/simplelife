@@ -44,6 +44,10 @@ BEGIN
     'task','Unauthorized correction','edited',
     '019b2000-0000-7000-8000-000000000305'
   ) THEN RAISE EXCEPTION 'A second owner reviewed a foreign capture part'; END IF;
+  IF public.set_inbox_capture_attention_status(
+    '019b2000-0000-7000-8000-000000000101','archived',
+    '019b2000-0000-7000-8000-000000000308'
+  ) THEN RAISE EXCEPTION 'A second owner changed a foreign capture review state'; END IF;
 END;
 $test$;
 RESET ROLE;
@@ -77,6 +81,14 @@ BEGIN
     '019b2000-0000-7000-8000-000000000101',
     '019b2000-0000-7000-8000-000000000307'
   ) THEN RAISE EXCEPTION 'Repeated restore request should be idempotent'; END IF;
+  IF NOT public.set_inbox_capture_attention_status(
+    '019b2000-0000-7000-8000-000000000101','reviewed',
+    '019b2000-0000-7000-8000-000000000308'
+  ) THEN RAISE EXCEPTION 'Owner could not change own capture attention status'; END IF;
+  IF NOT public.set_inbox_capture_attention_status(
+    '019b2000-0000-7000-8000-000000000101','reviewed',
+    '019b2000-0000-7000-8000-000000000309'
+  ) THEN RAISE EXCEPTION 'Repeated same-state attention update should be idempotent'; END IF;
   IF NOT public.review_inbox_capture_part(
     '019b2000-0000-7000-8000-000000000201',
     'task','Manual correction','edited',
@@ -91,8 +103,18 @@ BEGIN
       WHERE entity_id IN (
         '019b2000-0000-7000-8000-000000000101',
         '019b2000-0000-7000-8000-000000000201'
-      )) <> 3 THEN
-    RAISE EXCEPTION 'Trash, restore and part-review decisions must all be audited';
+      )) <> 4 THEN
+    RAISE EXCEPTION 'Trash, restore, attention status and part-review decisions must all be audited';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.audit_event
+    WHERE id='019b2000-0000-7000-8000-000000000308'
+      AND entity_id='019b2000-0000-7000-8000-000000000101'
+      AND action='capture.attention_status_changed'
+      AND details->>'attention_status_before'='needs_review'
+      AND details->>'attention_status_after'='reviewed'
+  ) THEN
+    RAISE EXCEPTION 'Capture attention status transition must be audited';
   END IF;
   IF NOT EXISTS (
     SELECT 1 FROM public.audit_event

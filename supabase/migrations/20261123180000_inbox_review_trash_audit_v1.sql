@@ -92,6 +92,64 @@ ALTER FUNCTION public.restore_inbox_capture(uuid, uuid) OWNER TO postgres;
 REVOKE ALL PRIVILEGES ON FUNCTION public.restore_inbox_capture(uuid, uuid) FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.restore_inbox_capture(uuid, uuid) TO authenticated;
 
+CREATE OR REPLACE FUNCTION public.set_inbox_capture_attention_status(
+  p_capture_id uuid, p_attention_status text, p_audit_id uuid
+)
+RETURNS boolean
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $function$
+DECLARE
+  v_profile_id uuid;
+  v_before_status text;
+  v_now timestamptz := clock_timestamp();
+BEGIN
+  SELECT up.id INTO v_profile_id
+  FROM public.user_profile up
+  WHERE up.auth_user_id = auth.uid() AND up.account_status = 'active';
+  IF v_profile_id IS NULL THEN
+    RAISE EXCEPTION 'Active owner profile required' USING ERRCODE = '42501';
+  END IF;
+  IF p_attention_status IS NULL OR p_attention_status NOT IN ('needs_review','reviewed','archived')
+     OR p_audit_id IS NULL
+     OR (get_byte(uuid_send(p_audit_id), 6) >> 4) <> 7
+     OR (get_byte(uuid_send(p_audit_id), 8) & 192) <> 128 THEN
+    RAISE EXCEPTION 'Invalid Inbox attention status or audit identifier' USING ERRCODE = '22023';
+  END IF;
+
+  SELECT c.attention_status INTO v_before_status
+  FROM public.capture c
+  WHERE c.id = p_capture_id
+    AND c.owner_user_id = v_profile_id
+    AND c.deleted_at IS NULL
+  FOR UPDATE;
+  IF NOT FOUND THEN RETURN false; END IF;
+  IF v_before_status = p_attention_status THEN RETURN true; END IF;
+
+  UPDATE public.capture
+  SET attention_status = p_attention_status, updated_at = v_now
+  WHERE id = p_capture_id AND owner_user_id = v_profile_id AND deleted_at IS NULL;
+  IF NOT FOUND THEN RETURN false; END IF;
+
+  INSERT INTO public.audit_event (
+    id, account_user_id, actor_user_id, action, entity_type, entity_id,
+    result, source, details, occurred_at, recorded_at
+  ) VALUES (
+    p_audit_id, v_profile_id, v_profile_id, 'capture.attention_status_changed',
+    'capture', p_capture_id, 'success', 'user',
+    jsonb_build_object(
+      'attention_status_before',v_before_status,
+      'attention_status_after',p_attention_status
+    ), v_now, v_now
+  );
+  RETURN true;
+END;
+$function$;
+ALTER FUNCTION public.set_inbox_capture_attention_status(uuid, text, uuid) OWNER TO postgres;
+REVOKE ALL PRIVILEGES ON FUNCTION public.set_inbox_capture_attention_status(uuid, text, uuid)
+  FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.set_inbox_capture_attention_status(uuid, text, uuid) TO authenticated;
+
 CREATE OR REPLACE FUNCTION public.review_inbox_capture_part(
   p_capture_part_id uuid,
   p_category text,

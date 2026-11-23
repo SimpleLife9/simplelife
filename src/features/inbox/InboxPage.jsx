@@ -186,13 +186,13 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
   }), [rows, captureParts, captureLinks, attentionFilter]);
 
   const updateAttention = (capture, nextStatus) => runAction(async () => {
-    const { data, error } = await supabase.from('capture')
-      .update({ attention_status: nextStatus })
-      .eq('id', capture.id)
-      .eq('owner_user_id', profile.id)
-      .select('id');
+    const { data, error } = await supabase.rpc('set_inbox_capture_attention_status', {
+      p_capture_id: capture.id,
+      p_attention_status: nextStatus,
+      p_audit_id: uuidv7(),
+    });
     if (error) throw error;
-    if (!data?.length) throw new Error('No se pudo actualizar la captura. Puede que ya no exista o no pertenezca a esta cuenta.');
+    if (data !== true) throw new Error('No se pudo actualizar la captura. Puede que ya no exista o no pertenezca a esta cuenta.');
   }, nextStatus === 'reviewed'
     ? 'Captura marcada como revisada.'
     : nextStatus === 'archived'

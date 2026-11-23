@@ -937,6 +937,27 @@ async function mockSupabaseSession(page, initialData = {}) {
       return;
     }
 
+    if (url.pathname === '/rest/v1/rpc/set_inbox_capture_attention_status' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const capture = captures.find((item) => item.id === payload.p_capture_id);
+      if (!capture || capture.deleted_at) { await json(200, false); return; }
+      const before = capture.attention_status;
+      if (before !== payload.p_attention_status) {
+        capture.attention_status = payload.p_attention_status;
+        updatedCaptures.push({ ...capture });
+        reviewAuditEvents.push({
+          id: payload.p_audit_id,
+          entity_type: 'capture',
+          entity_id: capture.id,
+          action: 'capture.attention_status_changed',
+          occurred_at: new Date().toISOString(),
+          details: { attention_status_before: before, attention_status_after: payload.p_attention_status },
+        });
+      }
+      await json(200, true);
+      return;
+    }
+
     if (url.pathname === '/rest/v1/rpc/review_inbox_capture_part' && method === 'POST') {
       const payload = request.postDataJSON();
       const part = captureParts.find((item) => item.id === payload.p_capture_part_id);
