@@ -501,12 +501,11 @@ BEGIN
     RAISE EXCEPTION 'Unsupported Protected Time decision audit operation: %', TG_OP;
   END IF;
 
-  IF CASE
-       WHEN jsonb_typeof(NEW.protected_time_decisions) = 'array'
-         THEN jsonb_array_length(NEW.protected_time_decisions) > 500
-       ELSE true
-     END THEN
-    RAISE EXCEPTION 'Protected Time decision evidence must be a bounded JSON array';
+  IF jsonb_typeof(NEW.protected_time_decisions) IS DISTINCT FROM 'array' THEN
+    RAISE EXCEPTION 'Protected Time decision evidence must be a JSON array';
+  END IF;
+  IF jsonb_array_length(NEW.protected_time_decisions) > 500 THEN
+    RAISE EXCEPTION 'Protected Time decision evidence cannot exceed 500 entries';
   END IF;
 
   IF TG_OP = 'INSERT' AND jsonb_array_length(NEW.protected_time_decisions) = 0 THEN
