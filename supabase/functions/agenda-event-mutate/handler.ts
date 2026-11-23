@@ -251,7 +251,7 @@ export async function handleRequest(
       }
       const currentResult = await ctx.supabaseAdmin
         .from("calendar_event")
-        .select("temporal_kind,start_date,end_date_exclusive,starts_at,ends_at,protected_time_decisions,task_schedule_decisions")
+        .select("temporal_kind,start_date,end_date_exclusive,starts_at,ends_at,protected_time_decisions,task_schedule_conflict_decisions")
         .eq("owner_user_id", profile.profileId)
         .eq("id", mutation.eventId)
         .maybeSingle();
@@ -324,8 +324,8 @@ export async function handleRequest(
           return previous ? [previous] : [];
         })
         : conflictAssessment.assessment.decisions;
-      const taskScheduleDecisionRecords = Array.isArray(currentResult.data.task_schedule_decisions)
-        ? currentResult.data.task_schedule_decisions as Record<string, unknown>[]
+      const taskScheduleDecisionRecords = Array.isArray(currentResult.data.task_schedule_conflict_decisions)
+        ? currentResult.data.task_schedule_conflict_decisions as Record<string, unknown>[]
         : [];
       const taskScheduleDecisionMap = new Map(taskScheduleDecisionRecords
         .filter((item) => typeof item.taskScheduleId === "string")
@@ -387,6 +387,7 @@ export async function handleRequest(
         protectedTimeSnapshot: [...conflictAssessment.assessment.snapshot],
         taskScheduleDecisions: [...taskScheduleDecisionsToPersist],
         taskScheduleSnapshot: [...taskScheduleAssessment.assessment.snapshot],
+        taskScheduleWindow: taskScheduleAssessment.assessment.candidate,
       });
       eventPatch = toEventPatch(record as unknown as Record<string, unknown>);
     }
