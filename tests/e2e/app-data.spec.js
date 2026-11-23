@@ -50,6 +50,7 @@ async function mockSupabaseSession(page, initialData = {}) {
   const calendarEvents = [...(initialData.calendarEvents || [])];
   const calendarEventOccurrences = [...(initialData.calendarEventOccurrences || [])];
   const recurringEventRequests = [];
+  const recurringSeriesMutationRequests = [];
   const protectedTimeBlocks = [...(initialData.protectedTimeBlocks || [])];
   const protectedTimeMutationRequests = [];
   const protectedTimeTaskScheduleConflictResponses = [...(initialData.protectedTimeTaskScheduleConflictResponses || [])];
@@ -972,6 +973,137 @@ async function mockSupabaseSession(page, initialData = {}) {
       return;
     }
 
+    if (url.pathname === '/functions/v1/agenda-event-series-mutate' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const key = request.headers()['idempotency-key'] || '';
+      const series = calendarEvents.find((row) => row.id === payload.seriesId && row.owner_user_id === profile.id);
+      const selected = calendarEventOccurrences.find((row) =>
+        row.id === payload.selectedOccurrenceId
+        && row.calendar_event_id === payload.seriesId
+        && row.owner_user_id === profile.id);
+      if (!series || !selected) {
+        await json(404, { error: 'SERIES_OR_OCCURRENCE_NOT_FOUND' });
+        return;
+      }
+      if (series.updated_at !== payload.expectedUpdatedAt) {
+        await json(409, { error: 'RECURRING_SERIES_VERSION_CONFLICT' });
+        return;
+      }
+      if (selected.occurrence_status !== 'scheduled' || selected.override_kind != null) {
+        await json(409, { error: 'SELECTED_OCCURRENCE_NOT_EDITABLE' });
+        return;
+      }
+      if (!['entire_series', 'this_and_following'].includes(payload.scope)) {
+        await json(422, { error: 'INVALID_SERIES_EDIT_SCOPE' });
+        return;
+      }
+      recurringSeriesMutationRequests.push({ key, payload });
+      const updatedAt = new Date().toISOString();
+      const event = payload.event;
+      const recurrenceRule = payload.recurrenceRule;
+      let childSeriesEventId = null;
+      let materializedCount = 0;
+      if (payload.scope === 'entire_series') {
+        Object.assign(series, {
+          title: event.title,
+          description: event.description ?? null,
+          location_label: event.locationLabel ?? null,
+          location_kind: event.locationKind ?? null,
+          event_status: event.eventStatus,
+          temporal_kind: event.temporalKind,
+          start_date: event.startDate ?? null,
+          end_date_exclusive: event.endDateExclusive ?? null,
+          start_local: event.startLocalDateTime ?? null,
+          end_local: event.endLocalDateTime ?? null,
+          time_zone: event.timeZone ?? null,
+          recurrence_rule: recurrenceRule,
+          recurrence_end_local_time: payload.endLocalTime ?? null,
+          recurrence_end_day_offset: Number(payload.endDayOffset ?? 0),
+          updated_at: updatedAt,
+        });
+      } else {
+        series.recurrence_effective_through = selected.original_local_date;
+        series.updated_at = updatedAt;
+        childSeriesEventId = '019a0000-0000-7000-8000-000000009399';
+        const childRule = {
+          ...recurrenceRule,
+          excludedDates: [selected.original_local_date],
+        };
+        const child = {
+          ...series,
+          id: childSeriesEventId,
+          title: event.title,
+          description: event.description ?? null,
+          location_label: event.locationLabel ?? null,
+          location_kind: event.locationKind ?? null,
+          event_status: event.eventStatus,
+          temporal_kind: event.temporalKind,
+          start_date: event.startDate ?? null,
+          end_date_exclusive: event.endDateExclusive ?? null,
+          start_local: event.startLocalDateTime ?? null,
+          end_local: event.endLocalDateTime ?? null,
+          time_zone: event.timeZone ?? null,
+          recurrence_rule: childRule,
+          recurrence_end_local_time: payload.endLocalTime ?? null,
+          recurrence_end_day_offset: Number(payload.endDayOffset ?? 0),
+          recurrence_effective_from: selected.original_local_date,
+          recurrence_effective_through: null,
+          recurrence_parent_event_id: series.id,
+          recurrence_inherited_occurrence_id: selected.id,
+          created_at: updatedAt,
+          updated_at: updatedAt,
+        };
+        calendarEvents.unshift(child);
+        const [year, month, day] = selected.original_local_date.split('-').map(Number);
+        const count = Math.min(Number(recurrenceRule.count || 1), 20);
+        for (let index = 1; index < count; index += 1) {
+          const interval = Number(recurrenceRule.interval || 1);
+          const date = new Date(Date.UTC(year, month - 1, day + index * interval)).toISOString().slice(0, 10);
+          const [slotYear, slotMonth, slotDay] = date.split('-').map(Number);
+          const endExclusive = new Date(Date.UTC(slotYear, slotMonth - 1, slotDay + Number(payload.endDayOffset ?? 0) + 1)).toISOString().slice(0, 10);
+          const occurrenceId = '019a0000-0000-7000-8000-' + String(9400 + index).padStart(12, '0');
+          calendarEventOccurrences.push({
+            id: occurrenceId,
+            owner_user_id: profile.id,
+            created_by_user_id: profile.id,
+            updated_by_user_id: profile.id,
+            calendar_event_id: childSeriesEventId,
+            occurrence_key: 'v1:' + childSeriesEventId + ':' + date + ':ALL_DAY',
+            original_local_date: date,
+            original_local_time: null,
+            actual_local_date: date,
+            actual_local_time: null,
+            temporal_kind: 'all_day',
+            start_date: date,
+            end_date_exclusive: endExclusive,
+            start_local: null,
+            end_local: null,
+            time_zone: null,
+            starts_at: null,
+            ends_at: null,
+            occurrence_status: 'scheduled',
+            override_kind: null,
+            review_candidate: null,
+            row_version: 1,
+            created_at: updatedAt,
+            updated_at: updatedAt,
+          });
+          materializedCount += 1;
+        }
+      }
+      await json(200, {
+        seriesEventId: series.id,
+        scope: payload.scope,
+        childSeriesEventId,
+        selectedOccurrenceId: selected.id,
+        materializedCount,
+        supersededCount: 0,
+        updatedAt,
+        replayed: false,
+      });
+      return;
+    }
+
     if (url.pathname === '/functions/v1/agenda-event-series-create' && method === 'POST') {
       const requestBody = request.postDataJSON();
       const event = requestBody.event;
@@ -1158,7 +1290,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     await json(404, { message: `Unexpected mocked Supabase request: ${method} ${url.pathname}` });
   });
 
-  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, calendarEventOccurrences, recurringEventRequests, protectedTimeBlocks, protectedTimeMutationRequests, taskSchedules, taskScheduleMutationRequests, protectedTimeConflicts, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
+  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, calendarEventOccurrences, recurringEventRequests, recurringSeriesMutationRequests, protectedTimeBlocks, protectedTimeMutationRequests, taskSchedules, taskScheduleMutationRequests, protectedTimeConflicts, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
 }
 
 test('mock-authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
@@ -4397,4 +4529,147 @@ test('Agenda creates a recurring all-day series and renders each persisted occur
       return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
     }, today),
   ]);
+});
+
+
+
+test('Agenda edits recurring series using explicit this-and-following and entire-series scopes', async ({ page }) => {
+  const today = await todayInBrowserHavana(page);
+  const addDay = (value, amount) => {
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(Date.UTC(year, month - 1, day + amount)).toISOString().slice(0, 10);
+  };
+  const seriesId = '019a0000-0000-7000-8000-000000009381';
+  const seriesUpdatedAt = '2026-11-23T11:00:00.000Z';
+  const series = {
+    id: seriesId,
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    updated_by_user_id: profile.id,
+    title: 'Serie editable',
+    description: 'Compromiso original',
+    location_label: null,
+    location_kind: null,
+    event_status: 'confirmed',
+    temporal_kind: 'all_day',
+    start_date: today,
+    end_date_exclusive: addDay(today, 1),
+    start_local: null,
+    end_local: null,
+    time_zone: null,
+    starts_at: null,
+    ends_at: null,
+    recurrence_rule: {
+      version: 1, frequency: 'DAILY', interval: 1,
+      startDate: today, temporalKind: 'all_day', count: 4, excludedDates: [],
+    },
+    recurrence_end_local_time: null,
+    recurrence_end_day_offset: 0,
+    recurrence_effective_from: null,
+    recurrence_effective_through: null,
+    recurrence_parent_event_id: null,
+    recurrence_inherited_occurrence_id: null,
+    archived_at: null,
+    deleted_at: null,
+    created_at: seriesUpdatedAt,
+    updated_at: seriesUpdatedAt,
+  };
+  const occurrences = [0, 1, 2].map((offset) => {
+    const date = addDay(today, offset);
+    const id = '019a0000-0000-7000-8000-' + String(9382 + offset).padStart(12, '0');
+    return {
+      id,
+      owner_user_id: profile.id,
+      created_by_user_id: profile.id,
+      updated_by_user_id: profile.id,
+      calendar_event_id: seriesId,
+      occurrence_key: 'v1:' + seriesId + ':' + date + ':ALL_DAY',
+      original_local_date: date,
+      original_local_time: null,
+      actual_local_date: date,
+      actual_local_time: null,
+      temporal_kind: 'all_day',
+      start_date: date,
+      end_date_exclusive: addDay(date, 1),
+      start_local: null,
+      end_local: null,
+      time_zone: null,
+      starts_at: null,
+      ends_at: null,
+      occurrence_status: 'scheduled',
+      override_kind: null,
+      review_candidate: null,
+      row_version: 1,
+      created_at: seriesUpdatedAt,
+      updated_at: seriesUpdatedAt,
+    };
+  });
+  const { calendarEvents, calendarEventOccurrences, recurringSeriesMutationRequests } =
+    await mockSupabaseSession(page, {
+      calendarEvents: [series],
+      calendarEventOccurrences: occurrences,
+    });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.getByRole('navigation', { name: 'Navegación principal' })
+    .getByRole('button', { name: /Agenda/ }).click();
+
+  const upcoming = page.getByRole('region', { name: 'Próximos compromisos' });
+  await expect(upcoming.getByRole('button', { name: /Serie editable/ })).toHaveCount(3);
+  await upcoming.getByRole('button', { name: /Serie editable/ }).first().click();
+  let detail = page.getByRole('dialog', { name: 'Serie editable' });
+  await expect(detail).toContainText('Parte de una serie');
+
+  await detail.getByRole('button', { name: 'Editar esta y las siguientes' }).click();
+  let composer = page.getByRole('dialog', { name: 'Editar serie recurrente' });
+  await composer.getByLabel('Nombre del evento').fill('Segmento futuro editado');
+  await composer.getByLabel('Ocurrencias').fill('3');
+  await composer.getByRole('button', { name: 'Guardar cambios de la serie' }).click();
+  await expect(page.getByText('Serie recurrente actualizada en Agenda.')).toBeVisible();
+  await expect(composer).toHaveCount(0);
+
+  expect(recurringSeriesMutationRequests).toHaveLength(1);
+  expect(recurringSeriesMutationRequests[0].key).toMatch(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+  );
+  expect(recurringSeriesMutationRequests[0].payload).toMatchObject({
+    seriesId,
+    scope: 'this_and_following',
+    selectedOccurrenceId: occurrences[0].id,
+    event: { title: 'Segmento futuro editado', temporalKind: 'all_day', startDate: today },
+    recurrenceRule: { frequency: 'DAILY', interval: 1, startDate: today, count: 3 },
+    endDayOffset: 0,
+  });
+  expect(calendarEvents).toHaveLength(2);
+  const child = calendarEvents.find((row) => row.recurrence_parent_event_id === seriesId);
+  expect(child).toMatchObject({
+    title: 'Segmento futuro editado',
+    recurrence_inherited_occurrence_id: occurrences[0].id,
+    recurrence_effective_from: today,
+    recurrence_rule: { excludedDates: [today] },
+  });
+  expect(calendarEventOccurrences.find((row) => row.id === occurrences[0].id).calendar_event_id).toBe(seriesId);
+
+  await expect(upcoming.getByRole('button', { name: /Serie editable/ })).toHaveCount(1);
+  await upcoming.getByRole('button', { name: /Serie editable/ }).first().click();
+  detail = page.getByRole('dialog', { name: 'Serie editable' });
+  await detail.getByRole('button', { name: 'Editar toda la serie' }).click();
+  composer = page.getByRole('dialog', { name: 'Editar serie recurrente' });
+  await composer.getByLabel('Nombre del evento').fill('Serie completa editada');
+  await composer.getByRole('button', { name: 'Guardar cambios de la serie' }).click();
+  await expect(page.getByText('Serie recurrente actualizada en Agenda.')).toBeVisible();
+
+  expect(recurringSeriesMutationRequests).toHaveLength(2);
+  expect(recurringSeriesMutationRequests[1].payload).toMatchObject({
+    seriesId,
+    scope: 'entire_series',
+    selectedOccurrenceId: occurrences[0].id,
+    event: { title: 'Serie completa editada' },
+  });
+  expect(calendarEvents.find((row) => row.id === seriesId)).toMatchObject({
+    title: 'Serie completa editada',
+    recurrence_rule: { frequency: 'DAILY' },
+  });
 });
