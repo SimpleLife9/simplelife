@@ -459,6 +459,35 @@ BEGIN
       USING ERRCODE = '22023';
   END IF;
 
+  INSERT INTO public.calendar_event_series_mutation_request (
+    owner_user_id, idempotency_key, series_event_id, payload_version, payload_hash
+  ) VALUES (
+    p_owner_user_id, p_idempotency_key, v_event.id, 'recurring-event-create-v1', v_payload_hash
+  )
+  ON CONFLICT (owner_user_id, idempotency_key) DO NOTHING;
+  GET DIAGNOSTICS v_claimed_rows = ROW_COUNT;
+
+  IF v_claimed_rows = 0 THEN
+    SELECT * INTO v_existing
+    FROM public.calendar_event_series_mutation_request
+    WHERE owner_user_id = p_owner_user_id AND idempotency_key = p_idempotency_key
+    FOR UPDATE;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'Concurrent recurring Event claim is not visible; retry the same key'
+        USING ERRCODE = '40001';
+    END IF;
+    IF v_existing.payload_version IS DISTINCT FROM 'recurring-event-create-v1'
+       OR v_existing.payload_hash IS DISTINCT FROM v_payload_hash THEN
+      RETURN QUERY SELECT 409, jsonb_build_object('error', 'IDEMPOTENCY_KEY_REUSED'), false;
+      RETURN;
+    END IF;
+    IF v_existing.response_http_status IS NULL OR v_existing.response_body IS NULL THEN
+      RAISE EXCEPTION 'Committed recurring Event receipt is incomplete' USING ERRCODE = '55000';
+    END IF;
+    RETURN QUERY SELECT v_existing.response_http_status, v_existing.response_body, true;
+    RETURN;
+  END IF;
+
   IF EXISTS (
     SELECT 1
     FROM jsonb_array_elements(p_occurrence_rows) AS item(value)
@@ -507,35 +536,6 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'Recurring Event occurrence rows do not match the master rule or authoritative time contract'
       USING ERRCODE = '22023';
-  END IF;
-
-  INSERT INTO public.calendar_event_series_mutation_request (
-    owner_user_id, idempotency_key, series_event_id, payload_version, payload_hash
-  ) VALUES (
-    p_owner_user_id, p_idempotency_key, v_event.id, 'recurring-event-create-v1', v_payload_hash
-  )
-  ON CONFLICT (owner_user_id, idempotency_key) DO NOTHING;
-  GET DIAGNOSTICS v_claimed_rows = ROW_COUNT;
-
-  IF v_claimed_rows = 0 THEN
-    SELECT * INTO v_existing
-    FROM public.calendar_event_series_mutation_request
-    WHERE owner_user_id = p_owner_user_id AND idempotency_key = p_idempotency_key
-    FOR UPDATE;
-    IF NOT FOUND THEN
-      RAISE EXCEPTION 'Concurrent recurring Event claim is not visible; retry the same key'
-        USING ERRCODE = '40001';
-    END IF;
-    IF v_existing.payload_version IS DISTINCT FROM 'recurring-event-create-v1'
-       OR v_existing.payload_hash IS DISTINCT FROM v_payload_hash THEN
-      RETURN QUERY SELECT 409, jsonb_build_object('error', 'IDEMPOTENCY_KEY_REUSED'), false;
-      RETURN;
-    END IF;
-    IF v_existing.response_http_status IS NULL OR v_existing.response_body IS NULL THEN
-      RAISE EXCEPTION 'Committed recurring Event receipt is incomplete' USING ERRCODE = '55000';
-    END IF;
-    RETURN QUERY SELECT v_existing.response_http_status, v_existing.response_body, true;
-    RETURN;
   END IF;
 
   PERFORM pg_advisory_xact_lock(hashtextextended(p_owner_user_id::text, 8102026));
