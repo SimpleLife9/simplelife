@@ -379,3 +379,24 @@
 .list-order-action{min-width:26px;padding:3px 7px;font-size:.74rem}
 @media(max-width:820px){.lists-toolbar{grid-template-columns:1fr 1fr}}
 @media(max-width:600px){.lists-toolbar{grid-template-columns:1fr;padding:11px}.list-card-head{flex-wrap:wrap}.list-card-actions{flex-direction:row;width:100%;justify-content:flex-end}.list-item-tools{gap:8px}}
+
+
+/* Inbox proposal review */
+.capture-part-review{margin:10px 0 0;padding:12px 13px;border:1px solid #e9eee8;border-radius:11px;background:#fafcf9;display:grid;gap:7px}
+.capture-part-heading{display:flex;align-items:center;flex-wrap:wrap;gap:7px}
+.capture-part-heading strong{font-size:.72rem;color:#496a53}
+.capture-part-confidence{font-size:.64rem;color:#87958b;background:#eef3ed;border-radius:6px;padding:4px 7px}
+.capture-part-confirmed{font-size:.63rem;color:#2f704b;background:#e8f3e8;border-radius:6px;padding:4px 7px}
+.capture-part-review p{margin:0;font-size:.76rem;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;color:#465b4d}
+.capture-row-actions{display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin-top:10px}
+.capture-action-button{max-width:100%;border:1px solid #dfe8df;border-radius:8px;background:#fff;color:#41684e;padding:7px 10px;font-size:.66rem;font-weight:650;cursor:pointer}
+.capture-action-button:disabled{opacity:.5;cursor:not-allowed}
+.capture-archive-button{color:#8c6658;background:#fffdfa;border-color:#efe5dc}
+.capture-status-archived{display:inline-flex;width:max-content;max-width:100%;white-space:normal;color:#8a6c4d;background:#f7f0e6;padding:5px 8px;border-radius:6px;font-size:.62rem}
+.capture-row-archived{background:#fcfbf8}
+@media(max-width:600px){
+ .capture-part-review{padding:11px 10px}
+ .capture-row-actions{gap:6px}
+ .capture-action-button{font-size:.64rem;padding:7px 8px}
+ .capture-part-confidence{font-size:.61rem}
+}
