@@ -8,9 +8,16 @@ INSERT INTO auth.users (
   '00000000-0000-0000-0000-000000000000',
   'authenticated','authenticated','inbox-trash-owner-20261123@example.invalid','',now(),
   '{"provider":"email","providers":["email"]}'::jsonb,'{}'::jsonb
+), (
+  'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+  '00000000-0000-0000-0000-000000000000',
+  'authenticated','authenticated','inbox-trash-other-20261123@example.invalid','',now(),
+  '{"provider":"email","providers":["email"]}'::jsonb,'{}'::jsonb
 ) ON CONFLICT(id) DO NOTHING;
 INSERT INTO public.user_profile(id,auth_user_id,display_name)
-VALUES('019b2000-0000-7000-8000-000000000001','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','Inbox trash owner')
+VALUES
+ ('019b2000-0000-7000-8000-000000000001','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','Inbox trash owner'),
+ ('019b2000-0000-7000-8000-000000000002','bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb','Inbox other owner')
 ON CONFLICT(id) DO NOTHING;
 
 SET LOCAL ROLE authenticated;
@@ -23,6 +30,25 @@ INSERT INTO public.capture_part(id,capture_id,part_index,original_fragment,categ
 VALUES('019b2000-0000-7000-8000-000000000201',
        '019b2000-0000-7000-8000-000000000101',0,'Inbox review audit capture','note_idea');
 
+RESET ROLE;
+SET LOCAL ROLE authenticated;
+SET LOCAL request.jwt.claim.sub = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+DO $test$
+BEGIN
+  IF public.trash_inbox_capture(
+    '019b2000-0000-7000-8000-000000000101',
+    '019b2000-0000-7000-8000-000000000304'
+  ) THEN RAISE EXCEPTION 'A second owner trashed a foreign capture'; END IF;
+  IF public.review_inbox_capture_part(
+    '019b2000-0000-7000-8000-000000000201',
+    'task','Unauthorized correction','edited',
+    '019b2000-0000-7000-8000-000000000305'
+  ) THEN RAISE EXCEPTION 'A second owner reviewed a foreign capture part'; END IF;
+END;
+$test$;
+RESET ROLE;
+SET LOCAL ROLE authenticated;
+SET LOCAL request.jwt.claim.sub = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 DO $test$
 BEGIN
   IF NOT public.trash_inbox_capture(

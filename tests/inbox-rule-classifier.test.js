@@ -18,3 +18,11 @@ test("multi-bullet input is split into reviewable parts without changing a chara
   assert.ok(parts.every((part) => part.confidence >= 0 && part.confidence <= 1
     && typeof part.requiresClarification === "boolean"));
 });
+
+test("leading and trailing whitespace around a multi-line capture is preserved exactly", () => {
+  const source = "  \n- Comprar café ☕\n- Llamar a Ana\n  ";
+  const parts = classifyInboxCapture(source);
+  assert.equal(parts.map((part) => part.originalFragment).join(""), source);
+  assert.equal(parts[0].originalFragment.startsWith("  \n"), true);
+  assert.equal(parts.at(-1).originalFragment.endsWith("\n  "), true);
+});

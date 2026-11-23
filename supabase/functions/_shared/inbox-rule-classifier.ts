@@ -57,18 +57,27 @@ export function classifyInboxCapture(contentOriginal) {
 
   const boundaries = [...starts, contentOriginal.length];
   const proposals = [];
+  let pendingPrefix = "";
+  let pendingStartOffset = null;
   for (let index = 0; index < boundaries.length - 1; index += 1) {
     const startOffset = boundaries[index];
     const endOffset = boundaries[index + 1];
-    const originalFragment = contentOriginal.slice(startOffset, endOffset);
-    if (!originalFragment.trim()) {
-      if (proposals.length) proposals[proposals.length - 1].originalFragment += originalFragment;
+    const segment = contentOriginal.slice(startOffset, endOffset);
+    if (!segment.trim()) {
+      if (proposals.length) {
+        proposals[proposals.length - 1].originalFragment += segment;
+        proposals[proposals.length - 1].endOffset = endOffset;
+      } else {
+        if (pendingStartOffset === null) pendingStartOffset = startOffset;
+        pendingPrefix += segment;
+      }
       continue;
     }
+    const originalFragment = pendingPrefix + segment;
     const result = classifyFragment(originalFragment);
     proposals.push({
       partIndex: proposals.length,
-      startOffset,
+      startOffset: pendingStartOffset ?? startOffset,
       endOffset,
       originalFragment,
       category: result.category,
@@ -76,6 +85,8 @@ export function classifyInboxCapture(contentOriginal) {
       requiresClarification: result.requiresClarification,
       interpretation: "Sugerencia heurística (" + result.rule + "). Requiere revisión y confirmación del usuario.",
     });
+    pendingPrefix = "";
+    pendingStartOffset = null;
   }
   if (!proposals.length) {
     const result = classifyFragment(contentOriginal);

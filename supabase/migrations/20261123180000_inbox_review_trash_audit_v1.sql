@@ -100,7 +100,7 @@ BEGIN
   IF v_profile_id IS NULL THEN
     RAISE EXCEPTION 'Active owner profile required' USING ERRCODE = '42501';
   END IF;
-  IF p_review_status NOT IN ('accepted','edited','rejected')
+  IF p_review_status IS NULL OR p_review_status NOT IN ('accepted','edited','rejected')
      OR (p_category IS NOT NULL AND p_category NOT IN (
        'task','event','request','habit','goal_subgoal','project','note_idea','list'
      ))
