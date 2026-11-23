@@ -139,6 +139,8 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
   const [selectedPart, setSelectedPart] = useState(null);
   const [destinationType, setDestinationType] = useState('task');
   const [selectedDestinationId, setSelectedDestinationId] = useState('');
+  const [clarificationRequired, setClarificationRequired] = useState(false);
+  const [manualInterpretation, setManualInterpretation] = useState('');
   const [taskTitle, setTaskTitle] = useState('');
   const [taskPriority, setTaskPriority] = useState('3');
   const [taskDueDate, setTaskDueDate] = useState('');
@@ -288,6 +290,11 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
     setSelectedPart(part || { id: uuidv7(), capture_id: capture.id, part_index: 0, original_fragment: capture.content_original });
     const source = String(part?.original_fragment || capture.content_original || '');
     const suggestedDestination = getSuggestedDestinationType(part?.category);
+    const processingProposal = processingRuns
+      .find((run) => run.capture_id === capture.id)?.result?.proposals
+      ?.find((proposal) => proposal.partIndex === (part?.part_index ?? 0));
+    setClarificationRequired(Boolean(processingProposal?.requiresClarification));
+    setManualInterpretation('');
     setDestinationType(suggestedDestination);
     const suggestedTargets = suggestedDestination === 'goal' ? goals
       : suggestedDestination === 'subgoal' ? subgoals
@@ -330,6 +337,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
   const saveOrganization = async (event) => {
     event.preventDefault();
     if (!isInboxDestinationReady(destinationType)) return;
+    if (clarificationRequired && !manualInterpretation.trim()) return;
     if (!selectedCapture || !selectedPart || !operationIds || getConfirmedLink(selectedCapture.id, selectedPart.id)) return;
     const sourceText = String(selectedPart.original_fragment || selectedCapture.content_original || '');
     if (!sourceText.trim()) return;
@@ -358,6 +366,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
               : destinationType === 'note' ? 'Clasificación manual confirmada: nota.'
                 : destinationType === 'idea' ? 'Clasificación manual confirmada: idea.'
                   : 'Clasificación manual confirmada: lista.';
+    const resolvedInterpretation = manualInterpretation.trim() || interpretation;
     const successMessage = destinationType === 'task' ? 'Captura organizada como tarea.'
       : destinationType === 'event' ? 'Evento creado en Agenda y vinculado al Inbox.'
         : destinationType === 'goal' ? 'Captura vinculada a la meta existente.'
@@ -430,7 +439,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
       });
 
       const { data: partUpdate, error: partError } = await supabase.rpc('review_inbox_capture_part', {
-        p_capture_part_id: partId, p_category: category, p_interpretation: interpretation,
+        p_capture_part_id: partId, p_category: category, p_interpretation: resolvedInterpretation,
         p_review_status: 'accepted', p_audit_id: uuidv7(),
       });
       if (partError) throw partError;
@@ -590,6 +599,10 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
             </select></label>
             {destinationType === 'request' && <p className="capture-organizer-help" role="status">La clasificación se conserva como Solicitud. Su flujo de destino aún no existe; no se creará una tarea ni otro registro por sustitución. Puedes elegir otro tipo solo si deseas convertirla manualmente.</p>}
             {destinationType === 'habit' && <p className="capture-organizer-help" role="status">La clasificación se conserva como Hábito. El sistema de hábitos aún no está implementado; no se creará una tarea ni otro registro por sustitución. Puedes elegir otro tipo solo si deseas convertirla manualmente.</p>}
+            <label className="field"><span>{clarificationRequired ? 'Aclaración necesaria para continuar' : 'Interpretación / aclaración (opcional)'}</span>
+              <textarea aria-label="Aclaración / interpretación" maxLength={1000} rows={3} value={manualInterpretation} onChange={(event) => setManualInterpretation(event.target.value)} placeholder="Describe brevemente qué significa o qué quieres hacer con esta captura…" required={clarificationRequired} disabled={busy} />
+            </label>
+            {clarificationRequired && <p className="capture-organizer-help" role="status">La sugerencia es ambigua. Añade una aclaración antes de confirmar; el texto original no cambiará.</p>}
             {destinationType === 'task' && <>
               <label className="field"><span>Título de la tarea</span><input aria-label="Título de la tarea" maxLength={240} value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} required disabled={busy} /></label>
               <div className="capture-organizer-two-col">
@@ -620,7 +633,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
                 <label className="field"><span>Texto del elemento (máximo 500 caracteres)</span><textarea aria-label="Texto del elemento" maxLength={500} rows={3} value={listItemText} onChange={(event) => setListItemText(event.target.value)} required disabled={busy} /></label>
               </>}
             </>}
-            <div className="capture-organizer-actions"><button type="button" className="capture-action-button" onClick={closeOrganizer} disabled={busy}>Cancelar</button><button type="submit" className="button button-primary" disabled={busy || !operationIds || !isInboxDestinationReady(destinationType)}>{busy ? 'Organizando…' : isInboxDestinationReady(destinationType) ? 'Confirmar y organizar' : 'Destino aún no disponible'} <span>→</span></button></div>
+            <div className="capture-organizer-actions"><button type="button" className="capture-action-button" onClick={closeOrganizer} disabled={busy}>Cancelar</button><button type="submit" className="button button-primary" disabled={busy || !operationIds || !isInboxDestinationReady(destinationType) || (clarificationRequired && !manualInterpretation.trim())}>{busy ? 'Organizando…' : isInboxDestinationReady(destinationType) ? 'Confirmar y organizar' : 'Destino aún no disponible'} <span>→</span></button></div>
           </form>
         </section>
       </div>
