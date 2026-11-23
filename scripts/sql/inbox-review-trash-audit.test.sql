@@ -60,6 +60,10 @@ BEGIN
     WHERE id='019b2000-0000-7000-8000-000000000101'
       AND (deleted_at IS NULL OR purge_after <> deleted_at + interval '30 days')
   ) THEN RAISE EXCEPTION 'Trash retention window is invalid'; END IF;
+  IF NOT public.trash_inbox_capture(
+    '019b2000-0000-7000-8000-000000000101',
+    '019b2000-0000-7000-8000-000000000306'
+  ) THEN RAISE EXCEPTION 'Repeated trash request should be idempotent'; END IF;
   IF NOT public.restore_inbox_capture(
     '019b2000-0000-7000-8000-000000000101',
     '019b2000-0000-7000-8000-000000000302'
@@ -69,6 +73,10 @@ BEGIN
     WHERE id='019b2000-0000-7000-8000-000000000101'
       AND (deleted_at IS NOT NULL OR purge_after IS NOT NULL)
   ) THEN RAISE EXCEPTION 'Restore did not clear both soft-delete fields'; END IF;
+  IF NOT public.restore_inbox_capture(
+    '019b2000-0000-7000-8000-000000000101',
+    '019b2000-0000-7000-8000-000000000307'
+  ) THEN RAISE EXCEPTION 'Repeated restore request should be idempotent'; END IF;
   IF NOT public.review_inbox_capture_part(
     '019b2000-0000-7000-8000-000000000201',
     'task','Manual correction','edited',

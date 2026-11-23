@@ -11,6 +11,7 @@ SET search_path = pg_catalog, public
 AS $function$
 DECLARE
   v_profile_id uuid;
+  v_deleted_at timestamptz;
   v_now timestamptz := clock_timestamp();
 BEGIN
   SELECT up.id INTO v_profile_id
@@ -19,6 +20,12 @@ BEGIN
   IF v_profile_id IS NULL THEN
     RAISE EXCEPTION 'Active owner profile required' USING ERRCODE = '42501';
   END IF;
+  SELECT c.deleted_at INTO v_deleted_at
+  FROM public.capture c
+  WHERE c.id = p_capture_id AND c.owner_user_id = v_profile_id
+  FOR UPDATE;
+  IF NOT FOUND THEN RETURN false; END IF;
+  IF v_deleted_at IS NOT NULL THEN RETURN true; END IF;
   UPDATE public.capture c
   SET deleted_at = v_now, purge_after = v_now + interval '30 days', updated_at = v_now
   WHERE c.id = p_capture_id AND c.owner_user_id = v_profile_id AND c.deleted_at IS NULL;
@@ -48,6 +55,8 @@ SET search_path = pg_catalog, public
 AS $function$
 DECLARE
   v_profile_id uuid;
+  v_deleted_at timestamptz;
+  v_purge_after timestamptz;
   v_now timestamptz := clock_timestamp();
 BEGIN
   SELECT up.id INTO v_profile_id
@@ -56,6 +65,13 @@ BEGIN
   IF v_profile_id IS NULL THEN
     RAISE EXCEPTION 'Active owner profile required' USING ERRCODE = '42501';
   END IF;
+  SELECT c.deleted_at, c.purge_after INTO v_deleted_at, v_purge_after
+  FROM public.capture c
+  WHERE c.id = p_capture_id AND c.owner_user_id = v_profile_id
+  FOR UPDATE;
+  IF NOT FOUND THEN RETURN false; END IF;
+  IF v_deleted_at IS NULL THEN RETURN true; END IF;
+  IF v_purge_after <= v_now THEN RETURN false; END IF;
   UPDATE public.capture c
   SET deleted_at = NULL, purge_after = NULL, updated_at = v_now
   WHERE c.id = p_capture_id AND c.owner_user_id = v_profile_id

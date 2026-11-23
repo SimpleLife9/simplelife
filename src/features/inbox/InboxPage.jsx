@@ -55,8 +55,9 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
     if (link?.project_id) return 'project';
     return 'unknown';
   };
-  const organizedCount = rows.filter((capture) => captureIsOrganized(capture.id)).length;
-  const pendingCount = rows.filter((capture) => capture.attention_status === 'needs_review' && !captureIsOrganized(capture.id)).length;
+  const activeRows = rows.filter((capture) => !capture.deleted_at);
+  const organizedCount = activeRows.filter((capture) => captureIsOrganized(capture.id)).length;
+  const pendingCount = activeRows.filter((capture) => capture.attention_status === 'needs_review' && !captureIsOrganized(capture.id)).length;
 
   const visibleCaptures = useMemo(() => {
     const term = captureSearch.trim().toLocaleLowerCase('es');
@@ -309,7 +310,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
             <div className="capture-row-content">
               <p>{capture.content_original}</p>
               <small>{new Intl.DateTimeFormat('es', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Havana' }).format(new Date(capture.captured_at))}</small>
-              {possibleDuplicate && <span className="capture-status capture-status-archived">Posible duplicado exacto · revisar antes de combinar</span>}
+              {possibleDuplicate && <span className="capture-status capture-status-archived">Posible duplicado normalizado · revisar antes de combinar</span>}
               {parts.map((capturePart) => {
                 const proposal = proposals.find((item) => item.partIndex === capturePart.part_index) || proposals[capturePart.part_index];
                 const partLink = getConfirmedLink(capture.id, capturePart.id);
