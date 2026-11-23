@@ -904,6 +904,7 @@ async function mockSupabaseSession(page, initialData = {}) {
       if (queuedTaskConflict) {
         pendingEventTaskScheduleConflicts = queuedTaskConflict.body?.conflicts || [];
       }
+      let taskScheduleConflictsForCommit = [];
       if (pendingEventTaskScheduleConflicts.length) {
         const acceptedTaskDecisions = new Map(taskDecisions.map((item) => [item.taskScheduleId, item]));
         const allAccepted = pendingEventTaskScheduleConflicts.every((conflict) => {
@@ -920,6 +921,7 @@ async function mockSupabaseSession(page, initialData = {}) {
           await json(queuedTaskConflict?.status || 409, responseBody);
           return;
         }
+        taskScheduleConflictsForCommit = [...pendingEventTaskScheduleConflicts];
         pendingEventTaskScheduleConflicts = [];
       }
       const accepted = new Map(decisions.map((item) => [
@@ -956,7 +958,17 @@ async function mockSupabaseSession(page, initialData = {}) {
         starts_at: event.startsAt ?? null,
         ends_at: event.endsAt ?? null,
         protected_time_decisions: decisions,
-        task_schedule_conflict_decisions: taskDecisions,
+        task_schedule_conflict_decisions: taskScheduleConflictsForCommit.map((conflict) => ({
+          policyVersion: 'event-task-schedule-decision-v1',
+          taskScheduleId: conflict.taskScheduleId,
+          taskScheduleUpdatedAt: conflict.taskScheduleUpdatedAt,
+          startsAt: conflict.startsAt,
+          endsAt: conflict.endsAt,
+          overlapStartsAt: conflict.overlapStartsAt,
+          overlapEndsAt: conflict.overlapEndsAt,
+          decision: 'keep_overlap',
+          consentedAt: new Date().toISOString(),
+        })),
         archived_at: null,
         deleted_at: null,
         created_at: createdAt,
