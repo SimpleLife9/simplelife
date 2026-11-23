@@ -436,7 +436,7 @@ BEGIN
     WHERE entity_type = 'calendar_event'
       AND entity_id = v_event_b
       AND action = 'calendar_event.task_schedule_decisions_recorded'
-      AND details->'decisions' = v_schedule_decisions
+      AND details->'decisions_after' = v_schedule_decisions
   ) THEN
     RAISE EXCEPTION 'Event TaskSchedule audit must preserve the exact accepted version-bound decisions';
   END IF;
