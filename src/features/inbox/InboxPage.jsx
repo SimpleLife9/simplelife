@@ -140,6 +140,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
   const [destinationType, setDestinationType] = useState('task');
   const [selectedDestinationId, setSelectedDestinationId] = useState('');
   const [clarificationRequired, setClarificationRequired] = useState(false);
+  const [clarificationPrompt, setClarificationPrompt] = useState('');
   const [manualInterpretation, setManualInterpretation] = useState('');
   const [taskTitle, setTaskTitle] = useState('');
   const [taskPriority, setTaskPriority] = useState('3');
@@ -294,6 +295,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
       .find((run) => run.capture_id === capture.id)?.result?.proposals
       ?.find((proposal) => proposal.partIndex === (part?.part_index ?? 0));
     setClarificationRequired(Boolean(processingProposal?.requiresClarification));
+    setClarificationPrompt(processingProposal?.clarificationPrompt || 'La sugerencia es ambigua. Explica brevemente qué significa.');
     setManualInterpretation('');
     setDestinationType(suggestedDestination);
     const suggestedTargets = suggestedDestination === 'goal' ? goals
@@ -600,9 +602,9 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
             {destinationType === 'request' && <p className="capture-organizer-help" role="status">La clasificación se conserva como Solicitud. Su flujo de destino aún no existe; no se creará una tarea ni otro registro por sustitución. Puedes elegir otro tipo solo si deseas convertirla manualmente.</p>}
             {destinationType === 'habit' && <p className="capture-organizer-help" role="status">La clasificación se conserva como Hábito. El sistema de hábitos aún no está implementado; no se creará una tarea ni otro registro por sustitución. Puedes elegir otro tipo solo si deseas convertirla manualmente.</p>}
             <label className="field"><span>{clarificationRequired ? 'Aclaración necesaria para continuar' : 'Interpretación / aclaración (opcional)'}</span>
-              <textarea aria-label="Aclaración / interpretación" maxLength={1000} rows={3} value={manualInterpretation} onChange={(event) => setManualInterpretation(event.target.value)} placeholder="Describe brevemente qué significa o qué quieres hacer con esta captura…" required={clarificationRequired} disabled={busy} />
+              <textarea aria-label="Aclaración / interpretación" maxLength={1000} rows={3} value={manualInterpretation} onChange={(event) => setManualInterpretation(event.target.value)} placeholder={clarificationRequired ? clarificationPrompt : 'Describe brevemente qué significa o qué quieres hacer con esta captura…'} required={clarificationRequired} disabled={busy} />
             </label>
-            {clarificationRequired && <p className="capture-organizer-help" role="status">La sugerencia es ambigua. Añade una aclaración antes de confirmar; el texto original no cambiará.</p>}
+            {clarificationRequired && <p className="capture-organizer-help" role="status">{clarificationPrompt} Añade una aclaración antes de confirmar; el texto original no cambiará.</p>}
             {destinationType === 'task' && <>
               <label className="field"><span>Título de la tarea</span><input aria-label="Título de la tarea" maxLength={240} value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} required disabled={busy} /></label>
               <div className="capture-organizer-two-col">
