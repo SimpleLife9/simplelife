@@ -381,11 +381,6 @@ BEGIN
       AND task_schedule_conflict_decisions = v_schedule_decisions
   ) THEN RAISE EXCEPTION 'Restore did not persist the exact consent evidence'; END IF;
 
-  SELECT count(*) INTO v_audit_count FROM public.audit_event
-  WHERE entity_type = 'calendar_event' AND entity_id = v_event_b
-    AND action = 'calendar_event.task_schedule_decisions_recorded';
-  IF v_audit_count <> 1 THEN RAISE EXCEPTION 'Restore must append one decision audit row'; END IF;
-
   SELECT updated_at INTO v_version FROM public.calendar_event WHERE id = v_event_b;
   SELECT r.http_status INTO v_status
   FROM public.mutate_calendar_event_once(
@@ -401,11 +396,6 @@ BEGIN
     v_version, 'reopen', v_lifecycle_patch, clock_timestamp()
   ) AS r;
   IF v_status <> 200 THEN RAISE EXCEPTION 'Reopen with prior valid consent failed: % %', v_status, v_body; END IF;
-
-  SELECT count(*) INTO v_audit_count FROM public.audit_event
-  WHERE entity_type = 'calendar_event' AND entity_id = v_event_b
-    AND action = 'calendar_event.task_schedule_decisions_recorded';
-  IF v_audit_count <> 1 THEN RAISE EXCEPTION 'Reopen must not duplicate unchanged consent audit'; END IF;
 
   SELECT r.http_status, r.replayed INTO v_status, v_replayed
   FROM public.mutate_calendar_event_once(
@@ -425,6 +415,25 @@ BEGIN
      OR v_version IS NOT NULL
      OR v_purge_after IS NOT NULL THEN
     RAISE EXCEPTION 'Event functional state/content/lifecycle did not return to the expected active state';
+  END IF;
+
+  SELECT count(*) INTO v_audit_count
+  FROM public.audit_event
+  WHERE entity_type = 'calendar_event'
+    AND entity_id = v_event_b
+    AND action = 'calendar_event.task_schedule_decisions_recorded';
+  IF v_audit_count <> 1 THEN
+    RAISE EXCEPTION 'Restore + unchanged-consent reopen must append exactly one TaskSchedule decision audit row; got %',
+      v_audit_count;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.audit_event
+    WHERE entity_type = 'calendar_event'
+      AND entity_id = v_event_b
+      AND action = 'calendar_event.task_schedule_decisions_recorded'
+      AND details->'decisions' = v_schedule_decisions
+  ) THEN
+    RAISE EXCEPTION 'Event TaskSchedule audit must preserve the exact accepted version-bound decisions';
   END IF;
 
   SELECT count(*) INTO v_audit_count
