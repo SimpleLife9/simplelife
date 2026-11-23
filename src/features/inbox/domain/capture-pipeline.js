@@ -124,3 +124,33 @@ export function validateCapturePartProposals(contentOriginal, proposals) {
 
   return Object.freeze(validated);
 }
+
+
+const SUGGESTED_DESTINATION_BY_CATEGORY = Object.freeze({
+  task: 'task',
+  event: 'event',
+  request: 'request',
+  habit: 'habit',
+  goal_subgoal: 'goal',
+  project: 'project',
+  note_idea: 'note',
+  list: 'list',
+});
+
+const CONFIRMABLE_INBOX_DESTINATIONS = new Set([
+  'task', 'event', 'goal', 'subgoal', 'project', 'note', 'idea', 'list',
+]);
+
+/**
+ * Preserve the classifier's category when opening manual review.
+ * Request and habit intentionally remain selected as unavailable destinations
+ * until their owning product phases provide a real write contract.
+ */
+export function getSuggestedDestinationType(category) {
+  return SUGGESTED_DESTINATION_BY_CATEGORY[category] || 'note';
+}
+
+/** Prevent unsupported future-phase destinations from being confirmed as another object. */
+export function isInboxDestinationReady(destinationType) {
+  return CONFIRMABLE_INBOX_DESTINATIONS.has(destinationType);
+}
