@@ -405,6 +405,7 @@ BEGIN
   IF v_status <> 200 OR NOT v_replayed THEN RAISE EXCEPTION 'Reopen retry did not replay'; END IF;
 
   EXECUTE 'RESET ROLE';
+  EXECUTE 'SET LOCAL ROLE postgres';
 
   SELECT event_status, title, archived_at, deleted_at
     INTO v_event_status, v_title, v_version, v_purge_after
