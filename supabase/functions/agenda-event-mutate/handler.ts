@@ -38,7 +38,7 @@ const EDIT_FIELDS = [
   "start_gap_strategy",
   "end_gap_strategy",
   "protected_time_decisions",
-  "task_schedule_decisions",
+  "task_schedule_conflict_decisions",
 ] as const;
 
 type RpcClient = {
@@ -91,6 +91,7 @@ function toEventPatch(record: Record<string, unknown>): Record<string, unknown> 
   for (const field of EDIT_FIELDS) patch[field] = record[field];
   patch.protected_time_snapshot = record.protected_time_snapshot;
   patch.task_schedule_snapshot = record.task_schedule_snapshot;
+  patch.task_schedule_window = record.task_schedule_window;
   return patch;
 }
 
