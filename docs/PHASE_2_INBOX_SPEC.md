@@ -132,6 +132,10 @@ Each slice should be a focused PR with exact-SHA CI. The phase closes only when 
 - Secret-only bounded retry dispatcher (maximum 10 jobs per invocation) that reclaims due/expired leases, persists proposals atomically and marks transient failures retryable. Its scheduled invocation is not configured in hosted Supabase.
 - CI coverage for classifier and worker contracts, browser desktop/mobile, ephemeral PostgreSQL RLS/lifecycle/audit, Edge Runtime smoke, Deno type checks and production build.
 
+
+- All capture-level attention transitions (needs review → reviewed/archived and return to pending) now use an owner-authenticated, idempotent RPC with before/after audit. Repeating the same state is a no-op and does not duplicate audit records.
+- Per-fragment correction history is exposed in the Inbox UI; it shows the prior/new category, interpretation and review status with timestamp. Audit reads are constrained by owner RLS.
+
 ### Remaining exit gates
 
 1. **Voice/transcription:** no private audio object lifecycle or provider/region/retention choice has been approved. Voice recording/transcription remains unavailable; raw audio is never placed in content_original.
