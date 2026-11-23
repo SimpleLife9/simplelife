@@ -180,3 +180,5 @@ jobs:
           retention-days: 7
 
 # Phase 2: CI covers capture security, processing proposals and authenticated worker paths.
+
+# Keep the original queue lifecycle contract tests in the phase 2 integration suite.
