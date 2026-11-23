@@ -40,6 +40,8 @@ CREATE OR REPLACE FUNCTION public.mutate_calendar_event_occurrence_once(
   p_payload_hash_hex text,
   p_expected_row_version bigint,
   p_occurrence_patch jsonb,
+  p_protected_time_snapshot jsonb,
+  p_task_schedule_snapshot jsonb,
   p_now timestamptz
 )
 RETURNS TABLE (
@@ -79,6 +81,16 @@ BEGIN
       USING ERRCODE = '22023';
   END IF;
   v_payload_hash := decode(p_payload_hash_hex, 'hex');
+
+  IF p_protected_time_snapshot IS NULL
+     OR jsonb_typeof(p_protected_time_snapshot) IS DISTINCT FROM 'array'
+     OR p_task_schedule_snapshot IS NULL
+     OR jsonb_typeof(p_task_schedule_snapshot) IS DISTINCT FROM 'array'
+     OR jsonb_array_length(p_protected_time_snapshot) > 500
+     OR jsonb_array_length(p_task_schedule_snapshot) > 500 THEN
+    RAISE EXCEPTION 'Occurrence conflict snapshots must be arrays of at most 500 rows'
+      USING ERRCODE = '22023';
+  END IF;
 
   IF p_occurrence_patch IS NULL
      OR jsonb_typeof(p_occurrence_patch) IS DISTINCT FROM 'object'
@@ -147,6 +159,38 @@ BEGIN
       'updatedAt', v_current.updated_at
     ), false;
     RETURN;
+  END IF;
+
+  -- A move or duration edit must have analyzed the complete active owner sets.
+  -- The same owner lock serializes these snapshots against Event/TaskSchedule/
+  -- Protected Time writers so there is no conflict-analysis time-of-check gap.
+  IF EXISTS (
+    WITH actual AS (
+      SELECT id, updated_at FROM public.protected_time_block
+      WHERE owner_user_id = p_owner_user_id AND archived_at IS NULL AND deleted_at IS NULL
+    ),
+    supplied AS (
+      SELECT id, updated_at
+      FROM jsonb_to_recordset(p_protected_time_snapshot)
+        AS snapshot(id uuid, updated_at timestamptz)
+    )
+    SELECT 1 FROM actual FULL OUTER JOIN supplied USING (id)
+    WHERE actual.id IS NULL OR supplied.id IS NULL OR actual.updated_at IS DISTINCT FROM supplied.updated_at
+  ) OR EXISTS (
+    WITH actual AS (
+      SELECT id, updated_at FROM public.task_schedule
+      WHERE owner_user_id = p_owner_user_id AND schedule_status IN ('proposed', 'confirmed')
+    ),
+    supplied AS (
+      SELECT id, updated_at
+      FROM jsonb_to_recordset(p_task_schedule_snapshot)
+        AS snapshot(id uuid, updated_at timestamptz)
+    )
+    SELECT 1 FROM actual FULL OUTER JOIN supplied USING (id)
+    WHERE actual.id IS NULL OR supplied.id IS NULL OR actual.updated_at IS DISTINCT FROM supplied.updated_at
+  ) THEN
+    RAISE EXCEPTION 'Occurrence conflict snapshot changed; reload and retry'
+      USING ERRCODE = '40001';
   END IF;
 
   v_merged := to_jsonb(v_current) || p_occurrence_patch;
@@ -229,7 +273,7 @@ BEGIN
 END;
 $function$;
 
-ALTER FUNCTION public.mutate_calendar_event_occurrence_once(uuid, uuid, uuid, text, bigint, jsonb, timestamptz)
+ALTER FUNCTION public.mutate_calendar_event_occurrence_once(uuid, uuid, uuid, text, bigint, jsonb, jsonb, jsonb, timestamptz)
   OWNER TO postgres;
 REVOKE ALL PRIVILEGES ON FUNCTION public.mutate_calendar_event_occurrence_once(uuid, uuid, uuid, text, bigint, jsonb, timestamptz)
   FROM PUBLIC, anon, authenticated, service_role;
