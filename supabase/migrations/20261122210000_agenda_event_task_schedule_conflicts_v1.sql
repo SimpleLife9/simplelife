@@ -73,7 +73,7 @@ CREATE TRIGGER calendar_event_task_schedule_decision_audit
   AFTER INSERT OR UPDATE ON public.calendar_event
   FOR EACH ROW EXECUTE FUNCTION private.append_calendar_event_task_schedule_decision_audit();
 
-CREATE OR REPLACE FUNCTION private.validate_event_task_schedule_conflicts(
+CREATE OR REPLACE FUNCTION public.validate_event_task_schedule_conflicts(
   p_owner_user_id uuid,
   p_window jsonb,
   p_decisions jsonb
@@ -171,10 +171,10 @@ BEGIN
 END;
 $function$;
 
-ALTER FUNCTION private.validate_event_task_schedule_conflicts(uuid, jsonb, jsonb) OWNER TO postgres;
-REVOKE ALL PRIVILEGES ON FUNCTION private.validate_event_task_schedule_conflicts(uuid, jsonb, jsonb)
+ALTER FUNCTION public.validate_event_task_schedule_conflicts(uuid, jsonb, jsonb) OWNER TO postgres;
+REVOKE ALL PRIVILEGES ON FUNCTION public.validate_event_task_schedule_conflicts(uuid, jsonb, jsonb)
   FROM PUBLIC, anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION private.validate_event_task_schedule_conflicts(uuid, jsonb, jsonb)
+GRANT EXECUTE ON FUNCTION public.validate_event_task_schedule_conflicts(uuid, jsonb, jsonb)
   TO service_role;
 
 
@@ -375,7 +375,7 @@ BEGIN
     RETURN;
   END IF;
 
-  v_task_schedule_result := private.validate_event_task_schedule_conflicts(
+  v_task_schedule_result := public.validate_event_task_schedule_conflicts(
     p_owner_user_id,
     p_event_record->'task_schedule_window',
     p_event_record->'task_schedule_conflict_decisions'
@@ -648,7 +648,7 @@ BEGIN
       RETURN;
     END IF;
 
-    v_task_schedule_result := private.validate_event_task_schedule_conflicts(
+    v_task_schedule_result := public.validate_event_task_schedule_conflicts(
       p_owner_user_id,
       p_event_patch->'task_schedule_window',
       p_event_patch->'task_schedule_conflict_decisions'
