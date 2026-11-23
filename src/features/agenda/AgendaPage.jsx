@@ -26,6 +26,9 @@ import './AgendaMutations.css';
 import { formatUpcomingCountdown, formatUpcomingStart, getUpcomingAgendaItems } from './domain/upcoming.js';
 
 const DEFAULT_TIME_ZONE = 'America/Havana';
+const RECURRENCE_OCCURRENCE_PAGE_SIZE = 500;
+const MAX_CALENDAR_RECURRENCE_OCCURRENCES = 10_000;
+const RECURRENCE_MAX_END_OFFSET_DAYS = 30;
 const VIEW_OPTIONS = [
   { id: 'day', label: 'Día' },
   { id: 'week', label: 'Semana' },
@@ -274,16 +277,40 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
           : [];
         let recurringOccurrences = [];
         if (activeSeries.length > 0) {
-          const occurrenceResult = await supabase.from('calendar_event_occurrence')
-            .select('*')
-            .in('calendar_event_id', activeSeries.map((item) => item.id))
-            .in('occurrence_status', ['scheduled', 'needs_review'])
-            .order('original_local_date', { ascending: true })
-            .limit(501);
-          if (occurrenceResult.error) throw occurrenceResult.error;
-          const rows = occurrenceResult.data || [];
-          if (rows.length > 500) {
-            throw new Error('La Agenda tiene más de 500 ocurrencias recurrentes activas en la ventana cargada. Reduce el rango o revisa la materialización.');
+          const visibleWindow = view === 'month'
+            ? (() => {
+              const visibleDays = monthGridDays(activeDate);
+              return {
+                startDate: visibleDays[0],
+                endDateExclusive: addCalendarDays(visibleDays[visibleDays.length - 1], 1),
+              };
+            })()
+            : getCalendarWindow(view, activeDate);
+          // A series can have an occurrence begin up to 30 calendar days before
+          // the visible range and continue into it. Include that bounded overlap
+          // buffer while excluding the rest of the 90-day materialized horizon.
+          const occurrenceStartDate = addCalendarDays(
+            visibleWindow.startDate,
+            -RECURRENCE_MAX_END_OFFSET_DAYS,
+          );
+          const rows = [];
+          for (let offset = 0; offset <= MAX_CALENDAR_RECURRENCE_OCCURRENCES; offset += RECURRENCE_OCCURRENCE_PAGE_SIZE) {
+            const occurrenceResult = await supabase.from('calendar_event_occurrence')
+              .select('*')
+              .in('calendar_event_id', activeSeries.map((item) => item.id))
+              .in('occurrence_status', ['scheduled', 'needs_review'])
+              .gte('original_local_date', occurrenceStartDate)
+              .lt('original_local_date', visibleWindow.endDateExclusive)
+              .order('original_local_date', { ascending: true })
+              .order('occurrence_key', { ascending: true })
+              .range(offset, offset + RECURRENCE_OCCURRENCE_PAGE_SIZE - 1);
+            if (occurrenceResult.error) throw occurrenceResult.error;
+            const pageRows = occurrenceResult.data || [];
+            if (offset === MAX_CALENDAR_RECURRENCE_OCCURRENCES && pageRows.length > 0) {
+              throw new Error('La vista actual contiene más de 10.000 ocurrencias recurrentes. Reduce el período o separa las series.');
+            }
+            rows.push(...pageRows);
+            if (pageRows.length < RECURRENCE_OCCURRENCE_PAGE_SIZE) break;
           }
           const seriesById = new Map(activeSeries.map((item) => [item.id, item]));
           recurringOccurrences = rows.flatMap((row) => {
