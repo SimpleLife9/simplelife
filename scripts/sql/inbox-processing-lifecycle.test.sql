@@ -71,6 +71,7 @@ DECLARE
   v_lease_c uuid := '00000000-0000-4000-8000-000000000003';
   v_job record;
   v_claim_count integer;
+  v_processed_rejected boolean := false;
 BEGIN
   SELECT run_id, run_status, attempt_number, replayed
     INTO v_run, v_status, v_attempt, v_replayed
@@ -153,6 +154,27 @@ BEGIN
   IF v_status <> 'succeeded' THEN RAISE EXCEPTION 'Run did not reach succeeded'; END IF;
   SELECT processing_status INTO v_status FROM public.capture WHERE id = '019b1000-0000-7000-8000-000000000101';
   IF v_status <> 'processed' THEN RAISE EXCEPTION 'Capture status did not become processed'; END IF;
+
+  -- A fresh idempotency key cannot enqueue the already processed capture again.
+  BEGIN
+    SELECT run_id INTO v_active_id
+    FROM public.enqueue_inbox_processing_run(
+      '019b1000-0000-7000-8000-000000000205',
+      '019b1000-0000-7000-8000-000000000001',
+      '019b1000-0000-7000-8000-000000000101',
+      '019b1000-0000-7000-8000-000000000304',
+      'inbox-proposal-v1'
+    );
+  EXCEPTION WHEN SQLSTATE '55000' THEN
+    v_processed_rejected := true;
+  END;
+  IF NOT v_processed_rejected THEN
+    RAISE EXCEPTION 'Processed capture was re-enqueued with a fresh key';
+  END IF;
+  SELECT processing_status INTO v_status FROM public.capture WHERE id = '019b1000-0000-7000-8000-000000000101';
+  IF v_status <> 'processed' THEN
+    RAISE EXCEPTION 'Processed capture state changed after duplicate enqueue attempt';
+  END IF;
 
   SELECT run_id INTO v_run
   FROM public.enqueue_inbox_processing_run(
