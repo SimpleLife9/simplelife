@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createCaptureRecordDraft,
+  getSuggestedDestinationType,
   INBOX_CATEGORIES,
+  isInboxDestinationReady,
   validateCapturePartProposals,
 } from '../src/features/inbox/domain/capture-pipeline.js';
 
@@ -153,4 +155,26 @@ test('proposals reject unsupported interpretation data', () => {
     startOffset: 0, endOffset: 6, category: 'task',
     confidence: 0.5, interpretation: { text: 'not plain text' }, requiresClarification: false,
   }]), /plain text/);
+});
+
+
+test('request and habit suggestions remain their own destinations instead of becoming tasks', () => {
+  assert.equal(getSuggestedDestinationType('request'), 'request');
+  assert.equal(getSuggestedDestinationType('habit'), 'habit');
+  assert.equal(getSuggestedDestinationType('task'), 'task');
+  assert.equal(getSuggestedDestinationType('event'), 'event');
+  assert.equal(getSuggestedDestinationType('goal_subgoal'), 'goal');
+  assert.equal(getSuggestedDestinationType('project'), 'project');
+  assert.equal(getSuggestedDestinationType('note_idea'), 'note');
+  assert.equal(getSuggestedDestinationType('list'), 'list');
+  assert.equal(getSuggestedDestinationType('unknown'), 'note');
+});
+
+test('future-phase request and habit destinations cannot be confirmed as another object', () => {
+  for (const destination of ['task', 'event', 'goal', 'subgoal', 'project', 'note', 'idea', 'list']) {
+    assert.equal(isInboxDestinationReady(destination), true, destination + ' should remain confirmable');
+  }
+  assert.equal(isInboxDestinationReady('request'), false);
+  assert.equal(isInboxDestinationReady('habit'), false);
+  assert.equal(isInboxDestinationReady('unknown'), false);
 });
