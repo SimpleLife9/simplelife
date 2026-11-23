@@ -126,7 +126,10 @@ Each slice should be a focused PR with exact-SHA CI. The phase closes only when 
 - Multi-item splitting only at explicit list/bullet boundaries. The SQL completion RPC validates that concatenating every stored fragment reconstructs content_original exactly. Parts remain unreviewed.
 - Inbox UI processing/retry control, per-part review, manual correction, rejection, and explicit task/note/list destination confirmation. No destination is created by classification.
 - Owner-scoped, audited, recoverable trash with a 30-day retention window and idempotent restore/trash RPCs.
-- Normalized duplicate warnings across the latest 250 loaded captures. Duplicates are never merged or deleted automatically.
+- Authenticated Inbox → Agenda Event creation through the existing idempotent Agenda writer, with a single-target owner-scoped provenance link to `calendar_event`.
+- Indexed full-text search across the complete capture archive, paginated in 100-row pages rather than limited to the latest 250 captures.
+- Normalized duplicate discovery across all active captures belonging to the owner. Duplicates are never merged or deleted automatically.
+- Secret-only bounded retry dispatcher (maximum 10 jobs per invocation) that reclaims due/expired leases, persists proposals atomically and marks transient failures retryable. Its scheduled invocation is not configured in hosted Supabase.
 - CI coverage for classifier and worker contracts, browser desktop/mobile, ephemeral PostgreSQL RLS/lifecycle/audit, Edge Runtime smoke, Deno type checks and production build.
 
 ### Remaining exit gates
@@ -134,9 +137,9 @@ Each slice should be a focused PR with exact-SHA CI. The phase closes only when 
 1. **Voice/transcription:** no private audio object lifecycle or provider/region/retention choice has been approved. Voice recording/transcription remains unavailable; raw audio is never placed in content_original.
 2. **Actual AI classification:** no AI provider/model or credentials have been approved. The deterministic processor is a safe provider-independent baseline, not a substitute for an AI capability.
 3. **Offline private capture/sync:** remains disabled until encryption, key recovery, conflict handling, idempotency, deletion and platform-specific tests are proven.
-4. **Background retry dispatch:** queue retry metadata and lease recovery exist; the current UI can retry a failed run manually. A scheduled production dispatcher is not configured or activated.
-5. **Coverage limits:** Inbox search and duplicate detection currently cover the latest 250 loaded captures; this is not yet a server-wide indexed search.
+4. **Background retry schedule:** the secure dispatcher is implemented and tested in local Edge Runtime, but no hosted cron/scheduler or secret invocation has been configured or activated.
+5. **Retention purge:** trash/restore enforces a 30-day recovery window; scheduled physical purge after expiry still needs a separately tested, auditable retention worker.
 6. **Manual acceptance:** Playwright desktop/mobile does not replace owner acceptance on desktop and a physical Android device.
-7. **Destination readiness:** Event destinations remain gated on the Agenda event writer/PR #93; Habit and Request destinations remain suggestion-only.
+7. **Destination readiness:** Event creation is linked to Agenda; Habit and Request remain proposals only because their owning destination workflows belong to later product phases.
 
 No hosted migration, production Edge deployment, secret change, merge, release or production data write is part of this branch. Do not mark Phase 2 closed until every required exit gate has either been implemented and evidenced or explicitly accepted as a deferral by the owner.

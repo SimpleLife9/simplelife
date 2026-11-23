@@ -1355,6 +1355,7 @@ test('Inbox can turn a reviewed capture into an Agenda Event with an owner-scope
     p_category: 'event',
     p_review_status: 'accepted',
   });
+  await page.getByLabel('Filtrar capturas por revisión').selectOption('organized');
   await expect(page.getByRole('button', { name: 'Abrir Agenda' })).toBeVisible();
   expect(captures[0].content_original).toBe('Llamar al proveedor antes del viernes');
 });
