@@ -62,6 +62,16 @@ Deno.test("dispatcher claims, processes and atomically completes a bounded due b
   if (result.claimed !== 2 || result.succeeded !== 2 || result.queueEmpty !== true) {
     throw new Error("Dispatcher batch statistics are inconsistent: " + JSON.stringify(result));
   }
+  const purgeCall = calls.find((call) => call.name === "purge_expired_inbox_captures");
+  if (!purgeCall || purgeCall.args.p_batch_size !== 10) {
+    throw new Error("Dispatcher must invoke the retention purge with a bounded batch of ten.");
+  }
+  const purgeAuditIds = purgeCall.args.p_audit_ids as string[];
+  if (!Array.isArray(purgeAuditIds) || purgeAuditIds.length !== 10
+    || new Set(purgeAuditIds).size !== 10
+    || purgeAuditIds.some((id) => !/^([0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i.test(id))) {
+    throw new Error("Dispatcher purge audit IDs must be ten unique UUIDv7 values.");
+  }
   const completed = calls.filter((call) => call.name === "complete_inbox_processing_run_with_parts");
   if (completed.length !== 2) throw new Error("Each claimed run must complete once.");
   const first = completed[0].args.p_proposals as Array<Record<string, unknown>>;
@@ -101,4 +111,5 @@ Deno.test("dispatcher makes a persistence failure retryable and reports a lost l
     throw new Error("A stale lease was not reported safely.");
   }
   if (!calls.includes("fail_inbox_processing_run")) throw new Error("A persistence failure did not attempt bounded retry state.");
+  if (!calls.includes("purge_expired_inbox_captures")) throw new Error("Dispatcher did not invoke the retention purge.");
 });
