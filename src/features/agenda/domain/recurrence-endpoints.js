@@ -131,13 +131,18 @@ export function buildRecurrenceEndEndpoints({
  * explicit local end endpoint. durationMinutes remains metadata/override data,
  * not an implicit substitute for the end clock time.
  */
-export function validatePersistableTimedRecurrence(ruleInput) {
-  assert(ruleInput && typeof ruleInput === 'object' && typeof ruleInput.endLocalTime === 'string',
+export function validatePersistableTimedRecurrence(input) {
+  assert(input && typeof input === 'object' && typeof input.endLocalTime === 'string',
     'Timed recurrence requires an explicit endLocalTime.');
-  const endLocalTime = normalizeClock(ruleInput.endLocalTime, 'endLocalTime');
+  const {
+    endLocalTime: rawEndLocalTime,
+    endDayOffset: rawEndDayOffset,
+    ...ruleInput
+  } = input;
+  const endLocalTime = normalizeClock(rawEndLocalTime, 'endLocalTime');
   const rule = validateRecurrenceRule(ruleInput);
   assert(rule.temporalKind === 'zoned_civil', 'A timed recurrence rule is required.');
-  const endDayOffset = normalizeDayOffset(ruleInput.endDayOffset);
+  const endDayOffset = normalizeDayOffset(rawEndDayOffset);
   const startLocalDateTime = normalizeLocalDateTime(rule.startDate + 'T' + rule.localTime, 'start.localDateTime');
   const endLocalDateTime = addRecurrenceCalendarDays(rule.startDate, endDayOffset) + 'T' + endLocalTime;
   assert(endLocalDateTime > startLocalDateTime,
