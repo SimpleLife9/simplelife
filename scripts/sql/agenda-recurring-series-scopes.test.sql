@@ -4,9 +4,6 @@
 
 BEGIN;
 
--- Initialize pg_temp before creating test-only SECURITY DEFINER audit probes.
-CREATE TEMP TABLE _series_test_temp_schema_init (id boolean) ON COMMIT DROP;
-
 INSERT INTO auth.users (
   id, instance_id, aud, role, email, encrypted_password,
   email_confirmed_at, raw_app_meta_data, raw_user_meta_data
@@ -23,9 +20,11 @@ VALUES ('019a0000-0000-7000-8000-000000000001',
 ON CONFLICT (id) DO NOTHING;
 
 -- Test-only audit probe. service_role intentionally has no direct audit SELECT grant.
-CREATE TEMP TABLE series_scope_test_context (marker boolean) ON COMMIT DROP;
+CREATE SCHEMA agenda_series_scope_test_helpers AUTHORIZATION postgres;
+REVOKE ALL ON SCHEMA agenda_series_scope_test_helpers FROM PUBLIC;
+GRANT USAGE ON SCHEMA agenda_series_scope_test_helpers TO service_role;
 
-CREATE FUNCTION pg_temp.series_scope_audit_count(
+CREATE FUNCTION agenda_series_scope_test_helpers.series_scope_audit_count(
   p_owner uuid,
   p_entity_type text,
   p_entity_id uuid,
@@ -44,11 +43,11 @@ AS $function$
     AND (p_entity_id IS NULL OR entity_id = p_entity_id)
     AND (p_actions IS NULL OR action = ANY(p_actions));
 $function$;
-ALTER FUNCTION pg_temp.series_scope_audit_count(uuid, text, uuid, text[]) OWNER TO postgres;
-GRANT USAGE ON SCHEMA pg_temp TO service_role;
-REVOKE ALL PRIVILEGES ON FUNCTION pg_temp.series_scope_audit_count(uuid, text, uuid, text[])
+ALTER FUNCTION agenda_series_scope_test_helpers.series_scope_audit_count(uuid, text, uuid, text[]) OWNER TO postgres;
+-- service_role receives only EXECUTE on the narrow SECURITY DEFINER test probe.
+REVOKE ALL PRIVILEGES ON FUNCTION agenda_series_scope_test_helpers.series_scope_audit_count(uuid, text, uuid, text[])
   FROM PUBLIC, anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION pg_temp.series_scope_audit_count(uuid, text, uuid, text[])
+GRANT EXECUTE ON FUNCTION agenda_series_scope_test_helpers.series_scope_audit_count(uuid, text, uuid, text[])
   TO service_role;
 
 SET LOCAL ROLE service_role;
@@ -336,7 +335,7 @@ BEGIN
     AND original_local_date IN ('2026-11-27', '2026-11-28');
   IF v_seen <> 2 THEN RAISE EXCEPTION 'Child segment did not materialize the following eligible slots'; END IF;
 
-  SELECT pg_temp.series_scope_audit_count(
+  SELECT agenda_series_scope_test_helpers.series_scope_audit_count(
     v_owner, 'calendar_event', v_series, ARRAY['calendar_event.recurrence_updated']
   ) INTO v_audit;
   IF v_audit <> 2 THEN
