@@ -22,6 +22,7 @@ import './AgendaPage.css';
 import { ProtectedTimePage } from './ProtectedTimePage.jsx';
 import { TaskSchedulePage } from './TaskSchedulePage.jsx';
 import './AgendaMutations.css';
+import { formatUpcomingCountdown, formatUpcomingStart, getUpcomingAgendaItems } from './domain/upcoming.js';
 
 const DEFAULT_TIME_ZONE = 'America/Havana';
 const VIEW_OPTIONS = [
@@ -162,6 +163,7 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
   const [taskSchedules, setTaskSchedules] = useState([]);
   const [scheduledTasks, setScheduledTasks] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [clockNow, setClockNow] = useState(() => Date.now());
   const [localError, setLocalError] = useState('');
   const [timeZone, setTimeZone] = useState(DEFAULT_TIME_ZONE);
   const [timeZoneNotice, setTimeZoneNotice] = useState('');
@@ -189,6 +191,11 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
   const [eventTimeZone, setEventTimeZone] = useState(DEFAULT_TIME_ZONE);
   const [fixedStartsAt, setFixedStartsAt] = useState('');
   const [fixedEndsAt, setFixedEndsAt] = useState('');
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -283,6 +290,14 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
     () => new Map(scheduledTasks.map((task) => [task.id, task])),
     [scheduledTasks],
   );
+  const upcomingItems = useMemo(() => getUpcomingAgendaItems({
+    events,
+    taskSchedules,
+    tasks: scheduledTasks,
+    now: clockNow,
+    viewerTimeZone: timeZone,
+    maxItems: 4,
+  }), [events, taskSchedules, scheduledTasks, clockNow, timeZone]);
   const openComposer = () => {
     setEditingEvent(null);
     setTitle('');
@@ -711,6 +726,51 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
       </nav>
 
       {timeZoneNotice && <div className="agenda-timezone-notice">{timeZoneNotice}</div>}
+      {!loading && !localError && (
+        <section className="agenda-upcoming-panel" aria-label="Próximos compromisos">
+          <div className="agenda-upcoming-heading">
+            <div>
+              <span className="agenda-section-kicker">AGENDA ACTIVA</span>
+              <h3>Próximos compromisos</h3>
+            </div>
+            <span>Se actualiza mientras la Agenda está abierta</span>
+          </div>
+          {upcomingItems.length > 0 ? (
+            <div className="agenda-upcoming-list">
+              {upcomingItems.map((item) => {
+                const content = (
+                  <>
+                    <span className={'agenda-upcoming-kind' + (item.kind === 'task_schedule' ? ' is-task' : '')}>
+                      {item.kind === 'task_schedule' ? 'TAREA RESERVADA' : item.allDay ? 'EVENTO · TODO EL DÍA' : 'EVENTO'}
+                    </span>
+                    <strong>{item.title}</strong>
+                    <span className="agenda-upcoming-start">{formatUpcomingStart(item, timeZone)}</span>
+                    <span className={'agenda-upcoming-countdown' + (item.state === 'ongoing' ? ' is-ongoing' : '')}>
+                      {formatUpcomingCountdown(item, clockNow)}
+                    </span>
+                  </>
+                );
+                return item.kind === 'event' ? (
+                  <button
+                    type="button"
+                    className="agenda-upcoming-card"
+                    key={item.kind + ':' + item.id}
+                    onClick={() => openEventDetail(item.source)}
+                  >
+                    {content}
+                  </button>
+                ) : (
+                  <div className="agenda-upcoming-card is-task" role="group" key={item.kind + ':' + item.id}>
+                    {content}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="agenda-upcoming-empty">No hay compromisos próximos. Tu calendario está despejado.</p>
+          )}
+        </section>
+      )}
       {loading && <p className="muted agenda-loading">Cargando Agenda…</p>}
       {!loading && localError && <div className="form-error agenda-error">{localError}</div>}
 
