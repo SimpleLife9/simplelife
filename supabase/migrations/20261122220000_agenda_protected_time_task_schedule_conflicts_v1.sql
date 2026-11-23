@@ -42,12 +42,11 @@ BEGIN
     RAISE EXCEPTION 'Unsupported Protected Time TaskSchedule decision audit operation: %', TG_OP;
   END IF;
 
-  IF CASE
-       WHEN jsonb_typeof(NEW.task_schedule_conflict_decisions) = 'array'
-         THEN jsonb_array_length(NEW.task_schedule_conflict_decisions) > 500
-       ELSE true
-     END THEN
-    RAISE EXCEPTION 'TaskSchedule decision evidence must be a bounded JSON array';
+  IF jsonb_typeof(NEW.task_schedule_conflict_decisions) IS DISTINCT FROM 'array' THEN
+    RAISE EXCEPTION 'TaskSchedule decision evidence must be a JSON array';
+  END IF;
+  IF jsonb_array_length(NEW.task_schedule_conflict_decisions) > 500 THEN
+    RAISE EXCEPTION 'TaskSchedule decision evidence cannot exceed 500 entries';
   END IF;
 
   -- An empty initial state has nothing to audit. An UPDATE from a non-empty
