@@ -12,6 +12,7 @@ const timedRule = {
   interval: 1,
   startDate: '2026-10-25',
   temporalKind: 'zoned_civil',
+  byWeekday: ['SU'],
   localTime: '01:30',
   timeZone: 'America/New_York',
   durationMinutes: 60,
