@@ -2876,7 +2876,7 @@ test('Agenda navigates day, week and month views and creates a confirmed all-day
   const sideNavigation = page.getByRole('navigation', { name: 'Navegación principal' });
   await sideNavigation.getByRole('button', { name: /Agenda/ }).click();
   await expect(page.locator('.page-heading h1')).toHaveText('Agenda');
-  await expect(page.getByText('Día de familia')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Día de familia', exact: true })).toBeVisible();
   await expect(page.getByRole('group', { name: 'Tarea reservada: Preparar informe semanal' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Día', exact: true }).click();
@@ -2886,7 +2886,7 @@ test('Agenda navigates day, week and month views and creates a confirmed all-day
 
   await page.getByRole('button', { name: 'Mes', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Agenda mensual' })).toBeVisible();
-  await expect(page.getByText('Día de familia')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Día de familia', exact: true })).toBeVisible();
   await expect(page.getByRole('group', { name: 'Tarea reservada: Preparar informe semanal' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Nuevo evento' }).click();
@@ -3946,7 +3946,7 @@ test('Agenda requires one explicit Protected Time decision per hard/flexible ove
 
   await expect(page.getByText('Evento guardado en Agenda.')).toBeVisible();
   await expect(decisionDialog).toHaveCount(0);
-  await expect(page.getByText('Reunión que cruza tiempo protegido')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Reunión que cruza tiempo protegido', exact: true })).toBeVisible();
   expect(idempotencyRequests).toHaveLength(2);
   expect(idempotencyRequests[1].key).toBe(idempotencyRequests[0].key);
   expect(idempotencyRequests[1].protectedTimeDecisions).toMatchObject([
