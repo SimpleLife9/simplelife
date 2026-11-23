@@ -135,7 +135,7 @@ Each slice should be a focused PR with exact-SHA CI. The phase closes only when 
 
 - All capture-level attention transitions (needs review → reviewed/archived and return to pending) now use an owner-authenticated, idempotent RPC with before/after audit. Repeating the same state is a no-op and does not duplicate audit records.
 - Per-fragment correction history is exposed in the Inbox UI; it shows the prior/new category, interpretation and review status with timestamp. Audit reads are constrained by owner RLS.
-- Proposals marked as materially ambiguous require a non-empty owner-provided clarification in the review dialog before confirmation; the answer is written to the audited interpretation field while `content_original` stays unchanged. Request/Habit suggestions remain their own unimplemented destination types and cannot be confirmed as Tasks by default.
+- Proposals marked as materially ambiguous carry a concise contextual clarification question and require a non-empty owner-provided answer in the review dialog before confirmation; the answer is written to the audited interpretation field while `content_original` stays unchanged. Request/Habit suggestions remain their own unimplemented destination types and cannot be confirmed as Tasks by default.
 
 ### Remaining exit gates
 
