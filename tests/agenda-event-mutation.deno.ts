@@ -54,6 +54,7 @@ function mockContext({
   }],
   rpcError = null,
   protectedBlocks = [] as Record<string, unknown>[],
+  taskSchedules = [] as Record<string, unknown>[],
   currentEvent = {
     temporal_kind: "all_day",
     start_date: "2026-12-24",
@@ -61,6 +62,7 @@ function mockContext({
     starts_at: null,
     ends_at: null,
     protected_time_decisions: [],
+    task_schedule_conflict_decisions: [],
   } as Record<string, unknown>,
 }: {
   profileStatus?: string;
@@ -69,6 +71,7 @@ function mockContext({
   rpcResult?: unknown;
   rpcError?: unknown;
   protectedBlocks?: Record<string, unknown>[];
+  taskSchedules?: Record<string, unknown>[];
   currentEvent?: Record<string, unknown>;
 } = {}) {
   const calls: Record<string, unknown> = { profileLookup: 0, rpc: 0, rpcName: null, rpcArgs: null };
@@ -143,6 +146,16 @@ function mockContext({
         };
         return query;
       }
+      if (table === "task_schedule") {
+        const query: any = {
+          select() { return this; },
+          eq() { return this; },
+          in() { return this; },
+          order() { return this; },
+          async limit() { return { data: taskSchedules, error: null }; },
+        };
+        return query;
+      }
       throw new Error("unexpected admin table " + table);
     },
     async rpc(name: string, args: Record<string, unknown>) {
@@ -188,6 +201,7 @@ Deno.test("Event mutation normalizes UUIDv7 and preserves PostgreSQL microsecond
     action: "cancel",
     eventDraft: null,
     protectedTimeDecisions: [],
+    taskScheduleDecisions: [],
   }, "normalized cancel mutation");
 });
 
@@ -237,12 +251,28 @@ Deno.test("Event mutation hash binds action, Event, exact expected version and n
     ...mutation,
     protectedTimeDecisions: [{ ...consent, decision: "keep_flexible" }],
   });
+  const taskScheduleConsent = {
+    taskScheduleId: "019a0000-0000-7000-8000-000000000222",
+    taskScheduleUpdatedAt: VERSION,
+    decision: "keep_overlap",
+  };
+  const withTaskScheduleConsent = await hashEventMutationIntent({
+    ...mutation,
+    taskScheduleDecisions: [taskScheduleConsent],
+  });
+  const changedTaskScheduleConsent = await hashEventMutationIntent({
+    ...mutation,
+    taskScheduleDecisions: [{ ...taskScheduleConsent, taskScheduleUpdatedAt: "2026-11-22T18:00:00.123457Z" }],
+  });
   assertEquals(first.payloadHash, replay.payloadHash, "stable hash");
   assertEquals(first.payloadHash.length, 64, "SHA-256 length");
   assertEquals(first.payloadHash === changedVersion.payloadHash, false, "version participates in hash");
   assertEquals(first.payloadHash === changedAction.payloadHash, false, "action participates in hash");
   assertEquals(first.payloadHash === withConsent.payloadHash, false, "Protected Time consent participates in hash");
   assertEquals(withConsent.payloadHash === changedConsent.payloadHash, false, "a changed consent choice changes the hash");
+  assertEquals(first.payloadHash === withTaskScheduleConsent.payloadHash, false, "TaskSchedule consent participates in hash");
+  assertEquals(withTaskScheduleConsent.payloadHash === changedTaskScheduleConsent.payloadHash, false,
+    "a changed TaskSchedule version changes hash");
 });
 
 Deno.test("authenticated edit invokes only the atomic owner-scoped mutation RPC with server-derived owner", async () => {
@@ -281,7 +311,68 @@ Deno.test("authenticated edit invokes only the atomic owner-scoped mutation RPC 
   assertEquals(patch.owner_user_id, undefined, "no owner identity in patch");
 });
 
-Deno.test("a detail-only Event edit preserves the original Protected Time consent timestamp", async () => {
+Deno.test("Event edit requires explicit consent for an overlapping TaskSchedule", async () => {
+  const schedule = {
+    id: "019a0000-0000-7000-8000-000000000223",
+    updated_at: "2026-11-20T10:00:00.000000+00:00",
+    starts_at: "2026-12-24T06:00:00.000Z",
+    ends_at: "2026-12-24T07:00:00.000Z",
+    time_zone: "America/Havana",
+    schedule_status: "confirmed",
+  };
+  const missing = mockContext({ taskSchedules: [schedule] });
+  const noConsent = await handleRequest(request({
+    eventId: EVENT_ID,
+    expectedUpdatedAt: VERSION,
+    action: "edit",
+    event: {
+      title: "Reunión actualizada",
+      description: "Detalles nuevos",
+      locationLabel: "Sala A",
+      locationKind: "physical",
+      eventStatus: "confirmed",
+      temporalKind: "all_day",
+      startDate: "2026-12-24",
+      endDateExclusive: "2026-12-26",
+    },
+  }), missing.ctx, { now: () => "2026-11-22T18:10:00.000Z" });
+  assertEquals(noConsent.status, 409, "overlap must be resolved before edit");
+  assertEquals((await body(noConsent)).error, "TASK_SCHEDULE_CONFLICTS", "schedule conflict code");
+  assertEquals(missing.calls.rpc, 0, "no edit RPC without consent");
+
+  const accepted = mockContext({ taskSchedules: [schedule] });
+  const response = await handleRequest(request({
+    eventId: EVENT_ID,
+    expectedUpdatedAt: VERSION,
+    action: "edit",
+    event: {
+      title: "Reunión actualizada",
+      description: "Detalles nuevos",
+      locationLabel: "Sala A",
+      locationKind: "physical",
+      eventStatus: "confirmed",
+      temporalKind: "all_day",
+      startDate: "2026-12-24",
+      endDateExclusive: "2026-12-26",
+    },
+    taskScheduleDecisions: [{
+      taskScheduleId: schedule.id,
+      taskScheduleUpdatedAt: schedule.updated_at,
+      decision: "keep_overlap",
+    }],
+  }), accepted.ctx, { now: () => "2026-11-22T18:10:00.000Z" });
+  assertEquals(response.status, 200, "explicit TaskSchedule decision accepted");
+  const args = accepted.calls.rpcArgs as Record<string, unknown>;
+  const patch = args.p_event_patch as Record<string, unknown>;
+  const decisions = patch.task_schedule_conflict_decisions as Array<Record<string, unknown>>;
+  assertEquals(decisions.length, 1, "one consent persisted for edit");
+  assertEquals(decisions[0].taskScheduleId, schedule.id, "edit consent is version-bound");
+  assertEquals(decisions[0].taskScheduleUpdatedAt, schedule.updated_at, "edit uses exact schedule version");
+  assertEquals((patch.task_schedule_snapshot as unknown[]).length, 1, "edit supplies full active schedule snapshot");
+  assertEquals(Object.keys(patch.task_schedule_window as object).length, 2, "edit supplies resolved UTC comparison window");
+});
+
+Deno.test("a detail-only Event edit preserves the original Protected Time consent timestamp", async () => {Deno.test("a detail-only Event edit preserves the original Protected Time consent timestamp", async () => {
   const blockId = "019a0000-0000-7000-8000-000000000211";
   const blockUpdatedAt = "2026-11-20T10:00:00.000000+00:00";
   const occurrenceStartsAt = "2026-12-24T06:00:00.000Z";
