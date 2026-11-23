@@ -4,9 +4,6 @@ import {
   validateRecurrenceRule,
 } from "../../../src/features/agenda/domain/recurrence.js";
 import {
-  planOccurrenceMaterializationReconciliation,
-} from "../../../src/features/agenda/domain/recurrence-materialization.js";
-import {
   buildRecurrenceEndEndpoints,
 } from "../../../src/features/agenda/domain/recurrence-endpoints.js";
 import {
@@ -196,31 +193,6 @@ function buildOccurrenceRows({
   });
 }
 
-function mapExistingOccurrence(row: Record<string, any>): Record<string, unknown> {
-  const metadata = row.resolver_metadata && typeof row.resolver_metadata === "object"
-    ? row.resolver_metadata
-    : {};
-  return {
-    occurrenceKey: row.occurrence_key,
-    originalLocalDate: row.original_local_date,
-    temporalKind: row.temporal_kind,
-    status: row.occurrence_status,
-    overrideKind: row.override_kind,
-    hasOverride: row.override_kind != null,
-    reviewState: row.review_candidate == null ? null : "needs_review",
-    startDate: row.start_date,
-    endDateExclusive: row.end_date_exclusive,
-    startsAt: row.starts_at,
-    endsAt: row.ends_at,
-    timeZone: row.time_zone,
-    rulesSource: metadata.rulesSource,
-    authoritative: metadata.authoritative === true,
-    rulesVersion: metadata.rulesVersion,
-    resolverVersion: metadata.resolverVersion,
-    updatedAt: row.updated_at,
-  };
-}
-
 function makeConflictEvent(row: Record<string, unknown>) {
   return {
     temporal_kind: row.temporal_kind,
@@ -355,14 +327,12 @@ export async function handleRequest(
         throw new RangeError("A recurring series has more than 500 materialized rows in its 90-day horizon.");
       }
 
-      const reconciliation = planOccurrenceMaterializationReconciliation({
-        candidates: batch.occurrences,
-        existingOccurrences: existingRows.map((row: Record<string, any>) => mapExistingOccurrence(row)),
-        materializationDate,
-      });
-      const insertOccurrences = reconciliation.actions
-        .filter((action) => action.action === "insert")
-        .map((action) => action.occurrence as Record<string, any>);
+      // Unique occurrence keys are the persistence idempotency boundary.
+      // Existing rows, regardless of override/review/terminal state, are never
+      // rewritten by a rolling-horizon top-up.
+      const existingKeys = new Set(existingRows.map((row: Record<string, any>) => row.occurrence_key));
+      const insertOccurrences = batch.occurrences
+        .filter((occurrence) => !existingKeys.has(occurrence.occurrenceKey));
       if (insertOccurrences.length === 0) continue;
 
       const endByOccurrenceKey = buildRecurrenceEndEndpoints({
