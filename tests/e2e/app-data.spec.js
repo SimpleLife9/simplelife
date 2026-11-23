@@ -808,6 +808,25 @@ async function mockSupabaseSession(page, initialData = {}) {
           return;
         }
       }
+      const taskDecisions = Array.isArray(payload.taskScheduleDecisions) ? payload.taskScheduleDecisions : [];
+      const queuedTaskConflict = eventTaskScheduleConflictResponses.shift();
+      if (queuedTaskConflict) pendingEventTaskScheduleConflicts = queuedTaskConflict.body?.conflicts || [];
+      if (payload.action === 'edit' && pendingEventTaskScheduleConflicts.length) {
+        const acceptedTaskDecisions = new Map(taskDecisions.map((item) => [item.taskScheduleId, item]));
+        const allAccepted = pendingEventTaskScheduleConflicts.every((conflict) => {
+          const choice = acceptedTaskDecisions.get(conflict.taskScheduleId);
+          return choice && choice.taskScheduleUpdatedAt === conflict.taskScheduleUpdatedAt
+            && choice.decision === conflict.requiredDecision;
+        });
+        if (!allAccepted) {
+          await json(queuedTaskConflict?.status || 409, queuedTaskConflict?.body || {
+            error: 'TASK_SCHEDULE_CONFLICTS',
+            conflicts: pendingEventTaskScheduleConflicts,
+          });
+          return;
+        }
+        pendingEventTaskScheduleConflicts = [];
+      }
       const updatedAt = new Date(Date.now() + mutationRequests.length * 2).toISOString();
       if (payload.action === 'edit') {
         const event = payload.event;
@@ -835,6 +854,7 @@ async function mockSupabaseSession(page, initialData = {}) {
           starts_at: event.startsAt ?? (unchangedZonedCivilRange ? row.starts_at : null),
           ends_at: event.endsAt ?? (unchangedZonedCivilRange ? row.ends_at : null),
           protected_time_decisions: decisions,
+          task_schedule_conflict_decisions: taskDecisions,
         });
       } else if (payload.action === 'cancel') {
         row.event_status = 'cancelled';
@@ -882,7 +902,7 @@ async function mockSupabaseSession(page, initialData = {}) {
       });
       const queuedTaskConflict = eventTaskScheduleConflictResponses.shift();
       if (queuedTaskConflict) {
-        pendingEventTaskScheduleConflicts = queuedTaskConflict.body?.taskScheduleConflicts || [];
+        pendingEventTaskScheduleConflicts = queuedTaskConflict.body?.conflicts || [];
       }
       if (pendingEventTaskScheduleConflicts.length) {
         const acceptedTaskDecisions = new Map(taskDecisions.map((item) => [item.taskScheduleId, item]));
@@ -2874,6 +2894,17 @@ test('Agenda navigates day, week and month views and creates a confirmed all-day
     temporal_kind: 'all_day',
     start_date: today,
     end_date_exclusive: tomorrow,
+    task_schedule_conflict_decisions: [{
+      policyVersion: 'event-task-schedule-decision-v1',
+      taskScheduleId: seedTaskSchedule.id,
+      taskScheduleUpdatedAt: seedTaskSchedule.updated_at,
+      startsAt: seedTaskSchedule.starts_at,
+      endsAt: seedTaskSchedule.ends_at,
+      overlapStartsAt: seedTaskSchedule.starts_at,
+      overlapEndsAt: seedTaskSchedule.ends_at,
+      decision: 'keep_overlap',
+      consentedAt: expect.any(String),
+    }],
   });
   expect(idempotencyRequests).toHaveLength(2);
   expect(idempotencyRequests[0].key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
