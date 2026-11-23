@@ -5,7 +5,7 @@ function assert(condition, message) {
 }
 
 function parseDateKey(value, label) {
-  assert(typeof value === 'string' && /^\\d{4}-\\d{2}-\\d{2}$/.test(value),
+  assert(typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value),
     label + ' must use YYYY-MM-DD.');
   const [year, month, day] = value.split('-').map(Number);
   const date = new Date(0);
@@ -17,7 +17,7 @@ function parseDateKey(value, label) {
 
 function normalizeClock(value, label) {
   assert(typeof value === 'string', label + ' must be a local clock time.');
-  const match = /^([0-9]{2}):([0-9]{2})(?::([0-9]{2})(?:\\.([0-9]{1,3}))?)?$/.exec(value);
+  const match = /^([0-9]{2}):([0-9]{2})(?::([0-9]{2})(?:\.([0-9]{1,3}))?)?$/.exec(value);
   assert(match, label + ' must use HH:mm[:ss[.SSS]].');
   const hour = Number(match[1]);
   const minute = Number(match[2]);
