@@ -136,6 +136,7 @@ export function assessProtectedTimeConflict({
 export const PROTECTED_TIME_PATTERNS = Object.freeze(['one_off', 'weekly']);
 export const PROTECTED_TIME_MUTATIONS = Object.freeze(['create', 'edit', 'archive', 'restore', 'delete']);
 export const PROTECTED_TIME_MUTATION_INTENT_VERSION = 'protected-time-mutation-v1';
+export const PROTECTED_TIME_MUTATION_INTENT_VERSION_V2 = 'protected-time-mutation-v2';
 
 const PROTECTED_TIME_UUID_V7_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PROTECTED_TIME_LOCAL_DATE_TIME_PATTERN = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/;
@@ -353,7 +354,7 @@ export function buildProtectedTimeResolutionRequest(draft) {
  * Build the exact 20-field database patch only after a matching authoritative
  * IANA resolution. Weekly rows keep civil recurrence fields and resolver policy.
  */
-export function buildProtectedTimeBlockPatch(draft, resolution) {
+export function buildProtectedTimeBlockPatch(draft, resolution, { taskScheduleDecisions = [], taskScheduleSnapshot = [] } = {}) {
   assert(draft && typeof draft === 'object', 'A normalized Protected Time draft is required.');
   assert(resolution && typeof resolution === 'object' && resolution.authoritative === true
     && resolution.rulesSource === 'iana-tzdb', 'An authoritative IANA resolution is required.');
@@ -389,6 +390,8 @@ export function buildProtectedTimeBlockPatch(draft, resolution) {
     start_time_local: oneOff ? null : draft.startLocalTime,
     end_time_local: oneOff ? null : draft.endLocalTime,
     ends_next_day: oneOff ? null : draft.endsNextDay,
+    task_schedule_conflict_decisions: [...taskScheduleDecisions],
+    task_schedule_snapshot: [...taskScheduleSnapshot],
     resolver_metadata: oneOff
       ? {
         rulesSource: resolution.rulesSource,
@@ -410,7 +413,7 @@ export function buildProtectedTimeBlockPatch(draft, resolution) {
 }
 
 /**
- * @param {{ action: string, blockId: string, expectedUpdatedAt?: string | null, blockDraft?: object | null }} input
+ * @param {{ action: string, blockId: string, expectedUpdatedAt?: string | null, blockDraft?: object | null, taskScheduleDecisions?: object[] }} input
  * @param {Crypto} [cryptoProvider]
  */
 export async function hashProtectedTimeMutationIntent({
@@ -418,26 +421,34 @@ export async function hashProtectedTimeMutationIntent({
   blockId,
   expectedUpdatedAt = null,
   blockDraft = null,
+  taskScheduleDecisions = [],
 }, cryptoProvider = globalThis.crypto) {
   assert(cryptoProvider?.subtle?.digest, 'Web Crypto SHA-256 is unavailable.');
   assert(PROTECTED_TIME_MUTATIONS.includes(action), 'Unsupported Protected Time mutation.');
+  assert(Array.isArray(taskScheduleDecisions) && taskScheduleDecisions.length <= 500,
+    'taskScheduleDecisions must be an array containing at most 500 entries.');
   const normalizedId = normalizeProtectedTimeBlockId(blockId);
   const normalizedVersion = expectedUpdatedAt == null
     ? null
     : normalizeProtectedTimeExpectedVersion(expectedUpdatedAt);
-  const canonicalPayload = JSON.stringify({
-    version: PROTECTED_TIME_MUTATION_INTENT_VERSION,
+  const version = taskScheduleDecisions.length > 0
+    ? PROTECTED_TIME_MUTATION_INTENT_VERSION_V2
+    : PROTECTED_TIME_MUTATION_INTENT_VERSION;
+  const canonical = {
+    version,
     action,
     blockId: action === 'create' ? null : normalizedId,
     expectedUpdatedAt: normalizedVersion,
     blockDraft,
-  });
+  };
+  if (taskScheduleDecisions.length > 0) canonical.taskScheduleDecisions = taskScheduleDecisions;
+  const canonicalPayload = JSON.stringify(canonical);
   const digest = await cryptoProvider.subtle.digest('SHA-256', new TextEncoder().encode(canonicalPayload));
   const payloadHash = [...new Uint8Array(digest)]
     .map((byte) => byte.toString(16).padStart(2, '0'))
     .join('');
   return Object.freeze({
-    version: PROTECTED_TIME_MUTATION_INTENT_VERSION,
+    version,
     canonicalPayload,
     hashAlgorithm: 'sha-256',
     payloadHash,
