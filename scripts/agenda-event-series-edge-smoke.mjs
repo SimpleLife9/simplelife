@@ -93,6 +93,9 @@ let materializerLogs = "";
 let occurrenceMutationServer = null;
 let occurrenceMutationExitCode = null;
 let occurrenceMutationLogs = "";
+let seriesMutationServer = null;
+let seriesMutationExitCode = null;
+let seriesMutationLogs = "";
 
 async function invoke(token, key, payload) {
   return await fetch(base + "/functions/v1/agenda-event-series-create", {
@@ -335,6 +338,147 @@ try {
   );
   equal(mutationAudit, "1", "Exactly one append-only exception audit row");
 
+  // Exercise the two-scope series editor through the authenticated local Edge Runtime.
+  // The canceled first slot stays on the parent; split from the next scheduled slot.
+  const splitTarget = sqlScalar(
+    "SELECT id::text || '|' || original_local_date::text FROM public.calendar_event_occurrence "
+      + "WHERE calendar_event_id = '" + first.seriesEventId + "'::uuid "
+      + "AND owner_user_id = '" + profileId + "'::uuid "
+      + "AND occurrence_status = 'scheduled' AND override_kind IS NULL "
+      + "ORDER BY original_local_date ASC LIMIT 1",
+  );
+  const [selectedOccurrenceId, selectedDate] = splitTarget.split("|");
+  assertUuid(selectedOccurrenceId, UUID_V7_PATTERN, "Occurrence selected for series split");
+  const masterResponse = await fetch(
+    base + "/rest/v1/calendar_event?id=eq." + first.seriesEventId + "&select=updated_at",
+    { headers: { apikey: publishable, authorization: "Bearer " + session.access_token } },
+  );
+  if (masterResponse.status !== 200) fail("Could not read owner-scoped series version: " + await masterResponse.text());
+  const masterRows = await masterResponse.json();
+  if (!Array.isArray(masterRows) || masterRows.length !== 1 || typeof masterRows[0].updated_at !== "string") {
+    fail("Owner-scoped series version response was malformed.");
+  }
+  const seriesEditKey = newUuid();
+  const seriesEditPayload = {
+    seriesId: first.seriesEventId,
+    expectedUpdatedAt: masterRows[0].updated_at,
+    selectedOccurrenceId,
+    scope: "this_and_following",
+    event: {
+      title: "Recurring series split from authenticated Edge smoke",
+      eventStatus: "confirmed",
+      temporalKind: "all_day",
+      startDate: selectedDate,
+      endDateExclusive: addCalendarDay(selectedDate),
+    },
+    recurrenceRule: {
+      version: 1,
+      frequency: "DAILY",
+      interval: 1,
+      startDate: selectedDate,
+      temporalKind: "all_day",
+      count: 3,
+    },
+    endLocalTime: null,
+    endDayOffset: 0,
+  };
+  seriesMutationServer = spawn("supabase", ["functions", "serve", "agenda-event-series-mutate", "--no-verify-jwt"], {
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, NO_COLOR: "1" },
+  });
+  seriesMutationServer.stdout.on("data", (chunk) => { seriesMutationLogs = (seriesMutationLogs + chunk.toString()).slice(-16000); });
+  seriesMutationServer.stderr.on("data", (chunk) => { seriesMutationLogs = (seriesMutationLogs + chunk.toString()).slice(-16000); });
+  seriesMutationServer.on("exit", (code) => { seriesMutationExitCode = code; });
+
+  let seriesMutationReady = false;
+  const seriesMutationDeadline = Date.now() + 60000;
+  while (Date.now() < seriesMutationDeadline) {
+    if (seriesMutationExitCode !== null) {
+      fail("Recurring series mutation Edge server exited early: " + seriesMutationExitCode + "\\n" + seriesMutationLogs);
+    }
+    try {
+      const probe = await fetch(base + "/functions/v1/agenda-event-series-mutate", {
+        method: "GET",
+        headers: { apikey: publishable, authorization: "Bearer " + publishable },
+        signal: AbortSignal.timeout(2000),
+      });
+      if (probe.status === 401) { seriesMutationReady = true; break; }
+      await probe.body?.cancel().catch(() => {});
+    } catch { /* bounded readiness retry */ }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  if (!seriesMutationReady) {
+    fail("Recurring series mutation Edge Runtime did not become ready.\\n" + seriesMutationLogs);
+  }
+  async function invokeSeriesMutation(token) {
+    return await fetch(base + "/functions/v1/agenda-event-series-mutate", {
+      method: "POST",
+      headers: {
+        apikey: publishable,
+        authorization: "Bearer " + token,
+        "content-type": "application/json",
+        "idempotency-key": seriesEditKey,
+      },
+      body: JSON.stringify(seriesEditPayload),
+      signal: AbortSignal.timeout(20000),
+    });
+  }
+  const invalidSeriesMutationBearer = await invokeSeriesMutation(publishable);
+  equal(invalidSeriesMutationBearer.status, 401, "Series edit rejects publishable API key as Bearer");
+  const seriesEdit = await expectJson(
+    await invokeSeriesMutation(session.access_token),
+    200,
+    "Authenticated this-and-following series edit",
+  );
+  assertUuid(seriesEdit.childSeriesEventId, UUID_V7_PATTERN, "Split child series id");
+  equal(seriesEdit.scope, "this_and_following", "Series split scope");
+  equal(seriesEdit.selectedOccurrenceId, selectedOccurrenceId, "Inherited selected occurrence identity");
+  const seriesEditReplay = await expectJson(
+    await invokeSeriesMutation(session.access_token),
+    200,
+    "Idempotent recurring series split retry",
+  );
+  equal(seriesEditReplay.childSeriesEventId, seriesEdit.childSeriesEventId, "Replay preserves child series id");
+  equal(seriesEditReplay.replayed, true, "Series split replay marker");
+
+  const parentBoundary = sqlScalar(
+    "SELECT recurrence_effective_through::text FROM public.calendar_event "
+      + "WHERE id = '" + first.seriesEventId + "'::uuid AND owner_user_id = '" + profileId + "'::uuid",
+  );
+  equal(parentBoundary, selectedDate, "Previous series segment effective-through boundary");
+  const childLineage = sqlScalar(
+    "SELECT count(*) FROM public.calendar_event WHERE id = '" + seriesEdit.childSeriesEventId
+      + "'::uuid AND owner_user_id = '" + profileId + "'::uuid "
+      + "AND recurrence_parent_event_id = '" + first.seriesEventId + "'::uuid "
+      + "AND recurrence_inherited_occurrence_id = '" + selectedOccurrenceId + "'::uuid "
+      + "AND recurrence_effective_from = '" + selectedDate + "'::date "
+      + "AND recurrence_rule->'excludedDates' @> jsonb_build_array('" + selectedDate + "')",
+  );
+  equal(childLineage, "1", "Child series lineage and inherited-slot exclusion");
+  const inheritedSlot = sqlScalar(
+    "SELECT count(*) FROM public.calendar_event_occurrence WHERE id = '" + selectedOccurrenceId
+      + "'::uuid AND calendar_event_id = '" + first.seriesEventId + "'::uuid AND occurrence_status = 'scheduled'",
+  );
+  equal(inheritedSlot, "1", "Selected inherited occurrence remains on parent without duplication");
+  const childOccurrenceCount = sqlScalar(
+    "SELECT count(*) FROM public.calendar_event_occurrence WHERE calendar_event_id = '"
+      + seriesEdit.childSeriesEventId + "'::uuid AND owner_user_id = '" + profileId + "'::uuid",
+  );
+  if (Number(childOccurrenceCount) < 1) fail("Series split did not persist any child occurrences.");
+  const seriesEditAudit = sqlScalar(
+    "SELECT count(*) FROM public.audit_event WHERE account_user_id = '" + profileId + "'::uuid "
+      + "AND entity_type = 'calendar_event' AND entity_id = '" + first.seriesEventId + "'::uuid "
+      + "AND action = 'calendar_event.recurrence_updated'",
+  );
+  if (Number(seriesEditAudit) < 1) fail("Series split did not append the recurrence audit record.");
+
+  seriesMutationServer.kill("SIGTERM");
+  await new Promise((resolve) => {
+    if (seriesMutationServer.exitCode !== null) return resolve();
+    const timeout = setTimeout(resolve, 5000);
+    seriesMutationServer.once("exit", () => { clearTimeout(timeout); resolve(); });
+  });
+
   console.log("PASS: real Auth JWT creates a recurring Event through the local Edge Runtime.");
   console.log("PASS: invalid API-key Bearer is rejected by the authenticated wrapper.");
   console.log("PASS: owner-scoped series + three occurrence rows persist; same-key create retry replays one identity.");
@@ -343,15 +487,18 @@ try {
   server.kill("SIGTERM");
   materializerServer?.kill("SIGTERM");
   occurrenceMutationServer?.kill("SIGTERM");
+  seriesMutationServer?.kill("SIGTERM");
   await new Promise((resolve) => {
     const allStopped = () => server.exitCode !== null
       && (!materializerServer || materializerServer.exitCode !== null)
-      && (!occurrenceMutationServer || occurrenceMutationServer.exitCode !== null);
+      && (!occurrenceMutationServer || occurrenceMutationServer.exitCode !== null)
+      && (!seriesMutationServer || seriesMutationServer.exitCode !== null);
     if (allStopped()) return resolve();
     const timeout = setTimeout(resolve, 5000);
     const finish = () => { if (allStopped()) { clearTimeout(timeout); resolve(); } };
     server.once("exit", finish);
     materializerServer?.once("exit", finish);
     occurrenceMutationServer?.once("exit", finish);
+    seriesMutationServer?.once("exit", finish);
   });
 }
