@@ -176,7 +176,7 @@ function mockContext({
       if (table === "calendar_event_series_edit_request") calls.receiptLookup = Number(calls.receiptLookup) + 1;
       if (table === "calendar_event") calls.seriesLookup = Number(calls.seriesLookup) + 1;
       if (table === "calendar_event_occurrence") calls.occurrenceLookup = Number(calls.occurrenceLookup) + 1;
-      return makeQuery(rows[table] ?? []);
+      return makeQuery(rows[table] === undefined ? [] : rows[table]);
     },
     async rpc(name: string, args: Record<string, unknown>) {
       calls.rpc = Number(calls.rpc) + 1;
