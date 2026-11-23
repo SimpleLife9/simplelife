@@ -477,6 +477,67 @@ REVOKE ALL PRIVILEGES ON FUNCTION public.create_calendar_event_once(uuid, uuid, 
 GRANT EXECUTE ON FUNCTION public.create_calendar_event_once(uuid, uuid, text, text, jsonb)
   TO service_role;
 
+CREATE OR REPLACE FUNCTION private.append_calendar_event_protected_time_decision_audit()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $function$
+DECLARE
+  v_decisions_before jsonb := '[]'::jsonb;
+BEGIN
+  IF NEW.owner_user_id IS NULL
+     OR NEW.updated_by_user_id IS NULL
+     OR NEW.owner_user_id <> NEW.updated_by_user_id THEN
+    RAISE EXCEPTION 'Protected Time decision audit requires matching Event owner and actor';
+  END IF;
+
+  IF TG_OP = 'UPDATE' THEN
+    IF NEW.protected_time_decisions IS NOT DISTINCT FROM OLD.protected_time_decisions THEN
+      RETURN NEW;
+    END IF;
+    v_decisions_before := coalesce(OLD.protected_time_decisions, '[]'::jsonb);
+  ELSIF TG_OP <> 'INSERT' THEN
+    RAISE EXCEPTION 'Unsupported Protected Time decision audit operation: %', TG_OP;
+  END IF;
+
+  IF CASE
+       WHEN jsonb_typeof(NEW.protected_time_decisions) = 'array'
+         THEN jsonb_array_length(NEW.protected_time_decisions) > 500
+       ELSE true
+     END THEN
+    RAISE EXCEPTION 'Protected Time decision evidence must be a bounded JSON array';
+  END IF;
+
+  IF TG_OP = 'INSERT' AND jsonb_array_length(NEW.protected_time_decisions) = 0 THEN
+    RETURN NEW;
+  END IF;
+
+  INSERT INTO public.audit_event (
+    id, account_user_id, actor_user_id, action, entity_type, entity_id,
+    result, source, details, occurred_at, recorded_at
+  ) VALUES (
+    private.uuidv7(), NEW.owner_user_id, NEW.updated_by_user_id,
+    'calendar_event.protected_time_decisions_recorded', 'calendar_event', NEW.id,
+    'success', 'user',
+    jsonb_build_object(
+      'decision_version', 'protected-time-decision-v1',
+      'decision_count_before', jsonb_array_length(v_decisions_before),
+      'decision_count_after', jsonb_array_length(NEW.protected_time_decisions),
+      'decisions', NEW.protected_time_decisions,
+      'decisions_before', v_decisions_before,
+      'decisions_after', NEW.protected_time_decisions
+    ),
+    clock_timestamp(), clock_timestamp()
+  );
+  RETURN NEW;
+END;
+$function$;
+
+ALTER FUNCTION private.append_calendar_event_protected_time_decision_audit() OWNER TO postgres;
+REVOKE ALL PRIVILEGES ON FUNCTION private.append_calendar_event_protected_time_decision_audit()
+  FROM PUBLIC, anon, authenticated, service_role;
+
 CREATE OR REPLACE FUNCTION public.mutate_calendar_event_once(
   p_owner_user_id uuid,
   p_event_id uuid,
