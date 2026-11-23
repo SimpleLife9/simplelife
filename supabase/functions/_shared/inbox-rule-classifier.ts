@@ -9,6 +9,7 @@ type ClassificationResult = {
   category: InboxCategory;
   confidence: number;
   requiresClarification: boolean;
+  clarificationPrompt: string | null;
   rule: string;
 };
 export type InboxProposal = {
@@ -19,6 +20,7 @@ export type InboxProposal = {
   category: InboxCategory;
   confidence: number;
   requiresClarification: boolean;
+  clarificationPrompt: string | null;
   interpretation: string;
   partId?: string;
 };
@@ -36,18 +38,30 @@ function classifyFragment(fragment: string): ClassificationResult {
   const text = fragment.trim();
   const lower = text.toLocaleLowerCase("es");
   if (/^(lista|pendientes|checklist|to do)\s*:?$/i.test(text)) {
-    return { category: "list", confidence: 0.78, requiresClarification: false, rule: "list-heading" };
+    return { category: "list", confidence: 0.78, requiresClarification: false, clarificationPrompt: null, rule: "list-heading" };
   }
   const matches = CATEGORY_PATTERNS.filter(([, pattern]) => pattern.test(lower));
   if (matches.length > 1) {
     const [category] = matches[0];
-    return { category, confidence: 0.60, requiresClarification: true, rule: "overlapping-cues" };
+    return {
+      category,
+      confidence: 0.60,
+      requiresClarification: true,
+      clarificationPrompt: "La captura contiene señales de más de una categoría. ¿Qué resultado esperas y qué debe quedar registrado?",
+      rule: "overlapping-cues",
+    };
   }
   if (matches.length === 1) {
     const [category, , confidence] = matches[0];
-    return { category, confidence, requiresClarification: false, rule: "phrase-cue" };
+    return { category, confidence, requiresClarification: false, clarificationPrompt: null, rule: "phrase-cue" };
   }
-  return { category: "note_idea", confidence: 0.42, requiresClarification: true, rule: "unclassified-fallback" };
+  return {
+    category: "note_idea",
+    confidence: 0.42,
+    requiresClarification: true,
+    clarificationPrompt: "No hay una señal clara de categoría. ¿Qué quieres hacer o recordar con este texto?",
+    rule: "unclassified-fallback",
+  };
 }
 
 /**
@@ -103,6 +117,7 @@ export function classifyInboxCapture(contentOriginal: string): InboxProposal[] {
       category: result.category,
       confidence: result.confidence,
       requiresClarification: result.requiresClarification,
+      clarificationPrompt: result.clarificationPrompt,
       interpretation: "Sugerencia heurística (" + result.rule + "). Requiere revisión y confirmación del usuario.",
     });
     pendingPrefix = "";
@@ -114,6 +129,7 @@ export function classifyInboxCapture(contentOriginal: string): InboxProposal[] {
       partIndex: 0, startOffset: 0, endOffset: contentOriginal.length,
       originalFragment: contentOriginal, category: result.category, confidence: result.confidence,
       requiresClarification: result.requiresClarification,
+      clarificationPrompt: result.clarificationPrompt,
       interpretation: "Sugerencia heurística (" + result.rule + "). Requiere revisión y confirmación del usuario.",
     });
   }
