@@ -1,7 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../lib/supabase.js';
 import { uuidv7 } from '../../lib/uuidv7.js';
-import { useRows } from '../../shared/hooks/useRows.js';
 import { SectionTitle } from '../../shared/components/SectionTitle.jsx';
 import { EmptyState } from '../../shared/components/EmptyState.jsx';
 import { CaptureComposer } from './components/CaptureComposer.jsx';
@@ -13,8 +12,15 @@ function normalizeCaptureForDuplicate(value) {
 }
 
 export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage, setMorePage }) {
-  const { rows, loading, localError } = useRows('capture', profile, refreshKey, (query) => query
-    .order('captured_at', { ascending: false }).limit(250));
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [localError, setLocalError] = useState('');
+  const [pageOffset, setPageOffset] = useState(0);
+  const [totalCount, setTotalCount] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [duplicateCaptureIds, setDuplicateCaptureIds] = useState([]);
+  const [duplicateCheckError, setDuplicateCheckError] = useState('');
   const { rows: captureParts } = useRows('capture_part', profile, refreshKey, (query) => query.order('part_index'));
   const { rows: captureLinks } = useRows('capture_link', profile, refreshKey);
   const { rows: processingRuns } = useRows('processing_run', profile, refreshKey, (query) => query.order('created_at', { ascending: false }).limit(100));
@@ -24,6 +30,91 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
 
   const [captureSearch, setCaptureSearch] = useState('');
   const [attentionFilter, setAttentionFilter] = useState('needs_review');
+
+  const buildCaptureQuery = (offset) => {
+    let query = supabase.from('capture').select('*', { count: 'exact' })
+      .order('captured_at', { ascending: false }).order('id', { ascending: false })
+      .range(offset, offset + 99);
+    if (attentionFilter === 'trash') query = query.not('deleted_at', 'is', null);
+    else query = query.is('deleted_at', null);
+    if (attentionFilter === 'needs_review' || attentionFilter === 'reviewed' || attentionFilter === 'archived') {
+      query = query.eq('attention_status', attentionFilter);
+    }
+    const term = captureSearch.trim();
+    if (term) query = query.textSearch('search_document', term, { config: 'simple', type: 'websearch' });
+    return query;
+  };
+
+  const refreshDuplicateMatches = async (captureRows) => {
+    const ids = captureRows.map((capture) => capture.id);
+    if (!ids.length) {
+      setDuplicateCaptureIds([]);
+      setDuplicateCheckError('');
+      return;
+    }
+    const { data, error } = await supabase.rpc('find_inbox_duplicate_captures', {
+      p_capture_ids: ids,
+    });
+    if (error) {
+      setDuplicateCheckError('No se pudo verificar duplicados en todo el archivo. La lista sigue disponible, pero no marques coincidencias como únicas.');
+      return;
+    }
+    setDuplicateCheckError('');
+    setDuplicateCaptureIds((data || []).map((row) => row.capture_id));
+  };
+
+  useEffect(() => {
+    let alive = true;
+    setRows([]);
+    setPageOffset(0);
+    setTotalCount(0);
+    setHasMore(false);
+    setDuplicateCaptureIds([]);
+    setLoading(true);
+    setLocalError('');
+    const timer = setTimeout(async () => {
+      try {
+        const { data, error, count } = await buildCaptureQuery(0);
+        if (error) throw error;
+        if (!alive) return;
+        const loaded = data || [];
+        setRows(loaded);
+        setPageOffset(loaded.length);
+        setTotalCount(count ?? loaded.length);
+        setHasMore((count ?? loaded.length) > loaded.length);
+        await refreshDuplicateMatches(loaded);
+      } catch (error) {
+        if (alive) setLocalError(error?.message || 'No se pudieron cargar las capturas.');
+      } finally {
+        if (alive) setLoading(false);
+      }
+    }, captureSearch.trim() ? 250 : 0);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [profile?.id, refreshKey, captureSearch, attentionFilter]);
+
+  const loadMoreCaptures = async () => {
+    if (loadingMore || loading || !hasMore) return;
+    setLoadingMore(true);
+    setLocalError('');
+    try {
+      const { data, error, count } = await buildCaptureQuery(pageOffset);
+      if (error) throw error;
+      const nextRows = data || [];
+      const merged = [...rows, ...nextRows];
+      setRows(merged);
+      setPageOffset(pageOffset + nextRows.length);
+      setTotalCount(count ?? totalCount);
+      setHasMore((count ?? totalCount) > pageOffset + nextRows.length);
+      await refreshDuplicateMatches(merged);
+    } catch (error) {
+      setLocalError(error?.message || 'No se pudieron cargar más capturas.');
+    } finally {
+      setLoadingMore(false);
+    }
+  };
   const [selectedCapture, setSelectedCapture] = useState(null);
   const [selectedPart, setSelectedPart] = useState(null);
   const [destinationType, setDestinationType] = useState('task');
@@ -63,7 +154,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
   const pendingCount = activeRows.filter((capture) => capture.attention_status === 'needs_review' && !captureIsOrganized(capture.id)).length;
 
   const visibleCaptures = useMemo(() => {
-    const term = captureSearch.trim().toLocaleLowerCase('es');
+    const terms = normalizeCaptureForDuplicate(captureSearch).split(' ').filter(Boolean);
     return rows.filter((capture) => {
       const parts = captureParts.filter((item) => item.capture_id === capture.id);
       const organized = parts.length > 0 && parts.every((part) => captureLinks.some((link) => link.capture_part_id === part.id && link.link_status === 'confirmed'));
@@ -74,7 +165,8 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
           || (attentionFilter === 'reviewed' && capture.attention_status === 'reviewed' && !organized)
           || (attentionFilter === 'organized' && organized)
           || (attentionFilter === 'archived' && capture.attention_status === 'archived'));
-      const searchMatches = !term || String(capture.content_original || '').toLocaleLowerCase('es').includes(term);
+      const normalizedContent = normalizeCaptureForDuplicate(capture.content_original);
+      const searchMatches = terms.length === 0 || terms.every((term) => normalizedContent.includes(term));
       return statusMatches && searchMatches;
     });
   }, [rows, captureParts, captureLinks, captureSearch, attentionFilter]);
@@ -302,7 +394,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
   return <div className="inbox-layout">
     <CaptureComposer busy={busy} onSubmit={submit} />
     <div className="inbox-list-wrap">
-      <SectionTitle detail={visibleCaptures.length + ' de ' + rows.length + ' capturas · ' + pendingCount + ' por organizar · ' + organizedCount + ' organizadas'}>Capturado recientemente</SectionTitle>
+      <SectionTitle detail={visibleCaptures.length + ' visibles · ' + rows.length + ' cargadas de ' + totalCount + ' coincidencias en el archivo'}>Capturado recientemente</SectionTitle>
       <div className="capture-toolbar" aria-label="Buscar y revisar capturas">
         <label className="capture-toolbar-field capture-search-field">
           <span>Buscar</span>
@@ -328,9 +420,8 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
             : part?.category === 'note_idea' ? 'Nota o idea'
               : part?.category === 'list' ? 'Lista' : typeLabels[linkKind] || 'Elemento';
           const normalizedSource = normalizeCaptureForDuplicate(capture.content_original);
-          const possibleDuplicate = !capture.deleted_at && normalizedSource.length > 3 && rows.some((candidate) =>
-            candidate.id !== capture.id && !candidate.deleted_at
-            && normalizeCaptureForDuplicate(candidate.content_original) === normalizedSource);
+          const possibleDuplicate = !capture.deleted_at && normalizedSource.length > 3
+            && duplicateCaptureIds.includes(capture.id);
           const rowClass = 'capture-row ' + (capture.deleted_at ? 'capture-row-archived' : confirmedLink ? 'capture-row-organized' : 'capture-row-' + capture.attention_status);
           return <div className={rowClass} key={capture.id}>
             <span className="capture-bullet">{confirmedLink ? '✓' : '✳'}</span>
@@ -381,6 +472,12 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
         })}</div>
       ) : <EmptyState title="No hay coincidencias" detail="Cambia la búsqueda o el filtro para encontrar otras capturas." icon="⌕" />
       : <EmptyState title="El Inbox está vacío" detail="Empieza escribiendo cualquier cosa que no quieras olvidar." /> }
+      {hasMore && <div className="capture-pagination">
+        <button type="button" className="capture-action-button" disabled={loadingMore || loading} onClick={loadMoreCaptures}>
+          {loadingMore ? 'Cargando…' : 'Cargar más capturas'}
+        </button>
+      </div>}
+      {duplicateCheckError && <p className="form-error" role="status">{duplicateCheckError}</p>}
     </div>
     <div className="honest-note"><span>ⓘ</span><p>Las sugerencias actuales se generan con reglas locales deterministas (no con un modelo de IA) y son solo orientativas. Cada fragmento conserva el texto original; ningún destino se crea sin tu confirmación. Voz y sincronización offline privada permanecen desactivadas hasta aprobar y verificar su almacenamiento, proveedor, cifrado y recuperación.</p></div>
 

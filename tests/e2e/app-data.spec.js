@@ -73,7 +73,7 @@ async function mockSupabaseSession(page, initialData = {}) {
   const contributionRelations = [...(initialData.contributionRelations || [])];
   const insertedContributionRelations = [];
   const updatedContributionRelations = [];
-  const captures = [
+  const defaultCaptures = [
     {
       id: '00000000-0000-7000-8000-000000000101',
       owner_user_id: profile.id,
@@ -111,6 +111,7 @@ async function mockSupabaseSession(page, initialData = {}) {
       deleted_at: null,
     },
   ];
+  const captures = [...(initialData.captures || defaultCaptures)];
   const updatedCaptures = [];
   const insertedCaptures = [];
   const insertedCaptureParts = [];
@@ -539,7 +540,23 @@ async function mockSupabaseSession(page, initialData = {}) {
     }
 
     if (url.pathname === '/rest/v1/capture' && method === 'GET') {
-      await json(200, captures);
+      const rangeHeader = request.headers()['range'] || '0-99';
+      const [rangeStart, rangeEnd] = rangeHeader.split('-').map(Number);
+      const start = Number.isFinite(rangeStart) ? rangeStart : 0;
+      const end = Number.isFinite(rangeEnd) ? rangeEnd : start + 99;
+      const searchParam = url.searchParams.get('search_document');
+      let filtered = [...captures];
+      if (searchParam) {
+        const value = decodeURIComponent(searchParam.replace(/^(?:wfts|fts|plfts|phfts)\([^)]*\)\./, ''));
+        const normalized = value.toLocaleLowerCase('es').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+        const words = normalized.split(/\s+/).filter(Boolean);
+        filtered = filtered.filter((capture) => {
+          const content = normalizeCaptureForDuplicate(capture.content_original);
+          return words.every((word) => content.includes(word));
+        });
+      }
+      const pageRows = filtered.slice(start, end + 1);
+      await json(200, pageRows, { 'content-range': pageRows.length ? `${start}-${start + pageRows.length - 1}/${filtered.length}` : `*/${filtered.length}`, 'accept-ranges': 'items' });
       return;
     }
 
@@ -880,6 +897,24 @@ async function mockSupabaseSession(page, initialData = {}) {
       };
       capture.processing_status = 'processed';
       await json(200, { status: 'succeeded', engine: 'deterministic-rules', proposalCount: 1 });
+      return;
+    }
+
+    if (url.pathname === '/rest/v1/rpc/find_inbox_duplicate_captures' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const ids = Array.isArray(payload.p_capture_ids) ? payload.p_capture_ids : [];
+      const duplicates = ids.map((id) => {
+        const source = captures.find((capture) => capture.id === id && !capture.deleted_at);
+        if (!source) return null;
+        const normalized = normalizeCaptureForDuplicate(source.content_original);
+        const matching = captures.filter((capture) => !capture.deleted_at
+          && capture.owner_user_id === source.owner_user_id
+          && normalizeCaptureForDuplicate(capture.content_original) === normalized);
+        return matching.length > 1
+          ? { capture_id: id, duplicate_count: matching.length, matching_capture_ids: matching.map((capture) => capture.id) }
+          : null;
+      }).filter(Boolean);
+      await json(200, duplicates);
       return;
     }
 
@@ -1224,6 +1259,38 @@ test('Inbox runs advisory processing, records review, and restores soft-deleted 
   await page.getByLabel('Filtrar capturas por revisión').selectOption('needs_review');
   await expect(page.getByText(original)).toBeVisible();
   expect(insertedTasks).toHaveLength(0);
+});
+
+test('Inbox searches and paginates the complete capture archive beyond the first 250 rows', async ({ page }) => {
+  const olderCaptures = Array.from({ length: 257 }, (_, index) => ({
+    id: `00000000-0000-7000-8000-${String(1000000000 + index).slice(-12)}`,
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    input_type: 'text',
+    content_original: index === 256 ? 'ARCHIVE_TAIL_UNIQUE_TERM' : `Historical capture ${index + 1}`,
+    attention_status: 'needs_review',
+    processing_status: 'not_started',
+    sync_status: 'synced',
+    captured_at: new Date(Date.UTC(2025, 0, 1 + index)).toISOString(),
+    deleted_at: null,
+  }));
+  const { captures } = await mockSupabaseSession(page, { captures: olderCaptures });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  await expect(page.getByText('Historical capture 257')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Cargar más capturas' }).click();
+  await page.getByRole('button', { name: 'Cargar más capturas' }).click();
+  await page.getByRole('button', { name: 'Cargar más capturas' }).click();
+  await expect(page.getByText('ARCHIVE_TAIL_UNIQUE_TERM')).toBeVisible();
+
+  await page.getByLabel('Buscar capturas').fill('ARCHIVE_TAIL_UNIQUE_TERM');
+  await expect(page.getByText('ARCHIVE_TAIL_UNIQUE_TERM')).toBeVisible();
+  expect(captures).toHaveLength(257);
 });
 
 test('Inbox marks normalized duplicate text without merging or deleting captures', async ({ page }) => {
