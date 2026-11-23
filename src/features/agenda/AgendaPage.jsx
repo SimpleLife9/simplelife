@@ -1154,7 +1154,13 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
               )}
               <footer className="agenda-dialog-actions">
                 <button type="button" className="agenda-secondary-button" onClick={closeComposer} disabled={busy}>Cancelar</button>
-                <button type="submit" className="button button-primary" disabled={busy || !title.trim()}>{busy ? 'Guardando…' : editingEvent ? 'Guardar cambios' : 'Guardar evento'}</button>
+                <button
+                  type="submit"
+                  className="button button-primary"
+                  disabled={busy || !title.trim() || (recurrenceFrequency === 'WEEKLY' && recurrenceWeekdays.length === 0)}
+                >
+                  {busy ? 'Guardando…' : editingEvent ? 'Guardar cambios' : recurrenceFrequency !== 'none' ? 'Crear serie recurrente' : 'Guardar evento'}
+                </button>
               </footer>
             </form>
           </section>
