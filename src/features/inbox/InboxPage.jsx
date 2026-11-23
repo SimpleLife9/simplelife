@@ -278,7 +278,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
                     {proposal && <span className="capture-part-confidence">Afinidad heurística: {Math.round(proposal.confidence * 100)}%{proposal.requiresClarification ? ' · necesita aclaración' : ''}</span>}
                     {capturePart.review_status === 'accepted' || capturePart.review_status === 'edited' ? <span className="capture-part-confirmed">Confirmado</span> : null}
                   </div>
-                  <p>{capturePart.original_fragment}</p>
+                  {capturePart.original_fragment !== capture.content_original && <p>{capturePart.original_fragment}</p>}
                   {partLink ? <span className="muted">Destino vinculado y trazable.</span> : <button type="button" className="capture-action-button" disabled={busy || capture.attention_status === 'archived'} onClick={() => openOrganizer(capture, capturePart)}>Revisar y confirmar destino</button>}
                 </div>;
               })}
