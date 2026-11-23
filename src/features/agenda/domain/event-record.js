@@ -186,7 +186,7 @@ export function buildEventInsertRecord({
     && UUID_V7_PATTERN.test(item.id) && typeof item.updated_at === 'string'
     && Number.isFinite(Date.parse(item.updated_at))),
   'Every TaskSchedule snapshot entry must contain UUIDv7 and updated_at.');
-  record.task_schedule_decisions = taskScheduleDecisions.map((item) => ({ ...item }));
+  record.task_schedule_conflict_decisions = taskScheduleDecisions.map((item) => ({ ...item }));
   record.task_schedule_snapshot = taskScheduleSnapshot.map((item) => ({
     id: item.id.toLowerCase(),
     updated_at: item.updated_at,
