@@ -130,7 +130,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     review_status: 'unreviewed',
   })))];
   const updatedCaptureParts = [];
-  const processingRuns = [];
+  const processingRuns = [...(initialData.processingRuns || [])];
   const queueRequests = [];
   const processingRequests = [];
   const reviewRequests = [];
@@ -1404,6 +1404,68 @@ test('Inbox keeps Request and Habit suggestions unavailable until the owner choo
   expect(insertedTasks).toHaveLength(1);
   expect(insertedCaptureLinks).toHaveLength(1);
   expect(reviewRequests).toHaveLength(1);
+});
+
+
+test('Inbox requires an explicit clarification before accepting an ambiguous proposal', async ({ page }) => {
+  const capture = {
+    id: '00000000-0000-7000-8000-000000000721',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    input_type: 'text',
+    content_original: 'Pensar en cómo mejorar mi rutina',
+    attention_status: 'needs_review',
+    processing_status: 'processed',
+    sync_status: 'synced',
+    captured_at: '2026-11-19T15:00:00.000Z',
+    deleted_at: null,
+  };
+  const part = {
+    id: '00000000-0000-7000-8000-000000000722',
+    capture_id: capture.id,
+    part_index: 0,
+    original_fragment: capture.content_original,
+    category: 'note_idea',
+    review_status: 'unreviewed',
+  };
+  const processingRun = {
+    id: '00000000-0000-7000-8000-000000000723',
+    capture_id: capture.id,
+    created_at: '2026-11-19T15:01:00.000Z',
+    result: {
+      proposals: [{ partIndex: 0, confidence: 0.42, requiresClarification: true }],
+    },
+  };
+  const { insertedNoteIdeas, reviewRequests } = await mockSupabaseSession(page, {
+    captures: [capture],
+    captureParts: [part],
+    processingRuns: [processingRun],
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  await expect(page.getByText(/necesita aclaración/)).toBeVisible();
+  await page.getByRole('button', { name: 'Organizar captura: Pensar en cómo mejorar mi rutina' }).click();
+  const organizer = page.getByRole('dialog', { name: 'Organizar captura' });
+  const confirm = organizer.getByRole('button', { name: 'Confirmar y organizar' });
+  await expect(organizer.getByLabel('Aclaración / interpretación')).toBeVisible();
+  await expect(confirm).toBeDisabled();
+  await organizer.getByLabel('Aclaración / interpretación').fill('Es una idea para diseñar una rutina semanal sostenible.');
+  await expect(confirm).toBeEnabled();
+  await confirm.click();
+  await expect(page.getByText('Captura guardada como nota.')).toBeVisible();
+  expect(insertedNoteIdeas).toHaveLength(1);
+  expect(reviewRequests.at(-1)).toMatchObject({
+    p_capture_part_id: part.id,
+    p_category: 'note_idea',
+    p_review_status: 'accepted',
+    p_interpretation: 'Es una idea para diseñar una rutina semanal sostenible.',
+  });
+  expect(capture.content_original).toBe('Pensar en cómo mejorar mi rutina');
 });
 
 test('Inbox searches and paginates the complete capture archive beyond the first 250 rows', async ({ page }) => {
