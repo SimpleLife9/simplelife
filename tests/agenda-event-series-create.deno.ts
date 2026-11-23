@@ -224,8 +224,8 @@ Deno.test("rejects Protected Time and TaskSchedule overlaps before the atomic wr
     protection_mode: "hard",
     pattern_kind: "one_off",
     time_zone: "America/Havana",
-    starts_at: "2026-11-24T13:30:00.000Z",
-    ends_at: "2026-11-24T14:00:00.000Z",
+    starts_at: "2026-11-24T14:30:00.000Z",
+    ends_at: "2026-11-24T15:00:00.000Z",
     archived_at: null,
     deleted_at: null,
   };
