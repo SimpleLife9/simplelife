@@ -629,6 +629,53 @@ END;
 $test$;
 RESET ROLE;
 
+-- The Event Create decision is append-only and carries exact before/after consent.
+-- Event Edit kept the same approval, so it must not append a duplicate consent row.
+DO $test$
+DECLARE
+  v_event_decisions jsonb;
+  v_details jsonb;
+  v_audit_count bigint;
+BEGIN
+  SELECT task_schedule_conflict_decisions INTO v_event_decisions
+  FROM public.calendar_event
+  WHERE id = '019a0000-0000-7000-8000-000000000104';
+
+  SELECT count(*) INTO v_audit_count
+  FROM public.audit_event
+  WHERE entity_type = 'calendar_event'
+    AND entity_id = '019a0000-0000-7000-8000-000000000104'
+    AND action = 'calendar_event.task_schedule_decisions_recorded';
+  IF v_audit_count <> 1 THEN
+    RAISE EXCEPTION 'One unchanged Event TaskSchedule consent should have exactly one audit row; got %', v_audit_count;
+  END IF;
+
+  SELECT details INTO v_details
+  FROM public.audit_event
+  WHERE entity_type = 'calendar_event'
+    AND entity_id = '019a0000-0000-7000-8000-000000000104'
+    AND action = 'calendar_event.task_schedule_decisions_recorded'
+  ORDER BY recorded_at DESC
+  LIMIT 1;
+
+  IF v_details->'decisions_before' IS DISTINCT FROM '[]'::jsonb
+     OR v_details->'decisions_after' IS DISTINCT FROM v_event_decisions
+     OR v_details->>'decision_version' IS DISTINCT FROM 'event-task-schedule-decision-v1' THEN
+    RAISE EXCEPTION 'Event TaskSchedule audit must preserve the exact version-bound consent: %', v_details;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.calendar_event
+    WHERE id = '019a0000-0000-7000-8000-000000000104'
+      AND title = 'Event edited while preserving TaskSchedule'
+      AND task_schedule_conflict_decisions = v_event_decisions
+  ) THEN
+    RAISE EXCEPTION 'Event Edit must retain the exact consent without rewriting its evidence';
+  END IF;
+END;
+$test$;
+
 -- Verify protected audit evidence as postgres, not service_role.
 DO $test$
 DECLARE
