@@ -33,6 +33,12 @@ function weekdayForDate(value) {
   return ISO_WEEKDAYS[weekday === 0 ? 6 : weekday - 1];
 }
 
+function clockMilliseconds(value) {
+  const [clock, fraction = '000'] = value.split('.');
+  const [hour, minute, second] = clock.split(':').map(Number);
+  return (((hour * 60 + minute) * 60 + second) * 1000) + Number(fraction);
+}
+
 /**
  * Builds the approved recurrence v1 create request from a normalized Event.
  * The explicit end clock and calendar-day offset remain separate from duration:
@@ -114,13 +120,14 @@ export function buildRecurringEventCreatePayload({
   assert(startDate === rule.startDate, 'The recurrence anchor must match the Event start date.');
   rule.localTime = startTime.slice(0, 8) + (startTime.slice(9) === '000' ? '' : '.' + startTime.slice(9));
   rule.timeZone = temporal.timeZone;
-  rule.durationMinutes = Math.round((
-    (parseDateKey(endDate, 'endLocalDateTime') - parseDateKey(startDate, 'startLocalDateTime')) * 1440
-    + (Number(endLocalTime.slice(0, 2)) * 60 + Number(endLocalTime.slice(3, 5)))
-    - (Number(startTime.slice(0, 2)) * 60 + Number(startTime.slice(3, 5)))
-  ));
-  assert(rule.durationMinutes > 0,
+  const elapsedCivilMilliseconds = (
+    (parseDateKey(endDate, 'endLocalDateTime') - parseDateKey(startDate, 'startLocalDateTime')) * 86_400_000
+    + clockMilliseconds(endLocalTime)
+    - clockMilliseconds(startTime)
+  );
+  assert(elapsedCivilMilliseconds > 0,
     'The requested local end must be after the requested local start.');
+  rule.durationMinutes = Math.max(1, Math.ceil(elapsedCivilMilliseconds / 60_000));
   rule.disambiguation = temporal.startDisambiguation || 'earlier';
   rule.gapStrategy = temporal.startGapStrategy || 'next-valid';
   const endDayOffset = parseDateKey(endDate, 'endLocalDateTime')
