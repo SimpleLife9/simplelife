@@ -70,9 +70,11 @@ const profileA = sqlScalar("SELECT private.uuidv7()");
 const profileB = sqlScalar("SELECT private.uuidv7()");
 const captureA = sqlScalar("SELECT private.uuidv7()");
 const captureRetry = sqlScalar("SELECT private.uuidv7()");
+const captureProcess = sqlScalar("SELECT private.uuidv7()");
 const keyA = sqlScalar("SELECT private.uuidv7()");
 const keyRetry = sqlScalar("SELECT private.uuidv7()");
-for (const [value, label] of [[profileA,"profile A"],[profileB,"profile B"],[captureA,"capture A"],[captureRetry,"retry capture"],[keyA,"key A"],[keyRetry,"retry key"]]) {
+const keyProcess = sqlScalar("SELECT private.uuidv7()");
+for (const [value, label] of [[profileA,"profile A"],[profileB,"profile B"],[captureA,"capture A"],[captureRetry,"retry capture"],[captureProcess,"process capture"],[keyA,"key A"],[keyRetry,"retry key"],[keyProcess,"process key"]]) {
   assertUuid(value, UUID_V7, label);
 }
 sqlExec(
@@ -81,7 +83,8 @@ sqlExec(
   "('" + profileB + "'::uuid,'" + ownerB.authUserId + "'::uuid,'Inbox Processing B','active'); " +
   "INSERT INTO public.capture (id,owner_user_id,created_by_user_id,content_original) VALUES " +
   "('" + captureA + "'::uuid,'" + profileA + "'::uuid,'" + profileA + "'::uuid,'Preserve this exact processing source.')," +
-  "('" + captureRetry + "'::uuid,'" + profileA + "'::uuid,'" + profileA + "'::uuid,'Retry this disposable source.');"
+  "('" + captureRetry + "'::uuid,'" + profileA + "'::uuid,'" + profileA + "'::uuid,'Retry this disposable source.')," +
+  "('" + captureProcess + "'::uuid,'" + profileA + "'::uuid,'" + profileA + "'::uuid,'Comprar leche para el desayuno.');"
 );
 
 async function startFunction(name, readyHeaders, readyStatus) {
@@ -128,6 +131,7 @@ async function stopServer(server) {
 
 let queueServer;
 let workerServer;
+let processServer;
 try {
   queueServer = await startFunction("inbox-processing-queue", { apikey: publishable }, 401);
   const queue = async (token, captureId, idempotencyKey) => await fetch(queueServer.url, {
@@ -249,6 +253,53 @@ try {
   equal(sqlScalar("SELECT status FROM public.processing_run WHERE id='" + retryJob.run_id + "'::uuid"),
     "succeeded", "retry terminal state");
 
+  // Verify the new owner-authenticated bridge through the actual local Edge Runtime.
+  await stopServer(workerServer.server);
+  workerServer = null;
+  queueServer = await startFunction("inbox-processing-queue", { apikey: publishable }, 401);
+  const processQueue = await queue(ownerA.accessToken, captureProcess, keyProcess);
+  equal(processQueue.status, 202, "process bridge fixture enqueue");
+  const processQueueBody = await responseJson(processQueue, "process bridge fixture queue");
+  await stopServer(queueServer.server);
+  queueServer = null;
+
+  processServer = await startFunction(
+    "inbox-processing-process",
+    { apikey: publishable, authorization: "Bearer " + ownerA.accessToken },
+    405,
+  );
+  const processCall = async (token) => await fetch(processServer.url, {
+    method: "POST",
+    headers: {
+      apikey: publishable,
+      authorization: "Bearer " + token,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ runId: processQueueBody.runId }),
+    signal: AbortSignal.timeout(20000),
+  });
+  const foreignProcess = await processCall(ownerB.accessToken);
+  equal(foreignProcess.status, 404, "another owner cannot invoke processing for a foreign run");
+  equal(sqlScalar("SELECT status FROM public.processing_run WHERE id='" + processQueueBody.runId + "'::uuid"),
+    "queued", "foreign user did not claim the processing run");
+
+  const processResponse = await processCall(ownerA.accessToken);
+  equal(processResponse.status, 200, "owner-authenticated processing bridge status");
+  const processBody = await responseJson(processResponse, "owner-authenticated process bridge");
+  equal(processBody.status, "succeeded", "process bridge terminal state");
+  equal(processBody.engine, "deterministic-rules", "processor identity");
+  equal(processBody.processorVersion, "inbox-rules-v1", "processor version");
+  equal(sqlScalar(
+    "SELECT pr.status || ':' || c.processing_status FROM public.processing_run pr " +
+    "JOIN public.capture c ON c.id=pr.capture_id WHERE pr.id='" + processQueueBody.runId + "'::uuid",
+  ), "succeeded:processed", "owner-authenticated processing atomic state");
+  equal(sqlScalar(
+    "SELECT cp.category || ':' || cp.review_status || ':' || cp.original_fragment " +
+    "FROM public.capture_part cp WHERE cp.capture_id='" + captureProcess + "'::uuid",
+  ), "task:unreviewed:Comprar leche para el desayuno.", "persisted advisory proposal and exact source");
+  await stopServer(processServer.server);
+  processServer = null;
+
   console.log("PASS: user JWT and active profile are required to enqueue Inbox processing.");
   console.log("PASS: capture ownership is enforced before the privileged server-side queue call.");
   console.log("PASS: same-key enqueue replays one run; users cannot read another owner's processing run.");
@@ -256,8 +307,10 @@ try {
   console.log("PASS: leases reject stale completion tokens.");
   console.log("PASS: successful completion updates processing_run and capture atomically.");
   console.log("PASS: retryable failure reclaims the same run with an incremented attempt number.");
+  console.log("PASS: authenticated process endpoint rejects another owner's run and persists unreviewed proposals through actual Edge Runtime.");
   console.log("PASS: no AI API, provider credential, or hosted Supabase write is used.");
 } finally {
   if (queueServer) await stopServer(queueServer.server);
   if (workerServer) await stopServer(workerServer.server);
+  if (processServer) await stopServer(processServer.server);
 }
