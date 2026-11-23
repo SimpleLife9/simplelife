@@ -8,9 +8,9 @@ INSERT INTO auth.users (
   id, instance_id, aud, role, email, encrypted_password,
   email_confirmed_at, raw_app_meta_data, raw_user_meta_data
 ) VALUES (
-  'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+  'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
   '00000000-0000-0000-0000-000000000000',
-  'authenticated', 'authenticated', 'protected-time-task-schedule@example.invalid',
+  'authenticated', 'authenticated', 'protected-time-task-schedule-20261123@example.invalid',
   '', now(), '{"provider":"email","providers":["email"]}'::jsonb, '{}'::jsonb
 )
 ON CONFLICT (id) DO NOTHING;
@@ -18,7 +18,7 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.user_profile (id, auth_user_id, display_name)
 VALUES (
   '019a0000-0000-7000-8000-000000000071',
-  'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+  'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
   'Protected Time TaskSchedule owner'
 )
 ON CONFLICT (id) DO NOTHING;
