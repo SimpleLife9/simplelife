@@ -553,7 +553,7 @@ async function mockSupabaseSession(page, initialData = {}) {
       const searchParam = url.searchParams.get('search_document');
       let filtered = [...captures];
       if (searchParam) {
-        const value = decodeURIComponent(searchParam.replace(/^(?:wfts|fts|plfts|phfts)\([^)]*\)\./, ''));
+        const value = searchParam.replace(/^(?:wfts|fts|plfts|phfts)\([^)]*\)\./, '');
         const normalized = value.toLocaleLowerCase('es').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
         const words = normalized.split(/\s+/).filter(Boolean);
         filtered = filtered.filter((capture) => {
