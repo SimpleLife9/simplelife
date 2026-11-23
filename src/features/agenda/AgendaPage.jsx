@@ -446,7 +446,9 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
           || response?.error === 'PROTECTED_TIME_CONFLICTS_CHANGED') {
           setProtectedConflictPrompt({
             error: response.error,
+            action: 'submit',
             conflicts: Array.isArray(response.conflicts) ? response.conflicts : [],
+            taskScheduleDecisions: acceptedTaskScheduleDecisions,
           });
           setProtectedConflictChoices({});
           message = response.error === 'PROTECTED_TIME_CONFLICTS_CHANGED'
