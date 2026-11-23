@@ -1,7 +1,7 @@
 // Stable, server-recomputable request identity for one-off Event creation.
 // This is not an Event ID and does not authorize a database write.
 
-export const EVENT_CREATE_INTENT_VERSION = 'event-create-v2';
+export const EVENT_CREATE_INTENT_VERSION = 'event-create-v1';
 
 const UUID_V7_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const OFFSET_INSTANT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/i;
