@@ -641,6 +641,64 @@ Deno.test("mutation receipt lookup failure blocks the write", async () => {
   assertEquals(calls.rpc, 0, "failed receipt lookup never writes");
 });
 
+Deno.test("reopen and restore require fresh consent for new Protected Time overlaps", async () => {
+  const block = {
+    id: "0190f47a-7b2c-7abc-8def-0123456789f1",
+    updated_at: "2026-12-20T10:00:00.000000Z",
+    label: "Descanso protegido",
+    category: "sleep",
+    protection_mode: "hard",
+    pattern_kind: "one_off",
+    time_zone: "America/Havana",
+    starts_at: "2026-12-25T02:00:00.000Z",
+    ends_at: "2026-12-25T03:00:00.000Z",
+    archived_at: null,
+    deleted_at: null,
+  };
+  for (const action of ["reopen", "restore"] as const) {
+    const currentEvent = {
+      temporal_kind: "all_day",
+      start_date: "2026-12-24",
+      end_date_exclusive: "2026-12-26",
+      starts_at: null,
+      ends_at: null,
+      protected_time_decisions: [],
+      task_schedule_conflict_decisions: [],
+    };
+    const missing = mockContext({ protectedBlocks: [block], currentEvent });
+    const noConsent = await handleRequest(request({
+      eventId: EVENT_ID, expectedUpdatedAt: VERSION, action,
+    }), missing.ctx, { now: () => "2026-11-22T18:10:00.000Z" });
+    assertEquals(noConsent.status, 409, action + " requires Protected Time consent");
+    assertEquals((await body(noConsent)).error, "PROTECTED_TIME_CONFLICTS", action + " Protected Time conflict");
+    assertEquals(missing.calls.rpc, 0, action + " must not write before Protected Time consent");
+
+    const accepted = mockContext({ protectedBlocks: [block], currentEvent });
+    const response = await handleRequest(request({
+      eventId: EVENT_ID,
+      expectedUpdatedAt: VERSION,
+      action,
+      protectedTimeDecisions: [{
+        blockId: block.id,
+        blockUpdatedAt: block.updated_at,
+        occurrenceStartsAt: block.starts_at,
+        decision: "override_hard",
+      }],
+    }), accepted.ctx, { now: () => "2026-11-22T18:11:00.000Z" });
+    assertEquals(response.status, 200, action + " accepts Protected Time decision");
+    const patch = (accepted.calls.rpcArgs as Record<string, unknown>).p_event_patch as Record<string, unknown>;
+    assertEquals(Object.keys(patch).sort(), [
+      "protected_time_decisions", "protected_time_snapshot",
+      "task_schedule_conflict_decisions", "task_schedule_snapshot", "task_schedule_window",
+    ], action + " sends both conflict systems");
+    const decisions = patch.protected_time_decisions as Array<Record<string, unknown>>;
+    assertEquals(decisions.length, 1, action + " persists one Protected Time consent");
+    assertEquals(decisions[0].blockId, block.id, action + " binds consent to Protected Time block");
+    assertEquals(decisions[0].blockUpdatedAt, block.updated_at, action + " binds Protected Time version");
+    assertEquals((patch.protected_time_snapshot as unknown[]).length, 1, action + " sends full Protected Time snapshot");
+  }
+});
+
 Deno.test("reopen and restore require version-bound TaskSchedule consent before Event reactivation", async () => {
   const schedule = {
     id: "0190f47a-7b2c-7abc-8def-0123456789ef",
@@ -683,8 +741,11 @@ Deno.test("reopen and restore require version-bound TaskSchedule consent before 
     const patch = args.p_event_patch as Record<string, unknown>;
     assertEquals(args.p_mutation, action, action + " reaches mutation RPC");
     assertEquals(Object.keys(patch).sort(), [
+      "protected_time_decisions", "protected_time_snapshot",
       "task_schedule_conflict_decisions", "task_schedule_snapshot", "task_schedule_window",
     ], action + " sends the exact lifecycle evidence fields");
+    assertEquals(patch.protected_time_decisions, [], action + " sends the current Protected Time decisions");
+    assertEquals(patch.protected_time_snapshot, [], action + " sends the complete Protected Time snapshot");
     const decisions = patch.task_schedule_conflict_decisions as Array<Record<string, unknown>>;
     assertEquals(decisions.length, 1, action + " persists one consent");
     assertEquals(decisions[0].taskScheduleId, schedule.id, action + " consent binds schedule identity");
