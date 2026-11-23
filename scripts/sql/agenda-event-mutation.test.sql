@@ -28,6 +28,35 @@ VALUES
   ('019a0000-0000-7000-8000-000000000012', 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', 'Mutation owner B')
 ON CONFLICT (id) DO NOTHING;
 
+INSERT INTO public.task (
+  id, owner_user_id, created_by_user_id, action, status, time_zone
+) VALUES (
+  '019a0000-0000-7000-8000-000000000013',
+  '019a0000-0000-7000-8000-000000000012',
+  '019a0000-0000-7000-8000-000000000012',
+  'Restore Event reservation', 'todo', 'America/Havana'
+);
+
+INSERT INTO public.task_schedule (
+  id, owner_user_id, created_by_user_id, updated_by_user_id, task_id,
+  schedule_status, start_local, end_local, time_zone, starts_at, ends_at,
+  start_disambiguation, end_disambiguation, resolver_metadata
+) VALUES (
+  '019a0000-0000-7000-8000-000000000014',
+  '019a0000-0000-7000-8000-000000000012',
+  '019a0000-0000-7000-8000-000000000012',
+  '019a0000-0000-7000-8000-000000000012',
+  '019a0000-0000-7000-8000-000000000013',
+  'confirmed',
+  timestamp '2026-12-24 05:00:00',
+  timestamp '2026-12-24 06:00:00',
+  'America/Havana',
+  timestamptz '2026-12-24 10:00:00+00',
+  timestamptz '2026-12-24 11:00:00+00',
+  'earlier', 'earlier',
+  '{"rulesSource":"iana-tzdb","rulesVersion":"2026f","resolverVersion":"agenda-iana-resolver-v1","authoritative":true}'::jsonb
+);
+
 INSERT INTO public.calendar_event (
   id, owner_user_id, created_by_user_id, updated_by_user_id,
   title, temporal_kind, start_date, end_date_exclusive
@@ -64,6 +93,14 @@ DECLARE
   v_key_trash uuid := private.uuidv7();
   v_key_untrash uuid := private.uuidv7();
   v_key_cross_owner uuid := private.uuidv7();
+  v_key_b_archive uuid := private.uuidv7();
+  v_key_b_restore uuid := private.uuidv7();
+  v_key_b_cancel uuid := private.uuidv7();
+  v_key_b_reopen uuid := private.uuidv7();
+  v_schedule_b uuid := '019a0000-0000-7000-8000-000000000014';
+  v_schedule_version timestamptz;
+  v_lifecycle_patch jsonb;
+  v_schedule_decisions jsonb;
   v_old_version timestamptz;
   v_version timestamptz;
   v_status integer;
@@ -214,10 +251,17 @@ BEGIN
   IF v_status <> 200 THEN RAISE EXCEPTION 'Event cancel failed'; END IF;
 
   SELECT updated_at INTO v_version FROM public.calendar_event WHERE id = v_event_a;
+  v_lifecycle_patch := jsonb_build_object(
+    'task_schedule_conflict_decisions', '[]'::jsonb,
+    'task_schedule_snapshot', '[]'::jsonb,
+    'task_schedule_window', jsonb_build_object(
+      'startsAt', '2026-12-25T05:00:00Z', 'endsAt', '2026-12-27T05:00:00Z'
+    )
+  );
   SELECT r.http_status INTO v_status
   FROM public.mutate_calendar_event_once(
     v_owner_a, v_event_a, v_key_reopen, 'event-mutation-v1', repeat('f', 64),
-    v_version, 'reopen', '{}'::jsonb, clock_timestamp()
+    v_version, 'reopen', v_lifecycle_patch, clock_timestamp()
   ) AS r;
   IF v_status <> 200 THEN RAISE EXCEPTION 'Event reopen failed'; END IF;
 
@@ -252,7 +296,7 @@ BEGIN
   SELECT r.http_status INTO v_status
   FROM public.mutate_calendar_event_once(
     v_owner_a, v_event_a, v_key_restore, 'event-mutation-v1', repeat('2', 64),
-    v_version, 'restore', '{}'::jsonb, clock_timestamp()
+    v_version, 'restore', v_lifecycle_patch, clock_timestamp()
   ) AS r;
   IF v_status <> 200 THEN RAISE EXCEPTION 'Archived Event restore failed'; END IF;
 
@@ -275,9 +319,100 @@ BEGIN
   SELECT r.http_status INTO v_status
   FROM public.mutate_calendar_event_once(
     v_owner_a, v_event_a, v_key_untrash, 'event-mutation-v1', repeat('4', 64),
-    v_version, 'restore', '{}'::jsonb, clock_timestamp()
+    v_version, 'restore', v_lifecycle_patch, clock_timestamp()
   ) AS r;
   IF v_status <> 200 THEN RAISE EXCEPTION 'Trashed Event restore failed'; END IF;
+
+
+  -- An archived Event that overlaps a TaskSchedule cannot be restored without consent.
+  SELECT updated_at INTO v_version FROM public.calendar_event
+  WHERE id = v_event_b AND owner_user_id = v_owner_b;
+  SELECT r.http_status INTO v_status
+  FROM public.mutate_calendar_event_once(
+    v_owner_b, v_event_b, v_key_b_archive, 'event-mutation-v1', repeat('7', 64),
+    v_version, 'archive', '{}'::jsonb, clock_timestamp()
+  ) AS r;
+  IF v_status <> 200 THEN RAISE EXCEPTION 'Owner B Event archive failed'; END IF;
+
+  SELECT updated_at INTO v_version FROM public.calendar_event
+  WHERE id = v_event_b AND owner_user_id = v_owner_b;
+  SELECT updated_at INTO v_schedule_version FROM public.task_schedule
+  WHERE id = v_schedule_b AND owner_user_id = v_owner_b;
+  v_lifecycle_patch := jsonb_build_object(
+    'task_schedule_conflict_decisions', '[]'::jsonb,
+    'task_schedule_snapshot', jsonb_build_array(jsonb_build_object('id', v_schedule_b, 'updated_at', v_schedule_version)),
+    'task_schedule_window', jsonb_build_object('startsAt', '2026-12-24T05:00:00Z', 'endsAt', '2026-12-25T05:00:00Z')
+  );
+
+  SELECT r.http_status, r.response_body INTO v_status, v_body
+  FROM public.mutate_calendar_event_once(
+    v_owner_b, v_event_b, v_key_b_restore, 'event-mutation-v1', repeat('8', 64),
+    v_version, 'restore', v_lifecycle_patch, clock_timestamp()
+  ) AS r;
+  IF v_status <> 409 OR v_body->>'error' <> 'TASK_SCHEDULE_CONFLICTS' THEN
+    RAISE EXCEPTION 'Restore must require TaskSchedule consent; got % %', v_status, v_body;
+  END IF;
+  SELECT count(*) INTO v_receipt_count FROM public.event_mutation_request
+  WHERE owner_user_id = v_owner_b AND idempotency_key = v_key_b_restore;
+  IF v_receipt_count <> 0 THEN RAISE EXCEPTION 'Denied restore consumed its idempotency key'; END IF;
+
+  v_schedule_decisions := jsonb_build_array(jsonb_build_object(
+    'policyVersion', 'event-task-schedule-decision-v1',
+    'taskScheduleId', v_schedule_b,
+    'taskScheduleUpdatedAt', v_schedule_version,
+    'startsAt', '2026-12-24T10:00:00Z',
+    'endsAt', '2026-12-24T11:00:00Z',
+    'overlapStartsAt', '2026-12-24T10:00:00Z',
+    'overlapEndsAt', '2026-12-24T11:00:00Z',
+    'decision', 'keep_overlap',
+    'consentedAt', clock_timestamp()
+  ));
+  v_lifecycle_patch := jsonb_set(v_lifecycle_patch, '{task_schedule_conflict_decisions}', v_schedule_decisions);
+
+  SELECT r.http_status, r.response_body INTO v_status, v_body
+  FROM public.mutate_calendar_event_once(
+    v_owner_b, v_event_b, v_key_b_restore, 'event-mutation-v1', repeat('9', 64),
+    v_version, 'restore', v_lifecycle_patch, clock_timestamp()
+  ) AS r;
+  IF v_status <> 200 THEN RAISE EXCEPTION 'Restore with explicit consent failed: % %', v_status, v_body; END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.calendar_event WHERE id = v_event_b AND owner_user_id = v_owner_b
+      AND archived_at IS NULL AND deleted_at IS NULL
+      AND task_schedule_conflict_decisions = v_schedule_decisions
+  ) THEN RAISE EXCEPTION 'Restore did not persist the exact consent evidence'; END IF;
+
+  SELECT count(*) INTO v_audit_count FROM public.audit_event
+  WHERE entity_type = 'calendar_event' AND entity_id = v_event_b
+    AND action = 'calendar_event.task_schedule_decisions_recorded';
+  IF v_audit_count <> 1 THEN RAISE EXCEPTION 'Restore must append one decision audit row'; END IF;
+
+  SELECT updated_at INTO v_version FROM public.calendar_event WHERE id = v_event_b;
+  SELECT r.http_status INTO v_status
+  FROM public.mutate_calendar_event_once(
+    v_owner_b, v_event_b, v_key_b_cancel, 'event-mutation-v1', repeat('a', 64),
+    v_version, 'cancel', '{}'::jsonb, clock_timestamp()
+  ) AS r;
+  IF v_status <> 200 THEN RAISE EXCEPTION 'Owner B Event cancel failed'; END IF;
+
+  SELECT updated_at INTO v_version FROM public.calendar_event WHERE id = v_event_b;
+  SELECT r.http_status, r.response_body INTO v_status, v_body
+  FROM public.mutate_calendar_event_once(
+    v_owner_b, v_event_b, v_key_b_reopen, 'event-mutation-v1', repeat('b', 64),
+    v_version, 'reopen', v_lifecycle_patch, clock_timestamp()
+  ) AS r;
+  IF v_status <> 200 THEN RAISE EXCEPTION 'Reopen with prior valid consent failed: % %', v_status, v_body; END IF;
+
+  SELECT count(*) INTO v_audit_count FROM public.audit_event
+  WHERE entity_type = 'calendar_event' AND entity_id = v_event_b
+    AND action = 'calendar_event.task_schedule_decisions_recorded';
+  IF v_audit_count <> 1 THEN RAISE EXCEPTION 'Reopen must not duplicate unchanged consent audit'; END IF;
+
+  SELECT r.http_status, r.replayed INTO v_status, v_replayed
+  FROM public.mutate_calendar_event_once(
+    v_owner_b, v_event_b, v_key_b_reopen, 'event-mutation-v1', repeat('b', 64),
+    v_version, 'reopen', v_lifecycle_patch, clock_timestamp()
+  ) AS r;
+  IF v_status <> 200 OR NOT v_replayed THEN RAISE EXCEPTION 'Reopen retry did not replay'; END IF;
 
   EXECUTE 'RESET ROLE';
 
@@ -329,8 +464,8 @@ BEGIN
   SELECT count(*) INTO v_audit_count
   FROM public.audit_event
   WHERE entity_type = 'calendar_event' AND entity_id = v_event_b;
-  IF v_audit_count <> 1 THEN
-    RAISE EXCEPTION 'Cross-owner mutation changed the other owner Event audit history';
+  IF v_audit_count <> 6 THEN
+    RAISE EXCEPTION 'Expected Event B create/archive/restore/cancel/reopen and one consent audit; got %', v_audit_count;
   END IF;
 END;
 $test$;

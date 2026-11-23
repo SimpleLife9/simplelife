@@ -433,6 +433,7 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
           if (response.error === 'TASK_SCHEDULE_CONFLICTS_CHANGED') setPendingKey(null);
           setTaskScheduleConflictPrompt({
             error: response.error,
+            action: 'submit',
             conflicts: Array.isArray(response.conflicts) ? response.conflicts : [],
             protectedTimeDecisions: acceptedProtectedTimeDecisions,
           });
@@ -512,12 +513,17 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
       taskScheduleUpdatedAt: conflict.taskScheduleUpdatedAt,
       decision: taskScheduleConflictChoices[conflict.taskScheduleId],
     }));
+    const promptAction = taskScheduleConflictPrompt.action;
     const protectedDecisions = taskScheduleConflictPrompt.protectedTimeDecisions;
     setTaskScheduleConflictPrompt(null);
-    void submitEvent({ preventDefault() {} }, protectedDecisions, decisions);
+    if (promptAction === 'reopen' || promptAction === 'restore') {
+      void mutateSelectedEvent(promptAction, decisions);
+    } else {
+      void submitEvent({ preventDefault() {} }, protectedDecisions, decisions);
+    }
   };
 
-  const mutateSelectedEvent = async (action) => {
+  const mutateSelectedEvent = async (action, acceptedTaskScheduleDecisions = undefined) => {
     if (!selectedEvent) return;
     const key = pendingKey || uuidv7();
     setPendingKey(key);
@@ -536,15 +542,33 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
           eventId: target.id,
           expectedUpdatedAt: target.updated_at,
           action,
+          ...(acceptedTaskScheduleDecisions === undefined ? {} : { taskScheduleDecisions: acceptedTaskScheduleDecisions }),
         },
         headers: { 'Idempotency-Key': key },
       });
       if (error) {
         let message = error.message || 'No se pudo actualizar el evento.';
+        let response = null;
         try {
-          const response = error.context instanceof Response ? await error.context.clone().json() : null;
+          response = error.context instanceof Response ? await error.context.clone().json() : null;
           if (response?.error) message = response.error;
         } catch { /* keep SDK error message */ }
+        if (response?.error === 'TASK_SCHEDULE_CONFLICTS'
+          || response?.error === 'TASK_SCHEDULE_CONFLICTS_CHANGED') {
+          if (response.error === 'TASK_SCHEDULE_CONFLICTS_CHANGED') setPendingKey(null);
+          setTaskScheduleConflictPrompt({
+            error: response.error,
+            action,
+            conflicts: Array.isArray(response.conflicts) ? response.conflicts : [],
+            protectedTimeDecisions: undefined,
+          });
+          setTaskScheduleConflictChoices({});
+          message = response.error === 'TASK_SCHEDULE_CONFLICTS_CHANGED'
+            ? 'Las reservas de tareas cambiaron mientras se reactivaba el evento. Revisa los cruces actuales.'
+            : action === 'restore'
+              ? 'El evento no se restauró. Decide explícitamente cómo conservar los horarios superpuestos.'
+              : 'El evento no se reabrió. Decide explícitamente cómo conservar los horarios superpuestos.';
+        }
         throw new Error(message);
       }
       if (!data?.eventId) throw new Error('El servidor no confirmó el cambio del evento.');
@@ -1039,7 +1063,11 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
             ) : (
               <>
                 <p className="agenda-confirm-copy">
-                  El evento no se guardó. Para conservar el horario, confirma cada cruce. La reserva existente no se moverá ni modificará.
+                  {taskScheduleConflictPrompt.action === 'restore'
+                    ? <>El evento no se restauró. Para reactivarlo, confirma cada cruce; ninguna reserva existente se moverá ni modificará.</>
+                    : taskScheduleConflictPrompt.action === 'reopen'
+                      ? <>El evento no se reabrió. Para reactivarlo, confirma cada cruce; ninguna reserva existente se moverá ni modificará.</>
+                      : <>El evento no se guardó. Para conservar el horario, confirma cada cruce. La reserva existente no se moverá ni modificará.</>}
                 </p>
                 <div className="agenda-conflict-list">
                   {taskScheduleConflictItems.map((conflict) => (

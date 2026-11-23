@@ -181,6 +181,8 @@ export async function handleRequest(
     : ["action", "eventId", "expectedUpdatedAt"];
   const allowedKeys = input.action === "edit"
     ? [...requiredKeys, "protectedTimeDecisions", "taskScheduleDecisions"]
+    : input.action === "reopen" || input.action === "restore"
+    ? [...requiredKeys, "taskScheduleDecisions"]
     : requiredKeys;
   if (requiredKeys.some((key) => !(key in input))
     || Object.keys(input).some((key) => !allowedKeys.includes(key))) {
@@ -390,6 +392,78 @@ export async function handleRequest(
         taskScheduleWindow: taskScheduleAssessment.assessment.candidate,
       });
       eventPatch = toEventPatch(record as unknown as Record<string, unknown>);
+    } else if (mutation.action === "reopen" || mutation.action === "restore") {
+      const currentResult = await ctx.supabaseAdmin
+        .from("calendar_event")
+        .select("temporal_kind,start_date,end_date_exclusive,starts_at,ends_at,task_schedule_conflict_decisions")
+        .eq("owner_user_id", profile.profileId)
+        .eq("id", mutation.eventId)
+        .maybeSingle();
+      if (currentResult.error) return json({ error: "EVENT_CONFLICT_CONTEXT_LOOKUP_FAILED" }, 503);
+      if (!currentResult.data) return json({ error: "EVENT_NOT_FOUND" }, 404);
+
+      const priorRecords = Array.isArray(currentResult.data.task_schedule_conflict_decisions)
+        ? currentResult.data.task_schedule_conflict_decisions as Record<string, unknown>[]
+        : [];
+      const priorById = new Map(priorRecords
+        .filter((item) => typeof item.taskScheduleId === "string")
+        .map((item) => [String(item.taskScheduleId).toLowerCase(), item]));
+      const priorInputs = priorRecords.map((item) => ({
+        taskScheduleId: item.taskScheduleId,
+        taskScheduleUpdatedAt: item.taskScheduleUpdatedAt,
+        decision: item.decision,
+      }));
+      const retainExistingConsent = input.taskScheduleDecisions === undefined;
+      let decisionInputs = retainExistingConsent ? priorInputs : requestedTaskScheduleDecisions;
+      let assessment = await assessOwnerEventTaskScheduleConflicts({
+        supabaseAdmin: ctx.supabaseAdmin,
+        ownerProfileId: profile.profileId,
+        event: currentResult.data,
+        suppliedDecisions: decisionInputs,
+        now,
+      });
+
+      // Preserve prior approvals only while they remain bound to the same
+      // active reservation version. New/changed overlaps need fresh consent.
+      if (!assessment.ok && retainExistingConsent) {
+        const reusable = assessment.conflicts.flatMap((conflict) => {
+          const previous = priorById.get(String(conflict.taskScheduleId).toLowerCase());
+          if (!previous
+            || previous.taskScheduleUpdatedAt !== conflict.taskScheduleUpdatedAt
+            || previous.decision !== conflict.requiredDecision) return [];
+          return [{
+            taskScheduleId: conflict.taskScheduleId,
+            taskScheduleUpdatedAt: conflict.taskScheduleUpdatedAt,
+            decision: conflict.requiredDecision,
+          }];
+        });
+        decisionInputs = reusable;
+        assessment = await assessOwnerEventTaskScheduleConflicts({
+          supabaseAdmin: ctx.supabaseAdmin,
+          ownerProfileId: profile.profileId,
+          event: currentResult.data,
+          suppliedDecisions: decisionInputs,
+          now,
+        });
+      }
+      if (!assessment.ok) {
+        return json({
+          error: assessment.code,
+          conflicts: assessment.conflicts,
+        }, 409);
+      }
+
+      const decisionsToPersist = retainExistingConsent
+        ? assessment.assessment.conflicts.flatMap((conflict) => {
+          const previous = priorById.get(String(conflict.taskScheduleId).toLowerCase());
+          return previous ? [previous] : [];
+        })
+        : assessment.assessment.decisions;
+      eventPatch = {
+        task_schedule_conflict_decisions: [...decisionsToPersist],
+        task_schedule_snapshot: [...assessment.assessment.snapshot],
+        task_schedule_window: assessment.assessment.candidate,
+      };
     }
 
     const result = await ctx.supabaseAdmin.rpc("mutate_calendar_event_once", {

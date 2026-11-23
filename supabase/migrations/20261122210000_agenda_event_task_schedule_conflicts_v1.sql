@@ -548,66 +548,100 @@ BEGIN
     IF p_event_patch IS NULL OR jsonb_typeof(p_event_patch) <> 'object'
        OR (SELECT count(*) FROM jsonb_object_keys(p_event_patch)) <> 21
        OR EXISTS (
-         SELECT 1
-         FROM jsonb_object_keys(p_event_patch) AS supplied(key)
+         SELECT 1 FROM jsonb_object_keys(p_event_patch) AS supplied(key)
          WHERE supplied.key <> ALL (ARRAY[
-           'title',
-           'description',
-           'location_label',
-           'location_kind',
-           'temporal_kind',
-           'start_date',
-           'end_date_exclusive',
-           'start_local',
-           'end_local',
-           'time_zone',
-           'starts_at',
-           'ends_at',
-           'start_disambiguation',
-           'end_disambiguation',
-           'start_gap_strategy',
-           'end_gap_strategy',
-           'protected_time_decisions',
-           'protected_time_snapshot',
-           'task_schedule_conflict_decisions',
-           'task_schedule_snapshot',
+           'title', 'description', 'location_label', 'location_kind',
+           'temporal_kind', 'start_date', 'end_date_exclusive',
+           'start_local', 'end_local', 'time_zone', 'starts_at', 'ends_at',
+           'start_disambiguation', 'end_disambiguation',
+           'start_gap_strategy', 'end_gap_strategy',
+           'protected_time_decisions', 'protected_time_snapshot',
+           'task_schedule_conflict_decisions', 'task_schedule_snapshot',
            'task_schedule_window'
          ]::text[])
        ) THEN
       RAISE EXCEPTION 'Event edit patch must contain exactly 21 fields including Protected Time and TaskSchedule evidence'
         USING ERRCODE = '22023';
     END IF;
+  ELSIF p_mutation IN ('reopen', 'restore') THEN
+    IF p_event_patch IS NULL OR jsonb_typeof(p_event_patch) IS DISTINCT FROM 'object'
+       OR (SELECT count(*) FROM jsonb_object_keys(p_event_patch)) <> 3
+       OR EXISTS (
+         SELECT 1 FROM jsonb_object_keys(p_event_patch) AS supplied(key)
+         WHERE supplied.key <> ALL (ARRAY[
+           'task_schedule_conflict_decisions', 'task_schedule_snapshot', 'task_schedule_window'
+         ]::text[])
+       ) THEN
+      RAISE EXCEPTION 'Event reopen/restore requires exact TaskSchedule decision, snapshot and comparison-window evidence'
+        USING ERRCODE = '22023';
+    END IF;
   ELSIF p_event_patch IS DISTINCT FROM '{}'::jsonb THEN
-    RAISE EXCEPTION 'Only Event edit may contain an Event patch'
+    RAISE EXCEPTION 'Only Event edit or lifecycle reactivation may contain an Event patch'
       USING ERRCODE = '22023';
   END IF;
 
-  IF p_mutation = 'edit' THEN
-    IF jsonb_typeof(p_event_patch->'protected_time_decisions') IS DISTINCT FROM 'array'
-       OR jsonb_typeof(p_event_patch->'protected_time_snapshot') IS DISTINCT FROM 'array' THEN
-      RAISE EXCEPTION 'Protected Time decisions/snapshot must be JSON arrays'
-        USING ERRCODE = '22023';
+  IF p_mutation IN ('edit', 'reopen', 'restore') THEN
+    IF p_mutation = 'edit' THEN
+      IF jsonb_typeof(p_event_patch->'protected_time_decisions') IS DISTINCT FROM 'array'
+         OR jsonb_typeof(p_event_patch->'protected_time_snapshot') IS DISTINCT FROM 'array'
+         OR jsonb_array_length(p_event_patch->'protected_time_decisions') > 500
+         OR jsonb_array_length(p_event_patch->'protected_time_snapshot') > 500 THEN
+        RAISE EXCEPTION 'Protected Time decisions/snapshot must be bounded JSON arrays'
+          USING ERRCODE = '22023';
+      END IF;
     END IF;
-    IF jsonb_array_length(p_event_patch->'protected_time_decisions') > 500
-       OR jsonb_array_length(p_event_patch->'protected_time_snapshot') > 500 THEN
-      RAISE EXCEPTION 'Protected Time decisions/snapshot cannot exceed 500 entries'
-        USING ERRCODE = '22023';
-    END IF;
+
     IF jsonb_typeof(p_event_patch->'task_schedule_conflict_decisions') IS DISTINCT FROM 'array'
        OR jsonb_typeof(p_event_patch->'task_schedule_snapshot') IS DISTINCT FROM 'array'
-       OR jsonb_typeof(p_event_patch->'task_schedule_window') IS DISTINCT FROM 'object' THEN
-      RAISE EXCEPTION 'TaskSchedule decisions, snapshot and comparison window must be JSON arrays/object'
-        USING ERRCODE = '22023';
-    END IF;
-    IF jsonb_array_length(p_event_patch->'task_schedule_conflict_decisions') > 500
-       OR jsonb_array_length(p_event_patch->'task_schedule_snapshot') > 500
-       OR (SELECT count(*) FROM jsonb_object_keys(p_event_patch->'task_schedule_window')) <> 2 THEN
-      RAISE EXCEPTION 'TaskSchedule conflict evidence exceeds its bounds or has an invalid window'
+       OR jsonb_typeof(p_event_patch->'task_schedule_window') IS DISTINCT FROM 'object'
+       OR (SELECT count(*) FROM jsonb_object_keys(p_event_patch->'task_schedule_window')) <> 2
+       OR NOT (p_event_patch->'task_schedule_window' ?& ARRAY['startsAt', 'endsAt']::text[])
+       OR jsonb_array_length(p_event_patch->'task_schedule_conflict_decisions') > 500
+       OR jsonb_array_length(p_event_patch->'task_schedule_snapshot') > 500 THEN
+      RAISE EXCEPTION 'TaskSchedule decisions, snapshot and comparison window must have valid bounded JSON shapes'
         USING ERRCODE = '22023';
     END IF;
 
-    PERFORM pg_advisory_xact_lock(hashtextextended(p_owner_user_id::text, 8102026));
     IF EXISTS (
+      SELECT 1 FROM jsonb_array_elements(p_event_patch->'task_schedule_snapshot') AS supplied(item)
+      WHERE jsonb_typeof(supplied.item) IS DISTINCT FROM 'object'
+         OR CASE WHEN jsonb_typeof(supplied.item) = 'object' THEN
+              (SELECT count(*) FROM jsonb_object_keys(supplied.item)) <> 2
+              OR NOT (supplied.item ?& ARRAY['id', 'updated_at']::text[])
+            ELSE true END
+    ) OR EXISTS (
+      SELECT 1
+      FROM (
+        SELECT item->>'id' AS schedule_id, count(*) AS copies
+        FROM jsonb_array_elements(p_event_patch->'task_schedule_snapshot') AS supplied(item)
+        GROUP BY item->>'id'
+      ) AS duplicate_snapshots
+      WHERE copies > 1
+    ) THEN
+      RAISE EXCEPTION 'TaskSchedule snapshot entries must be exact, unique id/updated_at objects'
+        USING ERRCODE = '22023';
+    END IF;
+
+    IF EXISTS (
+      SELECT 1 FROM jsonb_array_elements(p_event_patch->'task_schedule_conflict_decisions') AS supplied(item)
+      WHERE jsonb_typeof(supplied.item) IS DISTINCT FROM 'object'
+         OR CASE WHEN jsonb_typeof(supplied.item) = 'object' THEN
+              (SELECT count(*) FROM jsonb_object_keys(supplied.item)) <> 9
+              OR NOT (supplied.item ?& ARRAY[
+                'policyVersion', 'taskScheduleId', 'taskScheduleUpdatedAt',
+                'startsAt', 'endsAt', 'overlapStartsAt', 'overlapEndsAt',
+                'decision', 'consentedAt'
+              ]::text[])
+            ELSE true END
+    ) THEN
+      RAISE EXCEPTION 'TaskSchedule decisions must use the exact version-bound consent record shape'
+        USING ERRCODE = '22023';
+    END IF;
+
+    -- Serialize all writers for the owner on the same transaction lock.
+    PERFORM pg_advisory_xact_lock(hashtextextended(p_owner_user_id::text, 8102026));
+
+    IF p_mutation = 'edit' AND EXISTS (
       SELECT 1
       FROM (
         SELECT (item->>'id')::uuid AS id, (item->>'updated_at')::timestamptz AS updated_at
@@ -620,8 +654,7 @@ BEGIN
           AND archived_at IS NULL
           AND deleted_at IS NULL
       ) AS current_blocks USING (id)
-      WHERE snapshot.id IS NULL
-         OR current_blocks.id IS NULL
+      WHERE snapshot.id IS NULL OR current_blocks.id IS NULL
          OR snapshot.updated_at IS DISTINCT FROM current_blocks.updated_at
     ) THEN
       RETURN QUERY SELECT 409, jsonb_build_object('error', 'PROTECTED_TIME_CONFLICTS_CHANGED'), false;
@@ -640,8 +673,7 @@ BEGIN
         WHERE owner_user_id = p_owner_user_id
           AND schedule_status IN ('proposed', 'confirmed')
       ) AS current_schedules USING (id)
-      WHERE snapshot.id IS NULL
-         OR current_schedules.id IS NULL
+      WHERE snapshot.id IS NULL OR current_schedules.id IS NULL
          OR snapshot.updated_at IS DISTINCT FROM current_schedules.updated_at
     ) THEN
       RETURN QUERY SELECT 409, jsonb_build_object('error', 'TASK_SCHEDULE_CONFLICTS_CHANGED'), false;
@@ -781,7 +813,8 @@ BEGIN
           v_response := jsonb_build_object('error', 'EVENT_CANNOT_BE_REOPENED');
         ELSE
           UPDATE public.calendar_event
-          SET event_status = 'confirmed'
+          SET event_status = 'confirmed',
+              task_schedule_conflict_decisions = p_event_patch->'task_schedule_conflict_decisions'
           WHERE id = p_event_id AND owner_user_id = p_owner_user_id;
           v_status := 200;
         END IF;
@@ -812,12 +845,14 @@ BEGIN
         IF v_event.deleted_at IS NOT NULL AND v_event.purge_after > p_now THEN
           UPDATE public.calendar_event
           SET deleted_at = NULL,
-              purge_after = NULL
+              purge_after = NULL,
+              task_schedule_conflict_decisions = p_event_patch->'task_schedule_conflict_decisions'
           WHERE id = p_event_id AND owner_user_id = p_owner_user_id;
           v_status := 200;
         ELSIF v_event.deleted_at IS NULL AND v_event.archived_at IS NOT NULL THEN
           UPDATE public.calendar_event
-          SET archived_at = NULL
+          SET archived_at = NULL,
+              task_schedule_conflict_decisions = p_event_patch->'task_schedule_conflict_decisions'
           WHERE id = p_event_id AND owner_user_id = p_owner_user_id;
           v_status := 200;
         ELSE

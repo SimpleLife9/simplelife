@@ -66,8 +66,8 @@ export function normalizeEventMutation({ eventId, expectedUpdatedAt, action, eve
     'Every Protected Time decision must be an object.');
   assert(Array.isArray(taskScheduleDecisions) && taskScheduleDecisions.length <= 500,
     'taskScheduleDecisions must be an array with at most 500 entries.');
-  assert(action === 'edit' || taskScheduleDecisions.length === 0,
-    'Only an Event edit may include TaskSchedule decisions.');
+  assert(['edit', 'reopen', 'restore'].includes(action) || taskScheduleDecisions.length === 0,
+    'TaskSchedule decisions are only valid for Event edit, reopen or restore.');
   assert(taskScheduleDecisions.every((item) => item && typeof item === 'object' && !Array.isArray(item)),
     'Every TaskSchedule decision must be an object.');
   for (const item of taskScheduleDecisions) {

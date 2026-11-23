@@ -820,7 +820,7 @@ async function mockSupabaseSession(page, initialData = {}) {
       const taskDecisions = Array.isArray(payload.taskScheduleDecisions) ? payload.taskScheduleDecisions : [];
       const queuedTaskConflict = eventTaskScheduleConflictResponses.shift();
       if (queuedTaskConflict) pendingEventTaskScheduleConflicts = queuedTaskConflict.body?.conflicts || [];
-      if (payload.action === 'edit' && pendingEventTaskScheduleConflicts.length) {
+      if (['edit', 'reopen', 'restore'].includes(payload.action) && pendingEventTaskScheduleConflicts.length) {
         const acceptedTaskDecisions = new Map(taskDecisions.map((item) => [item.taskScheduleId, item]));
         const allAccepted = pendingEventTaskScheduleConflicts.every((conflict) => {
           const choice = acceptedTaskDecisions.get(conflict.taskScheduleId);
@@ -881,6 +881,9 @@ async function mockSupabaseSession(page, initialData = {}) {
         row.archived_at = null;
         row.deleted_at = null;
         row.purge_after = null;
+      }
+      if (['reopen', 'restore'].includes(payload.action)) {
+        row.task_schedule_conflict_decisions = taskDecisions;
       }
       row.updated_at = updatedAt;
       row.updated_by_user_id = profile.id;
@@ -3706,6 +3709,73 @@ test('Protected Time restore rechecks TaskSchedule overlaps and records explicit
   expect(protectedTimeBlocks[0].task_schedule_conflict_decisions).toHaveLength(1);
 });
 
+
+
+test('Agenda requires current TaskSchedule consent before reopening a cancelled Event', async ({ page }) => {
+  const today = await todayInBrowserHavana(page);
+  const tomorrow = await page.evaluate((value) => {
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
+  }, today);
+  const eventId = '0190f47a-7b2c-7abc-8def-0123456789f1';
+  const scheduleId = '0190f47a-7b2c-7abc-8def-0123456789f2';
+  const scheduleUpdatedAt = '2026-12-20T10:00:00.000Z';
+  const seedEvent = {
+    id: eventId, owner_user_id: profile.id, created_by_user_id: profile.id, updated_by_user_id: profile.id,
+    title: 'Reunión cancelada', description: 'Evento que se va a reabrir',
+    location_label: null, location_kind: null, event_status: 'cancelled', temporal_kind: 'all_day',
+    start_date: today, end_date_exclusive: tomorrow, start_local: null, end_local: null, time_zone: null,
+    starts_at: null, ends_at: null, archived_at: null, deleted_at: null, purge_after: null,
+    task_schedule_conflict_decisions: [],
+    created_at: '2026-11-22T17:00:00.000Z', updated_at: '2026-11-22T18:00:00.000000Z',
+  };
+  const { calendarEvents, mutationRequests } = await mockSupabaseSession(page, {
+    calendarEvents: [seedEvent],
+    eventTaskScheduleConflictResponses: [{
+      status: 409,
+      body: {
+        error: 'TASK_SCHEDULE_CONFLICTS',
+        conflicts: [{
+          taskScheduleId: scheduleId, taskScheduleUpdatedAt: scheduleUpdatedAt,
+          startsAt: '2026-12-24T10:00:00.000Z', endsAt: '2026-12-24T11:00:00.000Z',
+          overlapStartsAt: '2026-12-24T10:00:00.000Z', overlapEndsAt: '2026-12-24T11:00:00.000Z',
+          timeZone: 'America/Havana', requiredDecision: 'keep_overlap',
+        }],
+      },
+    }],
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.getByRole('navigation', { name: 'Navegación principal' })
+    .getByRole('button', { name: /Agenda/ }).click();
+  await page.locator('.agenda-event-chip').filter({ hasText: 'Reunión cancelada' }).first().click();
+  const detail = page.getByRole('dialog', { name: 'Reunión cancelada' });
+  await detail.getByRole('button', { name: 'Reabrir' }).click();
+
+  const dialog = page.getByRole('alertdialog', { name: 'El evento coincide con tiempo reservado' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText('El evento no se reabrió.')).toBeVisible();
+  expect(mutationRequests).toHaveLength(1);
+  expect(mutationRequests[0].payload.action).toBe('reopen');
+  expect(mutationRequests[0].payload.taskScheduleDecisions).toBeUndefined();
+  expect(calendarEvents[0].event_status).toBe('cancelled');
+
+  await dialog.getByRole('combobox', { name: 'Decisión para reserva de tarea' }).selectOption('keep_overlap');
+  await dialog.getByRole('button', { name: 'Guardar y mantener ambos' }).click();
+  await expect(page.getByText('Evento reabierto.')).toBeVisible();
+  expect(mutationRequests).toHaveLength(2);
+  expect(mutationRequests[1].key).toBe(mutationRequests[0].key);
+  expect(mutationRequests[1].payload).toMatchObject({
+    action: 'reopen', eventId,
+    taskScheduleDecisions: [{
+      taskScheduleId: scheduleId, taskScheduleUpdatedAt: scheduleUpdatedAt, decision: 'keep_overlap',
+    }],
+  });
+  expect(calendarEvents[0].event_status).toBe('confirmed');
+  expect(calendarEvents[0].task_schedule_conflict_decisions).toHaveLength(1);
+});
 
 test('Agenda requires one explicit Protected Time decision per hard/flexible overlap before Event creation', async ({ page }) => {
   const today = await todayInBrowserHavana(page);

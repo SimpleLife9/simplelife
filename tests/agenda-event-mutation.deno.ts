@@ -640,3 +640,56 @@ Deno.test("mutation receipt lookup failure blocks the write", async () => {
   assertEquals(response.status, 503, "ledger lookup failure");
   assertEquals(calls.rpc, 0, "failed receipt lookup never writes");
 });
+
+Deno.test("reopen and restore require version-bound TaskSchedule consent before Event reactivation", async () => {
+  const schedule = {
+    id: "0190f47a-7b2c-7abc-8def-0123456789ef",
+    updated_at: "2026-12-20T10:00:00.000Z",
+    starts_at: "2026-12-24T10:00:00.000Z",
+    ends_at: "2026-12-24T11:00:00.000Z",
+    time_zone: "America/Havana",
+    schedule_status: "confirmed",
+  };
+
+  for (const action of ["reopen", "restore"] as const) {
+    const currentEvent = {
+      temporal_kind: "all_day",
+      start_date: "2026-12-24",
+      end_date_exclusive: "2026-12-26",
+      starts_at: null,
+      ends_at: null,
+      protected_time_decisions: [],
+      task_schedule_conflict_decisions: [],
+    };
+    const missing = mockContext({ taskSchedules: [schedule], currentEvent });
+    const noConsent = await handleRequest(request({
+      eventId: EVENT_ID, expectedUpdatedAt: VERSION, action,
+    }), missing.ctx, { now: () => "2026-11-22T18:10:00.000Z" });
+    assertEquals(noConsent.status, 409, action + " conflict requires explicit consent");
+    assertEquals((await body(noConsent)).error, "TASK_SCHEDULE_CONFLICTS", action + " conflict code");
+    assertEquals(missing.calls.rpc, 0, action + " must not reach RPC before consent");
+
+    const accepted = mockContext({ taskSchedules: [schedule], currentEvent });
+    const response = await handleRequest(request({
+      eventId: EVENT_ID, expectedUpdatedAt: VERSION, action,
+      taskScheduleDecisions: [{
+        taskScheduleId: schedule.id,
+        taskScheduleUpdatedAt: schedule.updated_at,
+        decision: "keep_overlap",
+      }],
+    }), accepted.ctx, { now: () => "2026-11-22T18:11:00.000Z" });
+    assertEquals(response.status, 200, action + " accepts version-bound decision");
+    const args = accepted.calls.rpcArgs as Record<string, unknown>;
+    const patch = args.p_event_patch as Record<string, unknown>;
+    assertEquals(args.p_mutation, action, action + " reaches mutation RPC");
+    assertEquals(Object.keys(patch).sort(), [
+      "task_schedule_conflict_decisions", "task_schedule_snapshot", "task_schedule_window",
+    ], action + " sends the exact lifecycle evidence fields");
+    const decisions = patch.task_schedule_conflict_decisions as Array<Record<string, unknown>>;
+    assertEquals(decisions.length, 1, action + " persists one consent");
+    assertEquals(decisions[0].taskScheduleId, schedule.id, action + " consent binds schedule identity");
+    assertEquals(decisions[0].taskScheduleUpdatedAt, schedule.updated_at, action + " consent binds schedule version");
+    assertEquals((patch.task_schedule_snapshot as unknown[]).length, 1, action + " sends the full snapshot");
+    assertEquals(Object.keys(patch.task_schedule_window as object).length, 2, action + " sends the UTC window");
+  }
+});
