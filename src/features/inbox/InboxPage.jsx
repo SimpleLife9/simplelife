@@ -22,6 +22,8 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
   const [loadingMore, setLoadingMore] = useState(false);
   const [duplicateCaptureIds, setDuplicateCaptureIds] = useState([]);
   const [duplicateCheckError, setDuplicateCheckError] = useState('');
+  const captureQueryGenerationRef = useRef(0);
+  const duplicateRequestGenerationRef = useRef(0);
   const { rows: captureParts } = useRows('capture_part', profile, refreshKey, (query) => query.order('part_index'));
   const { rows: captureLinks } = useRows('capture_link', profile, refreshKey);
   const { rows: processingRuns } = useRows('processing_run', profile, refreshKey, (query) => query.order('created_at', { ascending: false }).limit(100));
@@ -61,9 +63,11 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
   };
 
   const refreshDuplicateMatches = async (captureRows, isAlive = () => true) => {
+    const requestGeneration = ++duplicateRequestGenerationRef.current;
+    const isCurrent = () => isAlive() && requestGeneration === duplicateRequestGenerationRef.current;
     const ids = captureRows.map((capture) => capture.id);
     if (!ids.length) {
-      if (isAlive()) {
+      if (isCurrent()) {
         setDuplicateCaptureIds([]);
         setDuplicateCheckError('');
       }
@@ -71,16 +75,24 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
     }
     const duplicateRows = [];
     for (let offset = 0; offset < ids.length; offset += 200) {
-      const { data, error } = await supabase.rpc('find_inbox_duplicate_captures', {
-        p_capture_ids: ids.slice(offset, offset + 200),
-      });
-      if (error) {
-        if (isAlive()) setDuplicateCheckError('No se pudo verificar duplicados en todo el archivo. La lista sigue disponible, pero no marques coincidencias como únicas.');
+      if (!isCurrent()) return;
+      let result;
+      try {
+        result = await supabase.rpc('find_inbox_duplicate_captures', {
+          p_capture_ids: ids.slice(offset, offset + 200),
+        });
+      } catch {
+        result = { data: null, error: true };
+      }
+      if (!isCurrent()) return;
+      if (result.error) {
+        setDuplicateCaptureIds([]);
+        setDuplicateCheckError('No se pudo verificar duplicados en todo el archivo. La lista sigue disponible, pero no marques coincidencias como únicas.');
         return;
       }
-      duplicateRows.push(...(data || []));
+      duplicateRows.push(...(result.data || []));
     }
-    if (isAlive()) {
+    if (isCurrent()) {
       setDuplicateCheckError('');
       setDuplicateCaptureIds(duplicateRows.map((row) => row.capture_id));
     }
@@ -88,42 +100,54 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
 
   useEffect(() => {
     let alive = true;
+    const queryGeneration = ++captureQueryGenerationRef.current;
+    duplicateRequestGenerationRef.current += 1;
+    const isCurrentQuery = () => alive && queryGeneration === captureQueryGenerationRef.current;
     setRows([]);
     setPageOffset(0);
     setTotalCount(0);
     setHasMore(false);
     setDuplicateCaptureIds([]);
+    setDuplicateCheckError('');
     setLoading(true);
+    setLoadingMore(false);
     setLocalError('');
     const timer = setTimeout(async () => {
       try {
         const { data, error, count } = await buildCaptureQuery(0);
         if (error) throw error;
-        if (!alive) return;
+        if (!isCurrentQuery()) return;
         const loaded = data || [];
         setRows(loaded);
         setPageOffset(loaded.length);
         setTotalCount(count ?? loaded.length);
         setHasMore((count ?? loaded.length) > loaded.length);
-        await refreshDuplicateMatches(loaded, () => alive);
+        await refreshDuplicateMatches(loaded, isCurrentQuery);
       } catch (error) {
-        if (alive) setLocalError(error?.message || 'No se pudieron cargar las capturas.');
+        if (isCurrentQuery()) setLocalError(error?.message || 'No se pudieron cargar las capturas.');
       } finally {
-        if (alive) setLoading(false);
+        if (isCurrentQuery()) setLoading(false);
       }
     }, captureSearch.trim() ? 250 : 0);
     return () => {
       alive = false;
+      if (captureQueryGenerationRef.current === queryGeneration) {
+        captureQueryGenerationRef.current += 1;
+      }
+      duplicateRequestGenerationRef.current += 1;
       clearTimeout(timer);
     };
   }, [profile?.id, refreshKey, captureSearch, attentionFilter]);
 
   const loadMoreCaptures = async () => {
     if (loadingMore || loading || !hasMore) return;
+    const queryGeneration = captureQueryGenerationRef.current;
+    const isCurrentQuery = () => queryGeneration === captureQueryGenerationRef.current;
     setLoadingMore(true);
     setLocalError('');
     try {
       const { data, error, count } = await buildCaptureQuery(pageOffset);
+      if (!isCurrentQuery()) return;
       if (error) throw error;
       const nextRows = data || [];
       const merged = [...rows, ...nextRows];
@@ -131,11 +155,11 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
       setPageOffset(pageOffset + nextRows.length);
       setTotalCount(count ?? totalCount);
       setHasMore((count ?? totalCount) > pageOffset + nextRows.length);
-      await refreshDuplicateMatches(merged);
+      await refreshDuplicateMatches(merged, isCurrentQuery);
     } catch (error) {
-      setLocalError(error?.message || 'No se pudieron cargar más capturas.');
+      if (isCurrentQuery()) setLocalError(error?.message || 'No se pudieron cargar más capturas.');
     } finally {
-      setLoadingMore(false);
+      if (isCurrentQuery()) setLoadingMore(false);
     }
   };
   const [selectedCapture, setSelectedCapture] = useState(null);
