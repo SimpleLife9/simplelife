@@ -60,8 +60,8 @@ export function normalizeEventMutation({ eventId, expectedUpdatedAt, action, eve
   }
   assert(Array.isArray(protectedTimeDecisions) && protectedTimeDecisions.length <= 500,
     'protectedTimeDecisions must be an array with at most 500 entries.');
-  assert(action === 'edit' || protectedTimeDecisions.length === 0,
-    'Only an Event edit may include Protected Time decisions.');
+  assert(['edit', 'reopen', 'restore'].includes(action) || protectedTimeDecisions.length === 0,
+    'Protected Time decisions are only valid for Event edit, reopen or restore.');
   assert(protectedTimeDecisions.every((item) => item && typeof item === 'object' && !Array.isArray(item)),
     'Every Protected Time decision must be an object.');
   assert(Array.isArray(taskScheduleDecisions) && taskScheduleDecisions.length <= 500,
