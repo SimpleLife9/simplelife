@@ -277,7 +277,7 @@ $function$;
 
 ALTER FUNCTION public.mutate_calendar_event_occurrence_once(uuid, uuid, uuid, text, bigint, jsonb, jsonb, jsonb, timestamptz)
   OWNER TO postgres;
-REVOKE ALL PRIVILEGES ON FUNCTION public.mutate_calendar_event_occurrence_once(uuid, uuid, uuid, text, bigint, jsonb, timestamptz)
+REVOKE ALL PRIVILEGES ON FUNCTION public.mutate_calendar_event_occurrence_once(uuid, uuid, uuid, text, bigint, jsonb, jsonb, jsonb, timestamptz)
   FROM PUBLIC, anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.mutate_calendar_event_occurrence_once(uuid, uuid, uuid, text, bigint, jsonb, timestamptz)
+GRANT EXECUTE ON FUNCTION public.mutate_calendar_event_occurrence_once(uuid, uuid, uuid, text, bigint, jsonb, jsonb, jsonb, timestamptz)
   TO service_role;
