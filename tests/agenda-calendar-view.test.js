@@ -7,6 +7,7 @@ import {
   getCalendarEventRange,
   getCalendarTaskScheduleRange,
   getCalendarWindow,
+  getRecurringOccurrenceQueryWindow,
   monthGridDays,
   shiftCalendarPeriod,
   sortEventsForCalendar,
@@ -42,6 +43,29 @@ test('day and week windows use exclusive end dates', () => {
     startDate: '2026-11-16',
     endDateExclusive: '2026-11-23',
   });
+});
+
+test('recurring occurrence query windows follow the visible day, week and six-week month grid with a bounded overlap buffer', () => {
+  assert.deepEqual(getRecurringOccurrenceQueryWindow('day', '2026-11-22'), {
+    startDate: '2026-10-23',
+    endDateExclusive: '2026-11-23',
+  });
+  assert.deepEqual(getRecurringOccurrenceQueryWindow('week', '2026-11-22'), {
+    startDate: '2026-10-17',
+    endDateExclusive: '2026-11-23',
+  });
+  assert.deepEqual(getRecurringOccurrenceQueryWindow('month', '2026-11-22'), {
+    startDate: '2026-09-26',
+    endDateExclusive: '2026-12-07',
+  });
+});
+
+test('recurring occurrence overlap buffer can be shortened but cannot exceed the approved 30 days', () => {
+  assert.deepEqual(getRecurringOccurrenceQueryWindow('day', '2026-11-22', 0), {
+    startDate: '2026-11-22',
+    endDateExclusive: '2026-11-23',
+  });
+  assert.throws(() => getRecurringOccurrenceQueryWindow('day', '2026-11-22', 31), /0 to 30/);
 });
 
 test('month navigation clamps dates such as January 31 to February end', () => {
