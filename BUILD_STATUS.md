@@ -789,3 +789,18 @@ These deferrals are accepted to permit Phase 1 design/build work to begin. They 
 - Playwright desktop/móvil: PASS en viewport de navegador; aceptación manual real y Android físico no declarados.
 - Revisión estática de rutas críticas anterior: sin bloqueadores encontrados en las rutas examinadas. No hay segundo revisor, reviews ni review threads externos.
 - PR #93 sigue OPEN / Draft / no mergeado. Sin DDL alojado, despliegues Edge, cambios en `Simplelife_dev` ni publicación. Merge/release/operaciones alojadas requieren Human Gate explícito.
+
+
+
+## Phase 1 Agenda — cierre técnico 7/7 (23/11/2026)
+
+- **PR #93:** [OPEN / Draft / no mergeado](https://github.com/SimpleLife9/simplelife/pull/93). Rama `feat/agenda-task-schedule-persistence-v1`.
+- **Código validado:** `bf80eaa04de66af61ea9d82aefb9d87f9e0d43f1`.
+- **CI #623:** [SUCCESS sobre el SHA exacto](https://github.com/SimpleLife9/simplelife/actions/runs/45237394549). Job completo: 41 pasos SUCCESS y 2 SKIPPED esperados (guardado de lockfile solo para main y carga de trazas solo ante fallo). Incluye production build y cleanup/restauración de Supabase local.
+- **Validaciones:** unit tests; Playwright escritorio/móvil; grafo/type-check Deno e IANA; bootstrap RLS; todas las migraciones en PostgreSQL efímero; pruebas SQL de persistencia, ownership, auditoría append-only, idempotencia, materialización, concurrencia y edición por alcance; Edge Runtime local con JWT real para Auth, Event, Protected Time, TaskSchedule, creación recurrente y corte/replay de series.
+- **Cierre del bloque 7:** la persistencia de series y ocurrencias, materialización acotada (90 días / máximo 500 candidatos), mutaciones por ocurrencia y edición de `entire_series` y `this_and_following` están implementadas y conectadas a Agenda. El test PostgreSQL confirma historia, linaje, límites y auditoría; el smoke Edge confirma JWT real, ocurrencia heredada, segmento hijo y replay sin duplicados.
+- **Matriz de Fase 1:** (1) Events/ciclo de vida — PASS técnico; (2) calendario/línea temporal — PASS técnico; (3) tiempo civil/IANA/DST — PASS técnico; (4) Protected Time — PASS técnico; (5) conflictos/consentimiento — PASS técnico; (6) TaskSchedule — PASS técnico; (7) recurrencia/materialización/edición de series — PASS técnico. **Resultado: 7/7 bloques técnicos cerrados.**
+- **Gates humanos separados:** aceptación manual desktop y Android físico sigue pendiente; GitHub no registra segundo revisor ni review thread independiente. PR continúa OPEN / Draft / no mergeado. Quitar Draft, merge, hosted DDL, despliegue Edge y release requieren autorización humana explícita.
+- **Límites de entorno:** pruebas PostgreSQL y Edge Runtime ejecutadas sobre Supabase efímero/local. No se aplicó DDL alojado, no se desplegaron funciones a Supabase LIVE, no se modificó `Simplelife_dev`, no se publicaron builds ni se alteraron datos alojados.
+- **Conclusión:** Fase 1 de Agenda cerrada en implementación y validación automatizada. No declarar aceptación final de producto ni RELEASED hasta cerrar los gates humanos anteriores.
+
