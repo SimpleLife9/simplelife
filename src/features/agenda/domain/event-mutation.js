@@ -99,15 +99,19 @@ export function buildEventMutationIntent(mutation) {
     ? buildEventCreateIntent(normalized.eventDraft).canonicalPayload
     : null;
   // Fixed positional tuple avoids object-property-order ambiguity.
-  const canonicalPayload = JSON.stringify([
+  const canonicalTuple = [
     EVENT_MUTATION_INTENT_VERSION,
     normalized.eventId,
     normalized.expectedUpdatedAt,
     normalized.action,
     draftIntent,
     normalized.protectedTimeDecisions,
-    normalized.taskScheduleDecisions,
-  ]);
+  ];
+  const scheduleDecisions = normalized.taskScheduleDecisions
+    .map((item) => [item.taskScheduleId.toLowerCase(), item.taskScheduleUpdatedAt, item.decision])
+    .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+  if (scheduleDecisions.length) canonicalTuple.push('event-task-schedule-decision-v1', scheduleDecisions);
+  const canonicalPayload = JSON.stringify(canonicalTuple);
   return Object.freeze({
     version: EVENT_MUTATION_INTENT_VERSION,
     canonicalPayload,
