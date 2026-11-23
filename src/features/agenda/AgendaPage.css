@@ -169,3 +169,10 @@
 .agenda-recurrence-weekdays label{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-width:39px;padding:7px 9px;border:1px solid #dce7dc;border-radius:9px;background:#fff;color:#4a6651;font-size:.7rem;font-weight:700}
 .agenda-recurrence-weekdays input{accent-color:#477d58}
 .agenda-recurrence-note{margin:0;padding:9px 11px;border-radius:8px;background:#f1f6f1;color:#647b69;font-size:.68rem;line-height:1.5}
+.agenda-occurrence-editor{display:grid;gap:12px;padding:14px;border:1px solid #dfe9e0;border-radius:12px;background:#f8fbf8}
+.agenda-occurrence-editor h3{margin:0;color:#345244;font-size:.88rem}
+.agenda-occurrence-editor>label{display:grid;gap:6px;color:#536a59;font-size:.72rem;font-weight:700}
+.agenda-occurrence-editor input{width:100%;min-height:41px;padding:9px 10px;border:1px solid #dce6dd;border-radius:9px;background:#fff;color:#345244;font:inherit;font-weight:500}
+.agenda-occurrence-editor input:focus{outline:2px solid rgba(71,125,88,.22);border-color:#6e9a76}
+.agenda-occurrence-editor .agenda-dialog-actions{display:flex;flex-wrap:wrap;justify-content:flex-end}
+@media(max-width:600px){.agenda-occurrence-editor .agenda-dialog-actions{display:grid;grid-template-columns:1fr 1.3fr}}
