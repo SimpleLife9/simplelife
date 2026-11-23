@@ -125,7 +125,6 @@ async function mockSupabaseSession(page, initialData = {}) {
   })))];
   const updatedCaptureParts = [];
   const processingRuns = [];
-  const agendaCreateRequests = [];
   const queueRequests = [];
   const processingRequests = [];
   const reviewRequests = [];
@@ -844,18 +843,6 @@ async function mockSupabaseSession(page, initialData = {}) {
       return;
     }
 
-    if (url.pathname === '/functions/v1/agenda-event-create' && method === 'POST') {
-      const payload = request.postDataJSON();
-      agendaCreateRequests.push({ payload, idempotencyKey: request.headers()['idempotency-key'] || null });
-      await json(201, {
-        eventId: '019b3000-0000-7000-8000-000000000401',
-        createdAt: '2026-11-23T12:00:00.000Z',
-        eventStatus: 'confirmed',
-        replayed: false,
-      });
-      return;
-    }
-
     if (url.pathname === '/functions/v1/inbox-processing-queue' && method === 'POST') {
       const payload = request.postDataJSON();
       const run = {
@@ -945,7 +932,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     await json(404, { message: `Unexpected mocked Supabase request: ${method} ${url.pathname}` });
   });
 
-  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, protectedTimeBlocks, protectedTimeMutationRequests, protectedTimeConflicts, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, processingRuns, agendaCreateRequests, queueRequests, processingRequests, reviewRequests, trashRequests, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
+  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, protectedTimeBlocks, protectedTimeMutationRequests, protectedTimeConflicts, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, processingRuns, queueRequests, processingRequests, reviewRequests, trashRequests, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
 }
 
 test('mock-authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
@@ -1265,7 +1252,7 @@ test('Inbox marks normalized duplicate text without merging or deleting captures
 });
 
 test('Inbox can turn a reviewed capture into an Agenda Event with an owner-scoped provenance link', async ({ page }) => {
-  const { captures, captureParts, agendaCreateRequests, insertedCaptureLinks, reviewRequests } = await mockSupabaseSession(page);
+  const { captures, captureParts, idempotencyRequests, insertedAgendaEvents, insertedCaptureLinks, reviewRequests } = await mockSupabaseSession(page);
   await page.goto('/');
   await page.getByLabel('Correo electrónico').fill(authUser.email);
   await page.getByLabel('Contraseña').fill('not-a-real-password');
@@ -1281,18 +1268,19 @@ test('Inbox can turn a reviewed capture into an Agenda Event with an owner-scope
   await organizer.getByRole('button', { name: 'Confirmar y organizar' }).click();
   await expect(page.getByText('Evento creado en Agenda y vinculado al Inbox.')).toBeVisible();
 
-  expect(agendaCreateRequests).toHaveLength(1);
-  expect(agendaCreateRequests[0].payload.event).toEqual({
+  expect(idempotencyRequests).toHaveLength(1);
+  expect(idempotencyRequests[0].event).toEqual({
     title: 'Llamar al proveedor',
     temporalKind: 'all_day',
     startDate: '2026-11-27',
     endDateExclusive: '2026-11-28',
   });
-  expect(agendaCreateRequests[0].idempotencyKey).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  expect(idempotencyRequests[0].key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  expect(insertedAgendaEvents).toHaveLength(1);
   expect(insertedCaptureLinks).toHaveLength(1);
   expect(insertedCaptureLinks[0]).toMatchObject({
     capture_part_id: captureParts[0].id,
-    calendar_event_id: '019b3000-0000-7000-8000-000000000401',
+    calendar_event_id: insertedAgendaEvents[0].id,
     link_status: 'confirmed',
   });
   expect(reviewRequests.at(-1)).toMatchObject({
