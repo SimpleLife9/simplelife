@@ -81,6 +81,10 @@ test('past historical rows are preserved even when they remain scheduled', () =>
   assert.equal(result.preserveCount, 1);
   assert.equal(result.actions[0].reason, 'historical');
   assert.equal(result.actions[0].occurrence.startsAt, existing.startsAt);
+  assert.throws(() => planOccurrenceMaterializationReconciliation({
+    candidates: [candidate],
+    materializationDate: TODAY,
+  }), /Historical occurrences cannot be newly materialized/);
 });
 
 test('completed, cancelled, skipped, superseded and needs_review rows are never overwritten', () => {
