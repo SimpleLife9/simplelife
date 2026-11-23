@@ -126,7 +126,7 @@ export async function handleRequest(
     : action === "edit"
     ? ["action", "blockId", "expectedUpdatedAt", "block"]
     : ["action", "blockId", "expectedUpdatedAt"];
-  const allowedKeys = action === "create" || action === "edit"
+  const allowedKeys = action === "create" || action === "edit" || action === "restore"
     ? [...requiredKeys, "taskScheduleDecisions"]
     : requiredKeys;
   if (requiredKeys.some((key) => !(key in input))
@@ -203,6 +203,22 @@ export async function handleRequest(
     return json({ ...existing.data.response_body, replayed: true }, existing.data.response_http_status);
   }
 
+  let restoreBlock: Record<string, unknown> | null = null;
+  if (action === "restore") {
+    const restored = await ctx.supabaseAdmin
+      .from("protected_time_block")
+      .select("id,updated_at,label,category,protection_mode,pattern_kind,time_zone,starts_at,ends_at,start_date,end_date_exclusive,weekdays,start_time_local,end_time_local,ends_next_day,archived_at,deleted_at")
+      .eq("id", blockId)
+      .eq("owner_user_id", profile.profileId)
+      .maybeSingle();
+    if (restored.error) return json({ error: "PROTECTED_TIME_BLOCK_LOOKUP_FAILED" }, 503);
+    if (!restored.data) return json({ error: "PROTECTED_TIME_BLOCK_NOT_FOUND" }, 404);
+    if (restored.data.updated_at !== expectedUpdatedAt) {
+      return json({ error: "PROTECTED_TIME_VERSION_CONFLICT" }, 409);
+    }
+    restoreBlock = restored.data as Record<string, unknown>;
+  }
+
   let blockPatch: Record<string, unknown> = {};
   if (blockDraft) {
     try {
@@ -218,12 +234,15 @@ export async function handleRequest(
   }
 
   const now = (dependencies.now ?? (() => new Date().toISOString()))();
-  if (blockDraft) {
+  if (blockDraft || (action === "restore" && restoreBlock)) {
     try {
+      const candidate = blockDraft
+        ? { ...blockPatch, id: blockId, updated_at: now }
+        : restoreBlock as Record<string, unknown>;
       const assessment = await assessOwnerProtectedTimeTaskScheduleConflicts({
         supabaseAdmin: ctx.supabaseAdmin,
         ownerProfileId: profile.profileId,
-        block: { ...blockPatch, id: blockId, updated_at: now },
+        block: candidate,
         suppliedDecisions: suppliedTaskScheduleDecisions,
         now,
       });
