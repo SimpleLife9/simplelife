@@ -565,14 +565,15 @@ BEGIN
     END IF;
   ELSIF p_mutation IN ('reopen', 'restore') THEN
     IF p_event_patch IS NULL OR jsonb_typeof(p_event_patch) IS DISTINCT FROM 'object'
-       OR (SELECT count(*) FROM jsonb_object_keys(p_event_patch)) <> 3
+       OR (SELECT count(*) FROM jsonb_object_keys(p_event_patch)) <> 5
        OR EXISTS (
          SELECT 1 FROM jsonb_object_keys(p_event_patch) AS supplied(key)
          WHERE supplied.key <> ALL (ARRAY[
+           'protected_time_decisions', 'protected_time_snapshot',
            'task_schedule_conflict_decisions', 'task_schedule_snapshot', 'task_schedule_window'
          ]::text[])
        ) THEN
-      RAISE EXCEPTION 'Event reopen/restore requires exact TaskSchedule decision, snapshot and comparison-window evidence'
+      RAISE EXCEPTION 'Event reopen/restore requires exact Protected Time and TaskSchedule decision evidence'
         USING ERRCODE = '22023';
     END IF;
   ELSIF p_event_patch IS DISTINCT FROM '{}'::jsonb THEN
@@ -581,14 +582,48 @@ BEGIN
   END IF;
 
   IF p_mutation IN ('edit', 'reopen', 'restore') THEN
-    IF p_mutation = 'edit' THEN
-      IF jsonb_typeof(p_event_patch->'protected_time_decisions') IS DISTINCT FROM 'array'
-         OR jsonb_typeof(p_event_patch->'protected_time_snapshot') IS DISTINCT FROM 'array'
-         OR jsonb_array_length(p_event_patch->'protected_time_decisions') > 500
-         OR jsonb_array_length(p_event_patch->'protected_time_snapshot') > 500 THEN
-        RAISE EXCEPTION 'Protected Time decisions/snapshot must be bounded JSON arrays'
-          USING ERRCODE = '22023';
-      END IF;
+    IF jsonb_typeof(p_event_patch->'protected_time_decisions') IS DISTINCT FROM 'array'
+       OR jsonb_typeof(p_event_patch->'protected_time_snapshot') IS DISTINCT FROM 'array'
+       OR jsonb_array_length(p_event_patch->'protected_time_decisions') > 500
+       OR jsonb_array_length(p_event_patch->'protected_time_snapshot') > 500 THEN
+      RAISE EXCEPTION 'Protected Time decisions/snapshot must be bounded JSON arrays'
+        USING ERRCODE = '22023';
+    END IF;
+
+    IF EXISTS (
+      SELECT 1 FROM jsonb_array_elements(p_event_patch->'protected_time_snapshot') AS supplied(item)
+      WHERE jsonb_typeof(supplied.item) IS DISTINCT FROM 'object'
+         OR CASE WHEN jsonb_typeof(supplied.item) = 'object' THEN
+              (SELECT count(*) FROM jsonb_object_keys(supplied.item)) <> 2
+              OR NOT (supplied.item ?& ARRAY['id', 'updated_at']::text[])
+            ELSE true END
+    ) OR EXISTS (
+      SELECT 1
+      FROM (
+        SELECT item->>'id' AS block_id, count(*) AS copies
+        FROM jsonb_array_elements(p_event_patch->'protected_time_snapshot') AS supplied(item)
+        GROUP BY item->>'id'
+      ) AS duplicate_snapshots
+      WHERE copies > 1
+    ) THEN
+      RAISE EXCEPTION 'Protected Time snapshot entries must be exact, unique id/updated_at objects'
+        USING ERRCODE = '22023';
+    END IF;
+
+    IF EXISTS (
+      SELECT 1 FROM jsonb_array_elements(p_event_patch->'protected_time_decisions') AS supplied(item)
+      WHERE jsonb_typeof(supplied.item) IS DISTINCT FROM 'object'
+         OR CASE WHEN jsonb_typeof(supplied.item) = 'object' THEN
+              (SELECT count(*) FROM jsonb_object_keys(supplied.item)) <> 12
+              OR NOT (supplied.item ?& ARRAY[
+                'policyVersion', 'blockId', 'blockUpdatedAt', 'protectionMode',
+                'occurrenceDate', 'occurrenceStartsAt', 'occurrenceEndsAt',
+                'overlapStartsAt', 'overlapEndsAt', 'timeZone', 'decision', 'consentedAt'
+              ]::text[])
+            ELSE true END
+    ) THEN
+      RAISE EXCEPTION 'Protected Time decisions must use the exact version-bound consent record shape'
+        USING ERRCODE = '22023';
     END IF;
 
     IF jsonb_typeof(p_event_patch->'task_schedule_conflict_decisions') IS DISTINCT FROM 'array'
@@ -641,7 +676,7 @@ BEGIN
     -- Serialize all writers for the owner on the same transaction lock.
     PERFORM pg_advisory_xact_lock(hashtextextended(p_owner_user_id::text, 8102026));
 
-    IF p_mutation = 'edit' AND EXISTS (
+    IF p_mutation IN ('edit', 'reopen', 'restore') AND EXISTS (
       SELECT 1
       FROM (
         SELECT (item->>'id')::uuid AS id, (item->>'updated_at')::timestamptz AS updated_at
@@ -814,6 +849,7 @@ BEGIN
         ELSE
           UPDATE public.calendar_event
           SET event_status = 'confirmed',
+              protected_time_decisions = p_event_patch->'protected_time_decisions',
               task_schedule_conflict_decisions = p_event_patch->'task_schedule_conflict_decisions'
           WHERE id = p_event_id AND owner_user_id = p_owner_user_id;
           v_status := 200;
@@ -846,12 +882,14 @@ BEGIN
           UPDATE public.calendar_event
           SET deleted_at = NULL,
               purge_after = NULL,
+              protected_time_decisions = p_event_patch->'protected_time_decisions',
               task_schedule_conflict_decisions = p_event_patch->'task_schedule_conflict_decisions'
           WHERE id = p_event_id AND owner_user_id = p_owner_user_id;
           v_status := 200;
         ELSIF v_event.deleted_at IS NULL AND v_event.archived_at IS NOT NULL THEN
           UPDATE public.calendar_event
           SET archived_at = NULL,
+              protected_time_decisions = p_event_patch->'protected_time_decisions',
               task_schedule_conflict_decisions = p_event_patch->'task_schedule_conflict_decisions'
           WHERE id = p_event_id AND owner_user_id = p_owner_user_id;
           v_status := 200;
