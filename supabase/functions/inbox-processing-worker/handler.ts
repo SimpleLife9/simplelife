@@ -1,4 +1,5 @@
 import { classifyInboxCapture, INBOX_RULE_PROCESSOR_VERSION } from "../_shared/inbox-rule-classifier.ts";
+import { uuidv7 } from "../../../src/lib/uuidv7.js";
 
 export const MAX_REQUEST_BYTES = 64 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -96,7 +97,7 @@ export async function handleRequest(
     }
     let proposals;
     try {
-      proposals = classifyInboxCapture(job.content_original);
+      proposals = classifyInboxCapture(job.content_original).map((proposal) => ({ ...proposal, partId: uuidv7() }));
     } catch {
       await ctx.supabaseAdmin.rpc("fail_inbox_processing_run", {
         p_run_id: body.runId, p_lease_token: leaseToken,

@@ -7,9 +7,14 @@ import { EmptyState } from '../../shared/components/EmptyState.jsx';
 import { CaptureComposer } from './components/CaptureComposer.jsx';
 import { persistTextCapture } from './data/capture-repository.js';
 
+function normalizeCaptureForDuplicate(value) {
+  return String(value || "").normalize("NFKC").toLocaleLowerCase("es")
+    .replace(/[^\p{L}\p{N}]+/gu, " ").trim().replace(/\s+/g, " ");
+}
+
 export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage, setMorePage }) {
   const { rows, loading, localError } = useRows('capture', profile, refreshKey, (query) => query
-    .is('deleted_at', null).order('captured_at', { ascending: false }).limit(50));
+    .order('captured_at', { ascending: false }).limit(250));
   const { rows: captureParts } = useRows('capture_part', profile, refreshKey, (query) => query.order('part_index'));
   const { rows: captureLinks } = useRows('capture_link', profile, refreshKey);
   const { rows: processingRuns } = useRows('processing_run', profile, refreshKey, (query) => query.order('created_at', { ascending: false }).limit(100));
@@ -58,11 +63,13 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
     return rows.filter((capture) => {
       const parts = captureParts.filter((item) => item.capture_id === capture.id);
       const organized = parts.length > 0 && parts.every((part) => captureLinks.some((link) => link.capture_part_id === part.id && link.link_status === 'confirmed'));
-      const statusMatches = attentionFilter === 'all'
-        || (attentionFilter === 'needs_review' && capture.attention_status === 'needs_review' && !organized)
-        || (attentionFilter === 'reviewed' && capture.attention_status === 'reviewed' && !organized)
-        || (attentionFilter === 'organized' && organized)
-        || (attentionFilter === 'archived' && capture.attention_status === 'archived');
+      const statusMatches = attentionFilter === 'trash'
+        ? Boolean(capture.deleted_at)
+        : !capture.deleted_at && (attentionFilter === 'all'
+          || (attentionFilter === 'needs_review' && capture.attention_status === 'needs_review' && !organized)
+          || (attentionFilter === 'reviewed' && capture.attention_status === 'reviewed' && !organized)
+          || (attentionFilter === 'organized' && organized)
+          || (attentionFilter === 'archived' && capture.attention_status === 'archived'));
       const searchMatches = !term || String(capture.content_original || '').toLocaleLowerCase('es').includes(term);
       return statusMatches && searchMatches;
     });
@@ -81,6 +88,34 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
     : nextStatus === 'archived'
       ? 'Captura archivada.'
       : 'Captura devuelta a pendientes.');
+
+  const trashCapture = (capture) => runAction(async () => {
+    const { data, error } = await supabase.rpc('trash_inbox_capture', {
+      p_capture_id: capture.id, p_audit_id: uuidv7(),
+    });
+    if (error) throw error;
+    if (data !== true) throw new Error('No se pudo enviar la captura a la papelera.');
+  }, 'Captura movida a la papelera. Se conservará durante 30 días antes de poder purgarse.');
+
+  const restoreTrashedCapture = (capture) => runAction(async () => {
+    const { data, error } = await supabase.rpc('restore_inbox_capture', {
+      p_capture_id: capture.id, p_audit_id: uuidv7(),
+    });
+    if (error) throw error;
+    if (data !== true) throw new Error('La captura ya no puede recuperarse o no pertenece a esta cuenta.');
+  }, 'Captura restaurada desde la papelera.');
+
+  const discardPartSuggestion = (part) => runAction(async () => {
+    const { data, error } = await supabase.rpc('review_inbox_capture_part', {
+      p_capture_part_id: part.id,
+      p_category: part.category,
+      p_interpretation: 'Sugerencia descartada manualmente por el propietario.',
+      p_review_status: 'rejected',
+      p_audit_id: uuidv7(),
+    });
+    if (error) throw error;
+    if (data !== true) throw new Error('No se pudo registrar el rechazo de esta sugerencia.');
+  }, 'Sugerencia descartada y decisión registrada en auditoría.');
 
   const queueAndProcess = async (captureId) => {
     const queued = await supabase.functions.invoke('inbox-processing-queue', {
@@ -207,11 +242,12 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
         id: ids.linkId, capture_part_id: partId, ...linkTarget, link_status: 'confirmed',
       });
 
-      const { data: partUpdate, error: partError } = await supabase.from('capture_part')
-        .update({ category, interpretation, review_status: 'accepted' })
-        .eq('id', partId).select('id');
+      const { data: partUpdate, error: partError } = await supabase.rpc('review_inbox_capture_part', {
+        p_capture_part_id: partId, p_category: category, p_interpretation: interpretation,
+        p_review_status: 'accepted', p_audit_id: uuidv7(),
+      });
       if (partError) throw partError;
-      if (!partUpdate?.length) throw new Error('El elemento fue creado, pero no se pudo confirmar su clasificación. Reintenta esta misma operación.');
+      if (partUpdate !== true) throw new Error('El elemento fue creado, pero no se pudo confirmar su clasificación. Reintenta esta misma operación.');
 
       const allParts = getCaptureParts(selectedCapture.id);
       const allPartsConfirmed = allParts.length > 0 && allParts.every((part) => part.id === partId
@@ -248,7 +284,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
           <span>Revisión</span>
           <select aria-label="Filtrar capturas por revisión" value={attentionFilter} onChange={(event) => setAttentionFilter(event.target.value)}>
             <option value="needs_review">Por organizar</option><option value="organized">Organizadas</option>
-            <option value="reviewed">Revisadas sin organizar</option><option value="archived">Archivadas</option><option value="all">Todas</option>
+            <option value="reviewed">Revisadas sin organizar</option><option value="archived">Archivadas</option><option value="trash">Papelera</option><option value="all">Todas</option>
           </select>
         </label>
       </div>
@@ -263,12 +299,17 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
           const label = part?.category === 'task' ? 'Tarea'
             : part?.category === 'note_idea' ? 'Nota o idea'
               : part?.category === 'list' ? 'Lista' : typeLabels[linkKind] || 'Elemento';
-          const rowClass = 'capture-row ' + (confirmedLink ? 'capture-row-organized' : 'capture-row-' + capture.attention_status);
+          const normalizedSource = normalizeCaptureForDuplicate(capture.content_original);
+          const possibleDuplicate = !capture.deleted_at && normalizedSource.length > 3 && rows.some((candidate) =>
+            candidate.id !== capture.id && !candidate.deleted_at
+            && normalizeCaptureForDuplicate(candidate.content_original) === normalizedSource);
+          const rowClass = 'capture-row ' + (capture.deleted_at ? 'capture-row-archived' : confirmedLink ? 'capture-row-organized' : 'capture-row-' + capture.attention_status);
           return <div className={rowClass} key={capture.id}>
             <span className="capture-bullet">{confirmedLink ? '✓' : '✳'}</span>
             <div className="capture-row-content">
               <p>{capture.content_original}</p>
               <small>{new Intl.DateTimeFormat('es', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Havana' }).format(new Date(capture.captured_at))}</small>
+              {possibleDuplicate && <span className="capture-status capture-status-archived">Posible duplicado exacto · revisar antes de combinar</span>}
               {parts.map((capturePart) => {
                 const proposal = proposals.find((item) => item.partIndex === capturePart.part_index) || proposals[capturePart.part_index];
                 const partLink = getConfirmedLink(capture.id, capturePart.id);
@@ -279,13 +320,18 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
                     {capturePart.review_status === 'accepted' || capturePart.review_status === 'edited' ? <span className="capture-part-confirmed">Confirmado</span> : null}
                   </div>
                   {capturePart.original_fragment !== capture.content_original && <p>{capturePart.original_fragment}</p>}
-                  {partLink ? <span className="muted">Destino vinculado y trazable.</span> : <button type="button" className="capture-action-button" disabled={busy || capture.attention_status === 'archived'} onClick={() => openOrganizer(capture, capturePart)}>Revisar y confirmar destino</button>}
+                  {partLink ? <span className="muted">Destino vinculado y trazable.</span> : <>
+                    <button type="button" className="capture-action-button" disabled={busy || capture.attention_status === 'archived' || Boolean(capture.deleted_at)} onClick={() => openOrganizer(capture, capturePart)}>Revisar y confirmar destino</button>
+                    {capturePart.review_status === 'unreviewed' && !capture.deleted_at && <button type="button" className="capture-action-button capture-archive-button" disabled={busy} onClick={() => discardPartSuggestion(capturePart)}>Descartar sugerencia</button>}
+                    {capturePart.review_status === 'rejected' && <span className="muted">Sugerencia descartada por el propietario.</span>}
+                  </>}
                 </div>;
               })}
               <div className="capture-row-actions">
                 {confirmedLink
                   ? <span className="capture-status capture-status-organized">Organizada · {label}{capture.attention_status === 'archived' ? ' · Archivada' : ''}</span>
                   : <span className={'capture-status capture-status-' + capture.attention_status}>{attentionLabels[capture.attention_status] || 'Pendiente de revisión'}</span>}
+                {capture.deleted_at ? <button type="button" className="capture-action-button" disabled={busy} onClick={() => restoreTrashedCapture(capture)}>Restaurar desde papelera</button> : <>
                 {capture.processing_status !== 'processed' && capture.attention_status !== 'archived' ? <button type="button" className="capture-action-button" disabled={busy} onClick={() => processCapture(capture)}>{capture.processing_status === 'queued' || capture.processing_status === 'processing' ? 'Reintentar procesamiento' : 'Generar sugerencias'}</button> : null}
                 {confirmedLink ? (
                   <>
@@ -299,6 +345,8 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
                     <button type="button" className="capture-action-button capture-archive-button" disabled={busy} onClick={() => updateAttention(capture, 'archived')} aria-label={'Archivar captura: ' + capture.content_original}>Archivar</button>
                   </>
                 ) : <button type="button" className="capture-action-button" disabled={busy} onClick={() => updateAttention(capture, 'needs_review')} aria-label={'Restaurar captura: ' + capture.content_original}>Restaurar</button>}
+                <button type="button" className="capture-action-button capture-archive-button" disabled={busy} onClick={() => trashCapture(capture)}>Enviar a papelera</button>
+                </>}
               </div>
             </div>
           </div>;

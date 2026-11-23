@@ -115,6 +115,9 @@ jobs:
       - name: Test Inbox capture ownership and source preservation in ephemeral local Postgres
         run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/inbox-capture-rls.test.sql
 
+      - name: Test Inbox trash, restore and part-review audit in ephemeral local Postgres
+        run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/inbox-review-trash-audit.test.sql
+
       - name: Test Inbox processing lifecycle and owner isolation in ephemeral local Postgres
         run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/inbox-processing-lifecycle.test.sql
 

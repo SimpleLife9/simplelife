@@ -128,7 +128,8 @@ BEGIN
        OR jsonb_typeof(v_item->'originalFragment') <> 'string'
        OR jsonb_typeof(v_item->'category') <> 'string'
        OR jsonb_typeof(v_item->'confidence') <> 'number'
-       OR jsonb_typeof(v_item->'requiresClarification') <> 'boolean' THEN
+       OR jsonb_typeof(v_item->'requiresClarification') <> 'boolean'
+       OR jsonb_typeof(v_item->'partId') <> 'string' THEN
       RAISE EXCEPTION 'Invalid Inbox part proposal shape' USING ERRCODE = '22023';
     END IF;
     v_fragment := v_item->>'originalFragment';
@@ -162,7 +163,7 @@ BEGIN
     INSERT INTO public.capture_part(
       id, capture_id, part_index, original_fragment, interpretation, category, review_status
     ) VALUES (
-      private.uuidv7(), v_run.capture_id, v_index, v_fragment, v_interpretation, v_category, 'unreviewed'
+      (v_item->>'partId')::uuid, v_run.capture_id, v_index, v_fragment, v_interpretation, v_category, 'unreviewed'
     )
     ON CONFLICT (capture_id, part_index) DO UPDATE
       SET original_fragment = EXCLUDED.original_fragment,
