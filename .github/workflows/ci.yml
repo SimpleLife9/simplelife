@@ -124,6 +124,9 @@ jobs:
       - name: Test Inbox indexed global search and owner-scoped duplicate lookup in ephemeral local Postgres
         run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/inbox-global-search.test.sql
 
+      - name: Test Inbox existing Goal, Subgoal and Project provenance owner isolation in ephemeral local Postgres
+        run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/inbox-existing-destinations.test.sql
+
       - name: Test Inbox processing lifecycle and owner isolation in ephemeral local Postgres
         run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/inbox-processing-lifecycle.test.sql
 
