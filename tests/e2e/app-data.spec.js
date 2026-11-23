@@ -28,7 +28,7 @@ const authUser = {
 };
 function normalizeCaptureForDuplicate(value) {
   return String(value || '').normalize('NFKC').toLocaleLowerCase('es')
-    .replace(/[^\\p{L}\\p{N}]+/gu, ' ').trim().replace(/\\s+/g, ' ');
+    .replace(/[^\p{L}\p{N}]+/gu, ' ').trim().replace(/\s+/g, ' ');
 }
 
 const profile = {
