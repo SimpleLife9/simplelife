@@ -66,6 +66,8 @@ export function planRecurrenceEditScope({
     assert(inputProposedRule == null && inputNewSeriesId == null,
       'This occurrence scope cannot replace the series rule or create a new series.');
     assert(override && typeof override === 'object', 'This occurrence scope requires an occurrence override.');
+    assert(override.occurrenceKey == null || override.occurrenceKey === selectedOccurrence.occurrenceKey,
+      'Override occurrenceKey does not match the selected original slot.');
     const occurrence = applyOccurrenceOverride(selectedOccurrence, {
       ...override,
       occurrenceKey: selectedOccurrence.occurrenceKey,
