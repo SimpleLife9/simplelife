@@ -28,6 +28,35 @@ VALUES
 ON CONFLICT (id) DO NOTHING;
 
 
+-- The backend writer is intentionally denied direct audit_event privileges.
+-- This test-only SECURITY DEFINER probe lets the SQL assertions inspect rows
+-- without widening service_role's production table grants.
+CREATE FUNCTION pg_temp.recurring_test_audit_count(
+  p_owner uuid,
+  p_entity_type text,
+  p_entity_id uuid,
+  p_actions text[]
+)
+RETURNS bigint
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $function$
+  SELECT count(*)::bigint
+  FROM public.audit_event
+  WHERE account_user_id = p_owner
+    AND (p_entity_type IS NULL OR entity_type = p_entity_type)
+    AND (p_entity_id IS NULL OR entity_id = p_entity_id)
+    AND (p_actions IS NULL OR action = ANY(p_actions));
+$function$;
+ALTER FUNCTION pg_temp.recurring_test_audit_count(uuid, text, uuid, text[]) OWNER TO postgres;
+GRANT USAGE ON SCHEMA pg_temp TO service_role;
+REVOKE ALL PRIVILEGES ON FUNCTION pg_temp.recurring_test_audit_count(uuid, text, uuid, text[])
+  FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION pg_temp.recurring_test_audit_count(uuid, text, uuid, text[])
+  TO service_role;
+
 SET LOCAL ROLE service_role;
 
 DO $test$
@@ -77,6 +106,14 @@ BEGIN
      OR has_table_privilege('authenticated', 'public.calendar_event_occurrence', 'DELETE')
      OR has_table_privilege('authenticated', 'public.calendar_event_occurrence', 'TRUNCATE') THEN
     RAISE EXCEPTION 'authenticated occurrence privileges must be SELECT-only';
+  END IF;
+
+  IF has_table_privilege('service_role', 'public.audit_event', 'SELECT')
+     OR has_table_privilege('service_role', 'public.audit_event', 'INSERT')
+     OR has_table_privilege('service_role', 'public.audit_event', 'UPDATE')
+     OR has_table_privilege('service_role', 'public.audit_event', 'DELETE')
+     OR has_table_privilege('service_role', 'public.audit_event', 'TRUNCATE') THEN
+    RAISE EXCEPTION 'service_role must retain zero direct audit_event privileges';
   END IF;
 
   IF NOT has_table_privilege('service_role', 'public.calendar_event_occurrence', 'SELECT')
@@ -214,14 +251,10 @@ BEGIN
     RAISE EXCEPTION 'Expected exactly one persisted occurrence; got %', v_seen_count;
   END IF;
 
-  SELECT count(*) INTO v_audit_count
-  FROM public.audit_event
-  WHERE account_user_id = v_owner
-    AND (
-      (entity_type = 'calendar_event' AND entity_id = v_event_id)
-      OR (entity_type = 'calendar_event_occurrence' AND entity_id = v_occurrence_id)
-    )
-    AND action IN ('calendar_event.created', 'calendar_event_occurrence.created');
+  SELECT pg_temp.recurring_test_audit_count(
+    v_owner, NULL, NULL,
+    ARRAY['calendar_event.created', 'calendar_event_occurrence.created']
+  ) INTO v_audit_count;
   IF v_audit_count <> 2 THEN
     RAISE EXCEPTION 'Series and occurrence must append two audit rows in the same transaction; got %', v_audit_count;
   END IF;
@@ -319,11 +352,9 @@ BEGIN
     RAISE EXCEPTION 'Recurring top-up must leave exactly two occurrence rows; got %', v_seen_count;
   END IF;
 
-  SELECT count(*) INTO v_audit_count
-  FROM public.audit_event
-  WHERE account_user_id = v_owner
-    AND entity_type = 'calendar_event_occurrence'
-    AND entity_id = '019a0000-0000-7000-8000-000000000105';
+  SELECT pg_temp.recurring_test_audit_count(
+    v_owner, 'calendar_event_occurrence', '019a0000-0000-7000-8000-000000000105', NULL
+  ) INTO v_audit_count;
   IF v_audit_count <> 1 THEN
     RAISE EXCEPTION 'Top-up must append exactly one occurrence audit row; got %', v_audit_count;
   END IF;
@@ -416,12 +447,10 @@ BEGIN
     RAISE EXCEPTION 'Stale occurrence row version must be rejected with 409';
   END IF;
 
-  SELECT count(*) INTO v_mutation_audit
-  FROM public.audit_event
-  WHERE account_user_id = v_owner
-    AND entity_type = 'calendar_event_occurrence'
-    AND entity_id = '019a0000-0000-7000-8000-000000000105'
-    AND action = 'calendar_event_occurrence.updated';
+  SELECT pg_temp.recurring_test_audit_count(
+    v_owner, 'calendar_event_occurrence', '019a0000-0000-7000-8000-000000000105',
+    ARRAY['calendar_event_occurrence.updated']
+  ) INTO v_mutation_audit;
   IF v_mutation_audit <> 1 THEN
     RAISE EXCEPTION 'Occurrence cancellation and replay must append exactly one mutation audit row; got %', v_mutation_audit;
   END IF;
