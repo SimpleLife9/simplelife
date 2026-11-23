@@ -123,7 +123,7 @@ function storedHash(value: unknown): string {
   if (value instanceof Uint8Array) {
     return Array.from(value).map((byte) => byte.toString(16).padStart(2, "0")).join("");
   }
-  return typeof value === "string" ? value.replace(/^\\\\x/, "") : "";
+  return typeof value === "string" ? value.replace(/^\\x/, "") : "";
 }
 
 function occurrenceRows({
