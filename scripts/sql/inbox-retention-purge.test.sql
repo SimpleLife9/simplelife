@@ -35,11 +35,13 @@ VALUES('019b6200-0000-7000-8000-000000000401',
        '019b6200-0000-7000-8000-000000000101','confirmed');
 RESET ROLE;
 
-SET LOCAL ROLE service_role;
+RESET ROLE;
 UPDATE public.capture SET deleted_at=now()-interval '31 days', purge_after=now()-interval '1 day'
 WHERE id IN ('019b6200-0000-7000-8000-000000000201','019b6200-0000-7000-8000-000000000203');
 UPDATE public.capture SET deleted_at=now()-interval '2 days', purge_after=now()+interval '28 days'
 WHERE id='019b6200-0000-7000-8000-000000000202';
+
+SET LOCAL ROLE service_role;
 INSERT INTO public.processing_run(
  id,capture_id,processor_version,status,attempt_number,idempotency_key,started_at,finished_at
 ) VALUES
