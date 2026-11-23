@@ -3682,7 +3682,7 @@ test('Protected Time restore rechecks TaskSchedule overlaps and records explicit
   await page.getByRole('button', { name: 'Restaurar', exact: true }).click();
   const decisionDialog = page.getByRole('alertdialog', { name: 'Hay reservas de tareas que se cruzan' });
   await expect(decisionDialog).toBeVisible();
-  await expect(decisionDialog.getByText(archivedBlock.label)).toBeVisible();
+  await expect(decisionDialog.locator('.agenda-conflict-card')).toContainText(archivedBlock.label);
   expect(protectedTimeMutationRequests).toHaveLength(1);
   expect(protectedTimeMutationRequests[0].payload.action).toBe('restore');
   expect(protectedTimeMutationRequests[0].payload.taskScheduleDecisions).toBeUndefined();
