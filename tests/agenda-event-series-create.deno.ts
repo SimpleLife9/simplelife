@@ -244,6 +244,30 @@ Deno.test("rejects Protected Time and TaskSchedule overlaps before the atomic wr
   assertEquals(calls.rpc, 0, "conflicted series must not reach persistence");
 });
 
+Deno.test("rejects a TaskSchedule overlap before the atomic write", async () => {
+  const schedule = {
+    id: "019a0000-0000-7000-8000-000000000711",
+    updated_at: "2026-11-22T10:00:00.000000Z",
+    starts_at: "2026-11-24T14:30:00.000Z",
+    ends_at: "2026-11-24T15:00:00.000Z",
+    time_zone: "America/Havana",
+    schedule_status: "confirmed",
+  };
+  const { ctx, calls } = mockContext({ taskSchedules: [schedule] });
+  const response = await handleRequest(request(
+    timedEvent(),
+    weeklyRule(),
+    { endLocalTime: "10:00", endDayOffset: 0 },
+  ), ctx, {
+    now: () => "2026-11-23T12:00:00.000Z",
+    newEventId: () => SERIES_ID,
+    newOccurrenceId: () => "019a0000-0000-7000-8000-000000000812",
+  });
+  assertEquals(response.status, 409, "TaskSchedule conflict status");
+  assertEquals((await responseBody(response)).error, "TASK_SCHEDULE_CONFLICTS", "conflict code");
+  assertEquals(calls.rpc, 0, "conflicted series must not reach persistence");
+});
+
 Deno.test("returns the idempotent recurring-series receipt without resolving or writing twice", async () => {
   const first = mockContext();
   const deps = {
