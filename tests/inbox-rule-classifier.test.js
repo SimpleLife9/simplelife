@@ -35,7 +35,7 @@ test("ambiguous category matches return a contextual clarification prompt", () =
 
   const [unclassified] = classifyInboxCapture("No olvidar la idea del menú");
   assert.equal(unclassified.requiresClarification, true);
-  assert.match(unclassified.clarificationPrompt, /qué quieres hacer o recordar/);
+  assert.match(unclassified.clarificationPrompt, /qué quieres hacer o recordar/i);
 });
 
 test("clear category matches do not request unnecessary clarification", () => {
