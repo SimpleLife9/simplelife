@@ -704,6 +704,7 @@ async function mockSupabaseSession(page, initialData = {}) {
         } else if (payload.action === 'restore') {
           row.archived_at = null;
           row.deleted_at = null;
+          if (payload.taskScheduleDecisions) row.task_schedule_conflict_decisions = payload.taskScheduleDecisions;
         } else if (payload.action === 'delete') {
           row.archived_at = null;
           row.deleted_at = now;
@@ -3606,6 +3607,102 @@ test('Protected Time exige consentimiento explícito antes de cruzar reservas de
     decision: 'keep_overlap',
   }]);
   expect(protectedTimeBlocks).toHaveLength(1);
+  expect(protectedTimeBlocks[0].task_schedule_conflict_decisions).toHaveLength(1);
+});
+
+
+test('Protected Time restore rechecks TaskSchedule overlaps and records explicit consent', async ({ page }) => {
+  const blockId = '019a0000-0000-7000-8000-000000000621';
+  const scheduleId = '019a0000-0000-7000-8000-000000000622';
+  const blockUpdatedAt = '2026-11-22T18:00:00.000000Z';
+  const scheduleUpdatedAt = '2026-12-25T04:00:00.000000Z';
+  const occurrenceStartsAt = '2026-12-25T03:00:00.000Z';
+  const archivedBlock = {
+    id: blockId,
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    updated_by_user_id: profile.id,
+    label: 'Descanso protegido archivado',
+    category: 'Salud',
+    protection_mode: 'hard',
+    pattern_kind: 'one_off',
+    time_zone: 'America/Havana',
+    start_local: '2026-12-24 22:00:00',
+    end_local: '2026-12-25 06:30:00',
+    starts_at: occurrenceStartsAt,
+    ends_at: '2026-12-25T11:30:00.000Z',
+    start_date: null,
+    end_date_exclusive: null,
+    weekdays: null,
+    start_time_local: null,
+    end_time_local: null,
+    ends_next_day: null,
+    resolver_metadata: { rulesSource: 'iana-tzdb', rulesVersion: '2026f', resolverVersion: 'agenda-iana-resolver-v1', authoritative: true },
+    task_schedule_conflict_decisions: [],
+    archived_at: '2026-11-21T18:00:00.000Z',
+    deleted_at: null,
+    created_at: '2026-11-20T18:00:00.000Z',
+    updated_at: blockUpdatedAt,
+  };
+  const { protectedTimeBlocks, protectedTimeMutationRequests } = await mockSupabaseSession(page, {
+    protectedTimeBlocks: [archivedBlock],
+    protectedTimeTaskScheduleConflictResponses: [{
+      status: 409,
+      body: {
+        error: 'TASK_SCHEDULE_CONFLICTS',
+        taskScheduleConflicts: [{
+          conflictKey: scheduleId + ':' + occurrenceStartsAt,
+          taskScheduleId: scheduleId,
+          taskScheduleUpdatedAt: scheduleUpdatedAt,
+          startsAt: occurrenceStartsAt,
+          endsAt: '2026-12-25T04:00:00.000Z',
+          overlapStartsAt: '2026-12-25T03:15:00.000Z',
+          overlapEndsAt: '2026-12-25T03:45:00.000Z',
+          occurrenceDate: '2026-12-25',
+          occurrenceStartsAt,
+          occurrenceEndsAt: '2026-12-25T04:00:00.000Z',
+          protectionMode: 'hard',
+          protectedTimeLabel: archivedBlock.label,
+          patternKind: 'one_off',
+          timeZone: 'America/Havana',
+          requiredDecision: 'keep_overlap',
+        }],
+      },
+    }],
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.getByRole('navigation', { name: 'Navegación principal' })
+    .getByRole('button', { name: /Agenda/ }).click();
+  await page.getByRole('button', { name: 'Tiempo protegido', exact: true }).click();
+  await page.getByRole('button', { name: 'Archivados', exact: true }).click();
+
+  await page.getByRole('button', { name: 'Restaurar', exact: true }).click();
+  const decisionDialog = page.getByRole('alertdialog', { name: 'Hay reservas de tareas que se cruzan' });
+  await expect(decisionDialog).toBeVisible();
+  await expect(decisionDialog.getByText(archivedBlock.label)).toBeVisible();
+  expect(protectedTimeMutationRequests).toHaveLength(1);
+  expect(protectedTimeMutationRequests[0].payload.action).toBe('restore');
+  expect(protectedTimeMutationRequests[0].payload.taskScheduleDecisions).toBeUndefined();
+
+  await decisionDialog.getByRole('checkbox', {
+    name: 'Acepto mantener esta reserva dentro del tiempo protegido',
+  }).check();
+  await decisionDialog.getByRole('button', { name: 'Guardar con estas decisiones' }).click();
+
+  await expect(page.getByText('Bloque restaurado.')).toBeVisible();
+  await expect(decisionDialog).toHaveCount(0);
+  expect(protectedTimeMutationRequests).toHaveLength(2);
+  expect(protectedTimeMutationRequests[1].key).toBe(protectedTimeMutationRequests[0].key);
+  expect(protectedTimeMutationRequests[1].payload.taskScheduleDecisions).toEqual([{
+    taskScheduleId: scheduleId,
+    taskScheduleUpdatedAt: scheduleUpdatedAt,
+    occurrenceStartsAt,
+    decision: 'keep_overlap',
+  }]);
+  expect(protectedTimeBlocks[0].archived_at).toBeNull();
   expect(protectedTimeBlocks[0].task_schedule_conflict_decisions).toHaveLength(1);
 });
 
