@@ -4,6 +4,7 @@ import {
   buildRecurrenceEndEndpoints,
   validatePersistableTimedRecurrence,
 } from '../src/features/agenda/domain/recurrence-endpoints.js';
+import { planOccurrenceResolutionBatches } from '../src/features/agenda/domain/occurrence-resolution.js';
 
 const timedRule = {
   version: 1,
@@ -130,6 +131,23 @@ test('end planner rejects invalid dates/times, unknown overrides and terminal oc
     occurrences: [occurrence()], endLocalTime: '02:30',
     occurrenceEndOverrides: { unused: { localTime: '10:00' } },
   }), /unknown occurrenceKey/);
+});
+
+test('explicit recurrence ends plug into the atomic resolver adapter without duration inference', () => {
+  const item = occurrence({ actualLocalDate: '2026-11-02', actualLocalTime: '09:00' });
+  const ends = buildRecurrenceEndEndpoints({
+    occurrences: [item],
+    endLocalTime: '10:15',
+  });
+  const plan = planOccurrenceResolutionBatches({
+    occurrences: [item],
+    endByOccurrenceKey: ends,
+  });
+  assert.equal(plan.timedOccurrenceCount, 1);
+  assert.equal(plan.batches[0].occurrenceKeys[0], item.occurrenceKey);
+  assert.equal(plan.batches[0].payload.ranges[0].start.localDateTime, '2026-11-02T09:00:00.000');
+  assert.equal(plan.batches[0].payload.ranges[0].end.localDateTime, '2026-11-02T10:15:00.000');
+  assert.equal(plan.batches[0].payload.ranges[0].timeZone, 'America/New_York');
 });
 
 test('two different local clock choices stay distinct even when the elapsed UTC durations differ at DST', () => {
