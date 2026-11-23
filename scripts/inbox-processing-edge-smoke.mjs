@@ -327,6 +327,8 @@ try {
   equal(dispatchResult.claimed, 1, "dispatcher claimed exactly its due fixture");
   equal(dispatchResult.succeeded, 1, "dispatcher persisted one proposal batch");
   equal(dispatchResult.queueEmpty, true, "dispatcher drained current due queue");
+  equal(dispatchResult.purgeFailed, false, "retention purge RPC status");
+  equal(dispatchResult.purgedCount, 0, "no expired captures in dispatcher fixture");
   equal(sqlScalar("SELECT pr.status || ':' || c.processing_status FROM public.processing_run pr JOIN public.capture c ON c.id=pr.capture_id WHERE pr.id='" + dispatchBody.runId + "'::uuid"),
     "succeeded:processed", "dispatcher terminal capture state");
   equal(sqlScalar("SELECT cp.category || ':' || cp.review_status || ':' || cp.original_fragment FROM public.capture_part cp WHERE cp.capture_id='" + captureDispatch + "'::uuid"),
