@@ -503,8 +503,41 @@ BEGIN
     RAISE EXCEPTION 'Confirmed reservation must be cancellable';
   END IF;
 
-  -- Create a second reservation and exercise released/elapsed as reservation-only states.
+  -- Create a second reservation outside the Event interval. Refresh the complete
+  -- owner snapshot because the Event above was created after the original TaskSchedule.
   v_patch := jsonb_set(v_patch, '{schedule_status}', '"confirmed"'::jsonb);
+  v_patch := jsonb_set(v_patch, '{start_local}', '"2026-11-24 11:00:00"'::jsonb);
+  v_patch := jsonb_set(v_patch, '{end_local}', '"2026-11-24 12:00:00"'::jsonb);
+  v_patch := jsonb_set(v_patch, '{starts_at}', '"2026-11-24 16:00:00+00"'::jsonb);
+  v_patch := jsonb_set(v_patch, '{ends_at}', '"2026-11-24 17:00:00+00"'::jsonb);
+  SELECT coalesce(jsonb_agg(jsonb_build_object(
+    'resource_type', snapshot.resource_type,
+    'id', snapshot.id,
+    'updated_at', snapshot.updated_at
+  ) ORDER BY snapshot.resource_type, snapshot.id), '[]'::jsonb)
+  INTO v_snapshot
+  FROM (
+    SELECT 'calendar_event'::text AS resource_type, id, updated_at
+    FROM public.calendar_event
+    WHERE owner_user_id = '019a0000-0000-7000-8000-000000000001'
+      AND archived_at IS NULL
+      AND deleted_at IS NULL
+      AND event_status IN ('preparing', 'proposed', 'confirmed')
+    UNION ALL
+    SELECT 'protected_time_block'::text AS resource_type, id, updated_at
+    FROM public.protected_time_block
+    WHERE owner_user_id = '019a0000-0000-7000-8000-000000000001'
+      AND archived_at IS NULL
+      AND deleted_at IS NULL
+    UNION ALL
+    SELECT 'task_schedule'::text AS resource_type, id, updated_at
+    FROM public.task_schedule
+    WHERE owner_user_id = '019a0000-0000-7000-8000-000000000001'
+      AND schedule_status IN ('proposed', 'confirmed')
+      AND id <> '019a0000-0000-7000-8000-000000000102'
+  ) AS snapshot;
+  v_patch := jsonb_set(v_patch, '{conflict_snapshot}', v_snapshot);
+
   SELECT * INTO v_result
   FROM public.mutate_task_schedule_once(
     '019a0000-0000-7000-8000-000000000001',
