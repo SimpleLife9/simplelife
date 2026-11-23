@@ -167,9 +167,6 @@ try {
   const foreignRuns = await responseJson(foreignRunRead, "foreign run read");
   equal(foreignRuns.length, 0, "other owner cannot read processing run");
 
-  stopServer(queueServer.server);
-  queueServer = null;
-
   workerServer = await startFunction("inbox-processing-worker", { apikey: secret }, 405);
   const worker = async (apiKey, payload) => await fetch(workerServer.url, {
     method: "POST",
