@@ -53,6 +53,7 @@ async function mockSupabaseSession(page, initialData = {}) {
   const taskSchedules = [...(initialData.taskSchedules || [])];
   const taskScheduleMutationRequests = [];
   const taskScheduleConflictResponses = [...(initialData.taskScheduleConflictResponses || [])];
+  const eventTaskScheduleConflictResponses = [...(initialData.eventTaskScheduleConflictResponses || [])];
   const protectedTimeConflicts = [...(initialData.protectedTimeConflicts || [])];
   const insertedAgendaEvents = [];
   const idempotencyRequests = [];
@@ -871,7 +872,28 @@ async function mockSupabaseSession(page, initialData = {}) {
       const event = requestBody.event;
       const key = request.headers()['idempotency-key'] || '';
       const decisions = Array.isArray(requestBody.protectedTimeDecisions) ? requestBody.protectedTimeDecisions : [];
-      idempotencyRequests.push({ key, event, protectedTimeDecisions: decisions });
+      const taskDecisions = Array.isArray(requestBody.taskScheduleDecisions) ? requestBody.taskScheduleDecisions : [];
+      idempotencyRequests.push({
+        key,
+        event,
+        protectedTimeDecisions: decisions,
+        taskScheduleDecisions: taskDecisions,
+      });
+      const queuedTaskConflict = eventTaskScheduleConflictResponses.shift();
+      if (queuedTaskConflict) {
+        const required = queuedTaskConflict.body?.taskScheduleConflicts || [];
+        const acceptedTaskDecisions = new Map(taskDecisions.map((item) => [item.taskScheduleId, item]));
+        const allAccepted = required.every((conflict) => {
+          const choice = acceptedTaskDecisions.get(conflict.taskScheduleId);
+          return choice
+            && choice.taskScheduleUpdatedAt === conflict.taskScheduleUpdatedAt
+            && choice.decision === conflict.requiredDecision;
+        });
+        if (!allAccepted) {
+          await json(queuedTaskConflict.status || 409, queuedTaskConflict.body);
+          return;
+        }
+      }
       const accepted = new Map(decisions.map((item) => [
         item.blockId + ':' + item.occurrenceStartsAt,
         item,
@@ -906,6 +928,7 @@ async function mockSupabaseSession(page, initialData = {}) {
         starts_at: event.startsAt ?? null,
         ends_at: event.endsAt ?? null,
         protected_time_decisions: decisions,
+        task_schedule_conflict_decisions: taskDecisions,
         archived_at: null,
         deleted_at: null,
         created_at: createdAt,
@@ -2764,6 +2787,7 @@ test('Agenda navigates day, week and month views and creates a confirmed all-day
     updated_by_user_id: profile.id,
     task_id: scheduledTask.id,
     schedule_status: 'confirmed',
+    updated_at: '2026-11-22T17:00:00.000Z',
     start_local: today + 'T10:00:00',
     end_local: today + 'T11:00:00',
     time_zone: 'America/Havana',
@@ -2774,6 +2798,22 @@ test('Agenda navigates day, week and month views and creates a confirmed all-day
     calendarEvents: seedEvents,
     tasks: [scheduledTask],
     taskSchedules: [seedTaskSchedule],
+    eventTaskScheduleConflictResponses: [{
+      status: 409,
+      body: {
+        error: 'TASK_SCHEDULE_CONFLICTS',
+        conflicts: [{
+          taskScheduleId: seedTaskSchedule.id,
+          taskScheduleUpdatedAt: seedTaskSchedule.updated_at,
+          startsAt: seedTaskSchedule.starts_at,
+          endsAt: seedTaskSchedule.ends_at,
+          timeZone: seedTaskSchedule.time_zone,
+          overlapStartsAt: seedTaskSchedule.starts_at,
+          overlapEndsAt: seedTaskSchedule.ends_at,
+          requiredDecision: 'keep_overlap',
+        }],
+      },
+    }],
   });
   await page.goto('/');
   await page.getByLabel('Correo electrónico').fill(authUser.email);
@@ -2805,6 +2845,13 @@ test('Agenda navigates day, week and month views and creates a confirmed all-day
   await dialog.getByLabel('Hasta (incluido)', { exact: true }).fill(today);
   await dialog.getByRole('button', { name: 'Guardar evento' }).click();
 
+  const scheduleConflictDialog = page.getByRole('alertdialog', { name: 'El evento coincide con tiempo reservado' });
+  await expect(scheduleConflictDialog).toBeVisible();
+  await expect(scheduleConflictDialog).toContainText('La reserva existente no se moverá ni modificará.');
+  await expect(scheduleConflictDialog.getByRole('button', { name: 'Guardar y mantener ambos' })).toBeDisabled();
+  await scheduleConflictDialog.getByLabel('Decisión para reserva de tarea').selectOption('keep_overlap');
+  await scheduleConflictDialog.getByRole('button', { name: 'Guardar y mantener ambos' }).click();
+
   await expect(page.getByText('Evento guardado en Agenda.')).toBeVisible();
   await expect(dialog).toHaveCount(0);
   await expect(page.getByText('Mi compromiso nuevo')).toBeVisible();
@@ -2820,8 +2867,15 @@ test('Agenda navigates day, week and month views and creates a confirmed all-day
     start_date: today,
     end_date_exclusive: tomorrow,
   });
-  expect(idempotencyRequests).toHaveLength(1);
+  expect(idempotencyRequests).toHaveLength(2);
   expect(idempotencyRequests[0].key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  expect(idempotencyRequests[1].key).toBe(idempotencyRequests[0].key);
+  expect(idempotencyRequests[0].taskScheduleDecisions).toEqual([]);
+  expect(idempotencyRequests[1].taskScheduleDecisions).toEqual([{
+    taskScheduleId: seedTaskSchedule.id,
+    taskScheduleUpdatedAt: seedTaskSchedule.updated_at,
+    decision: 'keep_overlap',
+  }]);
   expect(idempotencyRequests[0].event).toMatchObject({
     title: 'Mi compromiso nuevo',
     temporalKind: 'all_day',
