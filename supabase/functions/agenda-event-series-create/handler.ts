@@ -303,7 +303,7 @@ export async function handleRequest(
         throw new RangeError("All-day Event end range must match endDayOffset.");
       }
     }
-    if (rule.temporalKind !== eventDraft.temporal.kind || eventDraft.temporal.kind === "fixed_instant") {
+    if (rule.temporalKind !== eventDraft.temporal.kind) {
       throw new RangeError("Recurring Events support only all-day or zoned-civil temporal rules.");
     }
 
