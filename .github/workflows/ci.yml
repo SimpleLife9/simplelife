@@ -70,13 +70,13 @@ jobs:
 
       - name: Verify the pinned Deno dependency graph
         run: |
-          deno install --config supabase/functions/agenda-time-resolve/deno.json --frozen-lockfile --entrypoint supabase/functions/agenda-time-resolve/index.ts --entrypoint supabase/functions/agenda-event-create/index.ts --entrypoint supabase/functions/agenda-event-mutate/index.ts --entrypoint supabase/functions/agenda-protected-time-mutate/index.ts tests/agenda-iana-resolver.deno.ts tests/agenda-time-resolve.http.deno.ts tests/agenda-timezone-auth.deno.ts tests/agenda-event-profile.deno.ts tests/agenda-event-idempotency.deno.ts tests/agenda-event-create.deno.ts tests/agenda-event-mutation.deno.ts tests/agenda-protected-time.deno.ts tests/agenda-protected-time-conflicts.deno.ts
+          deno install --config supabase/functions/agenda-time-resolve/deno.json --frozen-lockfile --entrypoint supabase/functions/agenda-time-resolve/index.ts --entrypoint supabase/functions/agenda-event-create/index.ts --entrypoint supabase/functions/agenda-event-mutate/index.ts --entrypoint supabase/functions/agenda-protected-time-mutate/index.ts --entrypoint supabase/functions/inbox-processing-queue/index.ts --entrypoint supabase/functions/inbox-processing-worker/index.ts tests/agenda-iana-resolver.deno.ts tests/agenda-time-resolve.http.deno.ts tests/agenda-timezone-auth.deno.ts tests/agenda-event-profile.deno.ts tests/agenda-event-idempotency.deno.ts tests/agenda-event-create.deno.ts tests/agenda-event-mutation.deno.ts tests/agenda-protected-time.deno.ts tests/agenda-protected-time-conflicts.deno.ts tests/inbox-processing.deno.ts
 
       - name: Test and type-check Agenda IANA resolver with frozen lockfile
         run: |
-          deno test --config supabase/functions/agenda-time-resolve/deno.json --frozen-lockfile tests/agenda-iana-resolver.deno.ts tests/agenda-time-resolve.http.deno.ts tests/agenda-event-profile.deno.ts tests/agenda-event-idempotency.deno.ts tests/agenda-event-create.deno.ts tests/agenda-event-mutation.deno.ts tests/agenda-protected-time.deno.ts tests/agenda-protected-time-conflicts.deno.ts
+          deno test --config supabase/functions/agenda-time-resolve/deno.json --frozen-lockfile tests/agenda-iana-resolver.deno.ts tests/agenda-time-resolve.http.deno.ts tests/agenda-event-profile.deno.ts tests/agenda-event-idempotency.deno.ts tests/agenda-event-create.deno.ts tests/agenda-event-mutation.deno.ts tests/agenda-protected-time.deno.ts tests/agenda-protected-time-conflicts.deno.ts tests/inbox-processing.deno.ts
           APPVEYOR=simplelife-auth-test AI_AGENT=simplelife-auth-test CI=1 NODE_ENV=test deno test --allow-env=APPVEYOR,AI_AGENT,CI,DEBUG,NODE_ENV,MODE,MINIMAL,NO_COLOR,FORCE_COLOR,TERM,SUPABASE_URL,SUPABASE_PUBLISHABLE_KEYS,SUPABASE_SECRET_KEYS,SUPABASE_JWKS --config supabase/functions/agenda-time-resolve/deno.json --frozen-lockfile tests/agenda-timezone-auth.deno.ts
-          deno check --config supabase/functions/agenda-time-resolve/deno.json --frozen-lockfile supabase/functions/agenda-time-resolve/index.ts supabase/functions/agenda-event-create/index.ts supabase/functions/agenda-event-mutate/index.ts supabase/functions/agenda-protected-time-mutate/index.ts
+          deno check --config supabase/functions/agenda-time-resolve/deno.json --frozen-lockfile supabase/functions/agenda-time-resolve/index.ts supabase/functions/agenda-event-create/index.ts supabase/functions/agenda-event-mutate/index.ts supabase/functions/agenda-protected-time-mutate/index.ts supabase/functions/inbox-processing-queue/index.ts supabase/functions/inbox-processing-worker/index.ts
 
       - name: Set up pinned Supabase CLI
         uses: supabase/setup-cli@v1
@@ -112,6 +112,9 @@ jobs:
           PY
           supabase migration up
 
+      - name: Test Inbox processing lifecycle and owner isolation in ephemeral local Postgres
+        run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/inbox-processing-lifecycle.test.sql
+
       - name: Test Event persistence and append-only audit invariants in ephemeral local Postgres
         run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/agenda-event-persistence.test.sql
 
@@ -132,6 +135,9 @@ jobs:
 
       - name: Verify Agenda auth in the actual local Edge Runtime
         run: node scripts/agenda-edge-runtime-smoke.mjs
+
+      - name: Verify Inbox processing queue and secret worker in the actual local Edge Runtime
+        run: node scripts/inbox-processing-edge-smoke.mjs
 
       - name: Verify Event Create JWT gate in the actual local Edge Runtime
         run: node scripts/agenda-event-create-edge-smoke.mjs
