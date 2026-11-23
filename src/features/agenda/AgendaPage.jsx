@@ -267,6 +267,52 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
         ]);
         if (eventResult.error) throw eventResult.error;
         if (scheduleResult.error) throw scheduleResult.error;
+        const loadedEvents = eventResult.data || [];
+        const activeSeries = lifecycleView === 'active'
+          ? loadedEvents.filter((item) => item.recurrence_rule
+            && !['cancelled', 'finished'].includes(item.event_status))
+          : [];
+        let recurringOccurrences = [];
+        if (activeSeries.length > 0) {
+          const occurrenceResult = await supabase.from('calendar_event_occurrence')
+            .select('*')
+            .in('calendar_event_id', activeSeries.map((item) => item.id))
+            .in('occurrence_status', ['scheduled', 'needs_review'])
+            .order('original_local_date', { ascending: true })
+            .limit(501);
+          if (occurrenceResult.error) throw occurrenceResult.error;
+          const rows = occurrenceResult.data || [];
+          if (rows.length > 500) {
+            throw new Error('La Agenda tiene más de 500 ocurrencias recurrentes activas en la ventana cargada. Reduce el rango o revisa la materialización.');
+          }
+          const seriesById = new Map(activeSeries.map((item) => [item.id, item]));
+          recurringOccurrences = rows.flatMap((row) => {
+            const series = seriesById.get(row.calendar_event_id);
+            if (!series) return [];
+            return [{
+              ...series,
+              id: 'recurring-occurrence:' + row.id,
+              series_event_id: series.id,
+              occurrence_id: row.id,
+              occurrence_key: row.occurrence_key,
+              occurrence_status: row.occurrence_status,
+              is_recurring_occurrence: true,
+              temporal_kind: row.temporal_kind,
+              start_date: row.start_date,
+              end_date_exclusive: row.end_date_exclusive,
+              start_local: row.start_local,
+              end_local: row.end_local,
+              time_zone: row.time_zone,
+              starts_at: row.starts_at,
+              ends_at: row.ends_at,
+              start_disambiguation: row.start_disambiguation,
+              end_disambiguation: row.end_disambiguation,
+            }];
+          });
+        }
+        const oneOffOrNonActiveEvents = loadedEvents.filter((item) =>
+          !item.recurrence_rule || lifecycleView !== 'active');
+        const nextEvents = [...oneOffOrNonActiveEvents, ...recurringOccurrences];
         const nextSchedules = scheduleResult.data || [];
         const taskIds = [...new Set(nextSchedules.map((item) => item.task_id))];
         let nextTasks = [];
@@ -278,7 +324,7 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
           nextTasks = taskResult.data || [];
         }
         if (alive) {
-          setEvents(eventResult.data || []);
+          setEvents(nextEvents);
           setTaskSchedules(nextSchedules);
           setScheduledTasks(nextTasks);
         }
@@ -1124,6 +1170,13 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
             </header>
             <div className="agenda-detail-content">
               <div><span>Fecha y hora</span><strong>{getEventDateLabel(selectedEvent, timeZone)}</strong><small>{formatEventTime(selectedEvent, timeZone)}{selectedEvent.time_zone ? ' · ' + selectedEvent.time_zone : ''}</small></div>
+              {selectedEvent.is_recurring_occurrence && (
+                <div>
+                  <span>Ocurrencia recurrente</span>
+                  <strong>{selectedEvent.occurrence_status === 'needs_review' ? 'Requiere revisión de horario' : 'Parte de una serie'}</strong>
+                  <small>La hora de esta ocurrencia proviene de la regla de la serie y de su resolución horaria guardada.</small>
+                </div>
+              )}
               {selectedEvent.location_label && <div><span>Lugar</span><strong>{selectedEvent.location_label}</strong></div>}
               {selectedEvent.description && <div><span>Descripción</span><p>{selectedEvent.description}</p></div>}
               {selectedEvent.deleted_at && selectedEvent.purge_after && (
@@ -1131,6 +1184,12 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
               )}
             </div>
             <div className="agenda-event-actions">
+              {selectedEvent.is_recurring_occurrence ? (
+                <p className="agenda-recurrence-note">
+                  Esta fecha pertenece a una serie recurrente. La edición de una ocurrencia, de esta y las siguientes, y de toda la serie se gestiona en el editor de series.
+                </p>
+              ) : (
+                <>
               {canEditEvent(selectedEvent) && (
                 <button type="button" className="agenda-secondary-button" onClick={() => openEditComposer(selectedEvent)} disabled={busy}>Editar</button>
               )}
@@ -1154,6 +1213,8 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
               )}
               {selectedEvent.deleted_at && !canRestoreEvent(selectedEvent) && (
                 <p className="agenda-expired-notice">La ventana de recuperación de 30 días ha vencido.</p>
+              )}
+                </>
               )}
             </div>
             <footer className="agenda-dialog-actions"><button type="button" className="agenda-secondary-button" onClick={() => { setSelectedEvent(null); setConfirmAction(null); setPendingKey(null); }}>Cerrar</button></footer>
