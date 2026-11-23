@@ -208,11 +208,12 @@ Deno.test("creates date-only all-day recurrence without inventing UTC instants",
   assertEquals(response.status, 201, "all-day create status");
   const rows = (calls.rpcArgs as Record<string, unknown>).p_occurrence_rows as Array<Record<string, unknown>>;
   assertEquals(rows.length, 2, "all-day occurrence count");
+  assertEquals(rows.map((row) => row.end_date_exclusive),
+    ["2026-11-26", "2026-11-27"], "each all-day occurrence keeps its own exclusive end date");
   assert(rows.every((row) => row.temporal_kind === "all_day"
     && row.starts_at === null && row.ends_at === null
-    && row.start_local === null && row.time_zone === null
-    && row.end_date_exclusive === "2026-11-26"),
-  "all-day occurrences must keep date-only inclusive/exclusive ranges");
+    && row.start_local === null && row.time_zone === null),
+  "all-day occurrences must remain date-only without artificial UTC instants");
 });
 
 Deno.test("rejects Protected Time and TaskSchedule overlaps before the atomic write", async () => {
