@@ -278,6 +278,35 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
           : [];
         let recurringOccurrences = [];
         if (activeSeries.length > 0) {
+          // Keep the materializer request bounded and idempotent. A server-side
+          // owner lock + unique occurrence key prevents duplicate rows across tabs.
+          const materializationSeries = activeSeries.slice(0, 50);
+          for (let offset = 0; offset < materializationSeries.length; offset += 5) {
+            const seriesIds = materializationSeries.slice(offset, offset + 5).map((item) => item.id);
+            const materializationResult = await supabase.functions.invoke('agenda-event-series-materialize', {
+              body: { seriesIds },
+            });
+            if (materializationResult.error) {
+              let message = 'No se pudieron ampliar las ocurrencias recurrentes del calendario.';
+              try {
+                const response = materializationResult.error.context instanceof Response
+                  ? await materializationResult.error.context.clone().json()
+                  : null;
+                if (response?.error === 'PROTECTED_TIME_CONFLICTS') {
+                  message = 'Una ocurrencia recurrente coincide con Tiempo Protegido. Revisa ese compromiso antes de ampliar la serie.';
+                } else if (response?.error === 'TASK_SCHEDULE_CONFLICTS') {
+                  message = 'Una ocurrencia recurrente coincide con una tarea reservada. Revisa ese compromiso antes de ampliar la serie.';
+                } else if (response?.error) {
+                  message = response.error;
+                }
+              } catch { /* keep bounded default message */ }
+              setLocalError(message);
+              break;
+            }
+          }
+          if (activeSeries.length > materializationSeries.length) {
+            setLocalError('Hay más de 50 series activas; la ampliación del horizonte se limita a 50 por carga.');
+          }
           const occurrenceWindow = getRecurringOccurrenceQueryWindow(view, activeDate);
           // This excludes the rest of the 90-day materialized horizon while
           // retaining occurrences whose maximum 30-day end offset overlaps the view.
