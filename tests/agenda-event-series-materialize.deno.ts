@@ -214,6 +214,27 @@ Deno.test("Protected Time conflict blocks top-up before any occurrence write", a
   assertEquals(calls.rpc, 0, "conflicted occurrence must not reach persistence");
 });
 
+Deno.test("TaskSchedule overlap blocks a timed recurring top-up before the atomic write", async () => {
+  const candidate = resolveLocalDateTimeRange({
+    timeZone: "America/Havana",
+    start: { localDateTime: "2026-11-23T00:00", disambiguation: "earlier", gapStrategy: "next-valid" },
+    end: { localDateTime: "2026-11-24T00:00", disambiguation: "earlier", gapStrategy: "next-valid" },
+  });
+  const taskSchedule = {
+    id: "019a0000-0000-7000-8000-000000000721",
+    updated_at: "2026-11-22T10:00:00.000000Z",
+    starts_at: new Date(Date.parse(candidate.startsAt) + 30 * 60_000).toISOString(),
+    ends_at: new Date(Date.parse(candidate.startsAt) + 60 * 60_000).toISOString(),
+    time_zone: "America/Havana",
+    schedule_status: "confirmed",
+  };
+  const { ctx, calls } = mockContext({ taskSchedules: [taskSchedule] });
+  const response = await handleRequest(request(), ctx, { now: () => NOW });
+  assertEquals(response.status, 409, "TaskSchedule conflict status");
+  assertEquals((await body(response)).error, "TASK_SCHEDULE_CONFLICTS", "conflict code");
+  assertEquals(calls.rpc, 0, "conflicted top-up must not reach persistence");
+});
+
 Deno.test("inactive profiles cannot read recurring rows or top up the materialization horizon", async () => {
   const { ctx, calls } = mockContext({ profileStatus: "disabled" });
   const response = await handleRequest(request(), ctx, { now: () => NOW });
