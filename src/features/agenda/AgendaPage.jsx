@@ -17,6 +17,7 @@ import {
   startOfWeekMonday,
 } from './domain/calendar-view.js';
 import { createEventDraft } from './domain/event.js';
+import { buildRecurringEventCreatePayload } from './domain/recurring-event-form.js';
 import { formatInstantInTimeZone, isSupportedTimeZone } from './domain/temporal.js';
 import './AgendaPage.css';
 import { ProtectedTimePage } from './ProtectedTimePage.jsx';
@@ -31,6 +32,14 @@ const VIEW_OPTIONS = [
   { id: 'month', label: 'Mes' },
 ];
 const WEEKDAY_LABELS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+const ISO_WEEKDAY_OPTIONS = [
+  { code: 'MO', label: 'L' }, { code: 'TU', label: 'M' }, { code: 'WE', label: 'X' },
+  { code: 'TH', label: 'J' }, { code: 'FR', label: 'V' }, { code: 'SA', label: 'S' }, { code: 'SU', label: 'D' },
+];
+function isoWeekdayForDate(value) {
+  const weekday = new Date(value + 'T12:00:00.000Z').getUTCDay();
+  return ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'][weekday];
+}
 
 function todayInZone(timeZone) {
   return formatInstantInTimeZone(new Date().toISOString(), timeZone).slice(0, 10);
@@ -191,6 +200,10 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
   const [eventTimeZone, setEventTimeZone] = useState(DEFAULT_TIME_ZONE);
   const [fixedStartsAt, setFixedStartsAt] = useState('');
   const [fixedEndsAt, setFixedEndsAt] = useState('');
+  const [recurrenceFrequency, setRecurrenceFrequency] = useState('none');
+  const [recurrenceInterval, setRecurrenceInterval] = useState('1');
+  const [recurrenceCount, setRecurrenceCount] = useState('12');
+  const [recurrenceWeekdays, setRecurrenceWeekdays] = useState([]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setClockNow(Date.now()), 30_000);
@@ -312,6 +325,10 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
     setEventTimeZone(timeZone);
     setFixedStartsAt('');
     setFixedEndsAt('');
+    setRecurrenceFrequency('none');
+    setRecurrenceInterval('1');
+    setRecurrenceCount('12');
+    setRecurrenceWeekdays([isoWeekdayForDate(activeDate)]);
     setPendingKey(null);
     setShowComposer(true);
   };
@@ -344,6 +361,10 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
       setFixedEndsAt(event.ends_at);
     }
     setEventTimeZone(event.time_zone || timeZone);
+    setRecurrenceFrequency('none');
+    setRecurrenceInterval('1');
+    setRecurrenceCount('12');
+    setRecurrenceWeekdays([]);
     setPendingKey(null);
     setSelectedEvent(null);
     setShowComposer(true);
@@ -353,6 +374,8 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
     if (busy) return;
     setShowComposer(false);
     setEditingEvent(null);
+    setRecurrenceFrequency('none');
+    setRecurrenceWeekdays([]);
     setPendingKey(null);
   };
 
@@ -363,6 +386,7 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
   ) => {
     event.preventDefault();
     const key = pendingKey || uuidv7();
+    const creatingRecurring = !editingEvent && recurrenceFrequency !== 'none';
     setPendingKey(key);
     const success = await runAction(async () => {
       let draftInput;
@@ -410,6 +434,42 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
         };
       }
       const draft = createEventDraft(draftInput);
+      if (creatingRecurring) {
+        const recurring = buildRecurringEventCreatePayload({
+          eventDraft: draft,
+          frequency: recurrenceFrequency,
+          interval: Number(recurrenceInterval),
+          count: Number(recurrenceCount),
+          weekdays: recurrenceWeekdays,
+        });
+        const { data, error } = await supabase.functions.invoke('agenda-event-series-create', {
+          body: {
+            event: buildEventRequest(draft),
+            recurrenceRule: recurring.recurrenceRule,
+            endLocalTime: recurring.endLocalTime,
+            endDayOffset: recurring.endDayOffset,
+          },
+          headers: { 'Idempotency-Key': key },
+        });
+        if (error) {
+          let message = error.message || 'No se pudo crear la serie recurrente.';
+          try {
+            const response = error.context instanceof Response ? await error.context.clone().json() : null;
+            if (response?.error === 'PROTECTED_TIME_CONFLICTS') {
+              message = 'La ocurrencia ' + (response.occurrenceKey || '') + ' coincide con Tiempo Protegido. No se guardó la serie.';
+            } else if (response?.error === 'TASK_SCHEDULE_CONFLICTS') {
+              message = 'La ocurrencia ' + (response.occurrenceKey || '') + ' coincide con una tarea reservada. No se guardó la serie.';
+            } else if (response?.error) {
+              message = response.error;
+            }
+          } catch { /* keep SDK error message */ }
+          throw new Error(message);
+        }
+        if (!data?.seriesEventId || typeof data.materializedCount !== 'number') {
+          throw new Error('El servidor no devolvió la serie y sus ocurrencias materializadas.');
+        }
+        return;
+      }
       const protectedTimeBody = acceptedProtectedTimeDecisions === undefined
         ? {}
         : { protectedTimeDecisions: acceptedProtectedTimeDecisions };
@@ -473,7 +533,7 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
         throw new Error(message);
       }
       if (!data?.eventId) throw new Error('El servidor no devolvió el identificador del evento.');
-    }, editingEvent ? 'Cambios guardados.' : 'Evento guardado en Agenda.');
+    }, creatingRecurring ? 'Serie recurrente creada en Agenda.' : editingEvent ? 'Cambios guardados.' : 'Evento guardado en Agenda.');
 
     if (success) {
       setShowComposer(false);
@@ -985,6 +1045,67 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
                 <span>Descripción (opcional)</span>
                 <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={3} maxLength={5000} placeholder="Detalles útiles para este compromiso…" />
               </label>
+              {!editingEvent && temporalKind !== 'fixed_instant' && (
+                <section className="agenda-recurrence-form" aria-label="Repetición del evento">
+                  <label className="agenda-field">
+                    <span>Repetición</span>
+                    <select
+                      value={recurrenceFrequency}
+                      onChange={(event) => {
+                        const next = event.target.value;
+                        setRecurrenceFrequency(next);
+                        if (next === 'WEEKLY' && recurrenceWeekdays.length === 0) {
+                          setRecurrenceWeekdays([isoWeekdayForDate(temporalKind === 'all_day' ? startDate : startLocalDateTime.slice(0, 10))]);
+                        }
+                      }}
+                    >
+                      <option value="none">No se repite</option>
+                      <option value="DAILY">Cada día</option>
+                      <option value="WEEKLY">Cada semana</option>
+                      <option value="MONTHLY">Cada mes</option>
+                      <option value="YEARLY">Cada año</option>
+                    </select>
+                  </label>
+                  {recurrenceFrequency !== 'none' && (
+                    <>
+                      <div className="agenda-form-row">
+                        <label className="agenda-field">
+                          <span>Cada</span>
+                          <input type="number" min="1" max="1000" value={recurrenceInterval}
+                            onChange={(event) => setRecurrenceInterval(event.target.value)} required />
+                        </label>
+                        <label className="agenda-field">
+                          <span>Ocurrencias</span>
+                          <input type="number" min="1" max="100000" value={recurrenceCount}
+                            onChange={(event) => setRecurrenceCount(event.target.value)} required />
+                        </label>
+                      </div>
+                      {recurrenceFrequency === 'WEEKLY' && (
+                        <fieldset className="agenda-recurrence-weekdays">
+                          <legend>Días de la semana</legend>
+                          <div>
+                            {ISO_WEEKDAY_OPTIONS.map((day) => (
+                              <label key={day.code} title={day.label}>
+                                <input
+                                  type="checkbox"
+                                  checked={recurrenceWeekdays.includes(day.code)}
+                                  onChange={(event) => setRecurrenceWeekdays((current) => event.target.checked
+                                    ? [...current, day.code]
+                                    : current.filter((value) => value !== day.code))}
+                                />
+                                <span>{day.label}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </fieldset>
+                      )}
+                      <p className="agenda-recurrence-note">
+                        Se guardarán las ocurrencias de los próximos 90 días. La hora final y el día de finalización se conservan como horas civiles; los cruces con Tiempo Protegido o tareas reservadas detienen la creación para evitar solapamientos silenciosos.
+                      </p>
+                    </>
+                  )}
+                </section>
+              )}
               <footer className="agenda-dialog-actions">
                 <button type="button" className="agenda-secondary-button" onClick={closeComposer} disabled={busy}>Cancelar</button>
                 <button type="submit" className="button button-primary" disabled={busy || !title.trim()}>{busy ? 'Guardando…' : editingEvent ? 'Guardar cambios' : 'Guardar evento'}</button>
