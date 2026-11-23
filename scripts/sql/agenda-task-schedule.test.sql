@@ -551,7 +551,8 @@ BEGIN
     clock_timestamp()
   );
   IF v_result.http_status <> 201 THEN
-    RAISE EXCEPTION 'Second TaskSchedule create should succeed';
+    RAISE EXCEPTION 'Second TaskSchedule create should succeed; got HTTP % with body %',
+      v_result.http_status, v_result.response_body;
   END IF;
 
   SELECT updated_at INTO v_updated_at
