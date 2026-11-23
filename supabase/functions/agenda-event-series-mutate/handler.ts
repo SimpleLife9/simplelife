@@ -391,17 +391,8 @@ export async function handleRequest(
     const materializationDate = localDateAt(now, materializationTimeZone);
     const horizonEnd = addRecurrenceCalendarDays(materializationDate, 89);
     const firstCandidateDate = selectedDate > materializationDate ? selectedDate : materializationDate;
-    const candidates = firstCandidateDate > horizonEnd
-      ? []
-      : expandRecurrenceDates({
-        rule,
-        seriesId: body.scope === "entire_series" ? String(body.seriesId) : (dependencies.newSeriesId ?? uuidv7)(),
-        rangeStart: firstCandidateDate,
-        rangeEnd: horizonEnd,
-        maxOccurrences: 500,
-      });
-    // The child ID is generated exactly once and is part of the edit's canonical
-    // payload; store it before constructing stable occurrence keys.
+    // A split child identity is generated exactly once before deriving keys.
+    // On an idempotent retry the receipt path above returns before this point.
     const childSeriesId = body.scope === "this_and_following"
       ? (dependencies.newSeriesId ?? uuidv7)()
       : null;
