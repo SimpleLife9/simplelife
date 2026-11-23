@@ -400,3 +400,7 @@
  .capture-action-button{font-size:.64rem;padding:7px 8px}
  .capture-part-confidence{font-size:.61rem}
 }
+
+/* Inbox global search pagination */
+.capture-pagination{display:flex;justify-content:center;align-items:center;padding:14px 0}
+.capture-pagination .capture-action-button{min-width:180px}

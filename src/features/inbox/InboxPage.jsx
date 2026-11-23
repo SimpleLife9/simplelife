@@ -45,22 +45,30 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
     return query;
   };
 
-  const refreshDuplicateMatches = async (captureRows) => {
+  const refreshDuplicateMatches = async (captureRows, isAlive = () => true) => {
     const ids = captureRows.map((capture) => capture.id);
     if (!ids.length) {
-      setDuplicateCaptureIds([]);
+      if (isAlive()) {
+        setDuplicateCaptureIds([]);
+        setDuplicateCheckError('');
+      }
+      return;
+    }
+    const duplicateRows = [];
+    for (let offset = 0; offset < ids.length; offset += 200) {
+      const { data, error } = await supabase.rpc('find_inbox_duplicate_captures', {
+        p_capture_ids: ids.slice(offset, offset + 200),
+      });
+      if (error) {
+        if (isAlive()) setDuplicateCheckError('No se pudo verificar duplicados en todo el archivo. La lista sigue disponible, pero no marques coincidencias como únicas.');
+        return;
+      }
+      duplicateRows.push(...(data || []));
+    }
+    if (isAlive()) {
       setDuplicateCheckError('');
-      return;
+      setDuplicateCaptureIds(duplicateRows.map((row) => row.capture_id));
     }
-    const { data, error } = await supabase.rpc('find_inbox_duplicate_captures', {
-      p_capture_ids: ids,
-    });
-    if (error) {
-      setDuplicateCheckError('No se pudo verificar duplicados en todo el archivo. La lista sigue disponible, pero no marques coincidencias como únicas.');
-      return;
-    }
-    setDuplicateCheckError('');
-    setDuplicateCaptureIds((data || []).map((row) => row.capture_id));
   };
 
   useEffect(() => {
@@ -82,7 +90,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
         setPageOffset(loaded.length);
         setTotalCount(count ?? loaded.length);
         setHasMore((count ?? loaded.length) > loaded.length);
-        await refreshDuplicateMatches(loaded);
+        await refreshDuplicateMatches(loaded, () => alive);
       } catch (error) {
         if (alive) setLocalError(error?.message || 'No se pudieron cargar las capturas.');
       } finally {

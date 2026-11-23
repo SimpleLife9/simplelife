@@ -1263,7 +1263,7 @@ test('Inbox runs advisory processing, records review, and restores soft-deleted 
 
 test('Inbox searches and paginates the complete capture archive beyond the first 250 rows', async ({ page }) => {
   const olderCaptures = Array.from({ length: 257 }, (_, index) => ({
-    id: `00000000-0000-7000-8000-${String(1000000000 + index).slice(-12)}`,
+    id: `00000000-0000-7000-8000-${String(1000000000 + index).padStart(12, '0')}`,
     owner_user_id: profile.id,
     created_by_user_id: profile.id,
     input_type: 'text',
@@ -1271,7 +1271,7 @@ test('Inbox searches and paginates the complete capture archive beyond the first
     attention_status: 'needs_review',
     processing_status: 'not_started',
     sync_status: 'synced',
-    captured_at: new Date(Date.UTC(2025, 0, 1 + index)).toISOString(),
+    captured_at: new Date(Date.UTC(2026, 10, 23 - index)).toISOString(),
     deleted_at: null,
   }));
   const { captures } = await mockSupabaseSession(page, { captures: olderCaptures });
