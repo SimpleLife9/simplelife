@@ -175,3 +175,5 @@ jobs:
           path: test-results/
           if-no-files-found: ignore
           retention-days: 7
+
+# Phase 2: CI covers capture security, processing proposals and authenticated worker paths.
