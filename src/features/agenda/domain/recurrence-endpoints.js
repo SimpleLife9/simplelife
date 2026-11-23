@@ -1,7 +1,7 @@
 import { addRecurrenceCalendarDays, validateRecurrenceRule } from './recurrence.js';
 
-const CLOCK = /^(\\d{2}):(\\d{2})(?::(\\d{2})(?:\\.(\\d{1,3}))?)?$/;
-const LOCAL_DATE_TIME = /^(\\d{4}-\\d{2}-\\d{2})T(\\d{2}):(\\d{2})(?::(\\d{2})(?:\\.(\\d{1,3}))?)?$/;
+const CLOCK = /^([0-9]{2}):([0-9]{2})(?::([0-9]{2})(?:[.]([0-9]{1,3}))?)?$/;
+const LOCAL_DATE_TIME = /^([0-9]{4}-[0-9]{2}-[0-9]{2})T([0-9]{2}):([0-9]{2})(?::([0-9]{2})(?:[.]([0-9]{1,3}))?)?$/;
 
 function assert(condition, message) {
   if (!condition) throw new RangeError(message);
@@ -132,10 +132,11 @@ export function buildRecurrenceEndEndpoints({
  * not an implicit substitute for the end clock time.
  */
 export function validatePersistableTimedRecurrence(ruleInput) {
+  assert(ruleInput && typeof ruleInput === 'object' && typeof ruleInput.endLocalTime === 'string',
+    'Timed recurrence requires an explicit endLocalTime.');
+  const endLocalTime = normalizeClock(ruleInput.endLocalTime, 'endLocalTime');
   const rule = validateRecurrenceRule(ruleInput);
   assert(rule.temporalKind === 'zoned_civil', 'A timed recurrence rule is required.');
-  assert(typeof ruleInput.endLocalTime === 'string', 'Timed recurrence requires an explicit endLocalTime.');
-  const endLocalTime = normalizeClock(ruleInput.endLocalTime, 'endLocalTime');
   const endDayOffset = normalizeDayOffset(ruleInput.endDayOffset);
   const startLocalDateTime = normalizeLocalDateTime(rule.startDate + 'T' + rule.localTime, 'start.localDateTime');
   const endLocalDateTime = addRecurrenceCalendarDays(rule.startDate, endDayOffset) + 'T' + endLocalTime;
