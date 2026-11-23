@@ -369,9 +369,8 @@ BEGIN
         recurrence_end_local_time = v_next.recurrence_end_local_time,
         recurrence_end_day_offset = v_next.recurrence_end_day_offset,
         recurrence_effective_from = v_next.recurrence_effective_from,
-        protected_time_snapshot = v_next.protected_time_snapshot,
-        task_schedule_snapshot = v_next.task_schedule_snapshot,
-        task_schedule_window = v_next.task_schedule_window,
+        protected_time_decisions = '[]'::jsonb,
+        task_schedule_conflict_decisions = '[]'::jsonb,
         updated_by_user_id = p_owner_user_id
     WHERE id = p_series_event_id AND owner_user_id = p_owner_user_id
       AND updated_at = p_expected_updated_at;
