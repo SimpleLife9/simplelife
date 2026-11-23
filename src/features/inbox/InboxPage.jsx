@@ -489,7 +489,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
                 {capture.processing_status !== 'processed' && capture.attention_status !== 'archived' ? <button type="button" className="capture-action-button" disabled={busy} onClick={() => processCapture(capture)}>{capture.processing_status === 'queued' || capture.processing_status === 'processing' ? 'Reintentar procesamiento' : 'Generar sugerencias'}</button> : null}
                 {confirmedLink ? (
                   <>
-                    <button type="button" className="capture-action-button" onClick={() => openOrganizedTarget(confirmedLink)}>{linkKind === 'event' ? 'Abrir Agenda' : 'Abrir ' + (linkKind === 'task' ? 'tareas' : linkKind === 'note_idea' ? 'notas e ideas' : 'listas')} →</button>
+                    <button type="button" className="capture-action-button" onClick={() => openOrganizedTarget(confirmedLink)}>{'Abrir ' + ({ event: 'Agenda', task: 'tareas', note_idea: 'notas e ideas', list: 'listas', goal_subgoal: 'metas', project: 'proyectos' }[linkKind] || 'destino')} →</button>
                     <button type="button" className="capture-action-button capture-archive-button" disabled={busy} onClick={() => updateAttention(capture, capture.attention_status === 'archived' ? 'needs_review' : 'archived')} aria-label={capture.attention_status === 'archived' ? 'Restaurar captura: ' + capture.content_original : 'Archivar captura: ' + capture.content_original}>{capture.attention_status === 'archived' ? 'Restaurar' : 'Archivar'}</button>
                   </>
                 ) : capture.attention_status !== 'archived' ? (

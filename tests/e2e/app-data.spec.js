@@ -1355,6 +1355,10 @@ test('Inbox can link captures to existing Goals and Subgoals without duplicating
   expect(insertedCaptureLinks[0]).toMatchObject({ capture_part_id: captureParts[0].id, goal_id: goal.id });
   expect(reviewRequests.at(-1)).toMatchObject({ p_category: 'goal_subgoal', p_review_status: 'accepted' });
 
+  await page.getByLabel('Filtrar capturas por revisión').selectOption('organized');
+  await expect(page.getByRole('button', { name: 'Abrir metas' })).toBeVisible();
+
+  await page.getByLabel('Filtrar capturas por revisión').selectOption('needs_review');
   await page.getByRole('button', { name: 'Organizar captura: Idea para mejorar el negocio' }).click();
   organizer = page.getByRole('dialog', { name: 'Organizar captura' });
   await organizer.getByLabel('Tipo de destino').selectOption('subgoal');

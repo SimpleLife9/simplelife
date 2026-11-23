@@ -93,6 +93,12 @@ BEGIN
     WHERE c.deleted_at IS NOT NULL
       AND c.purge_after IS NOT NULL
       AND c.purge_after <= v_now
+      AND NOT EXISTS (
+        SELECT 1 FROM public.processing_run active_run
+        WHERE active_run.capture_id = c.id
+          AND active_run.status = 'running'
+          AND active_run.lease_expires_at > v_now
+      )
     ORDER BY c.purge_after, c.id
     LIMIT p_batch_size
   LOOP
