@@ -338,6 +338,13 @@ try {
   );
   equal(mutationAudit, "1", "Exactly one append-only exception audit row");
 
+  occurrenceMutationServer.kill("SIGTERM");
+  await new Promise((resolve) => {
+    if (occurrenceMutationServer.exitCode !== null) return resolve();
+    const timeout = setTimeout(resolve, 5000);
+    occurrenceMutationServer.once("exit", () => { clearTimeout(timeout); resolve(); });
+  });
+
   // Exercise the two-scope series editor through the authenticated local Edge Runtime.
   // The canceled first slot stays on the parent; split from the next scheduled slot.
   const splitTarget = sqlScalar(
