@@ -74,6 +74,41 @@ SET LOCAL ROLE authenticated;
 SET LOCAL request.jwt.claim.sub = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 DO $test$
 BEGIN
+  -- Each interactive audit write accepts UUIDv7 only; malformed IDs fail closed.
+  DECLARE
+    v_rejected boolean;
+  BEGIN
+    v_rejected := false;
+    BEGIN
+      PERFORM public.trash_inbox_capture(
+        '019b2000-0000-7000-8000-000000000101',
+        'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+      );
+    EXCEPTION WHEN SQLSTATE '22023' THEN v_rejected := true;
+    END;
+    IF NOT v_rejected THEN RAISE EXCEPTION 'Trash accepted a non-UUIDv7 audit ID'; END IF;
+
+    v_rejected := false;
+    BEGIN
+      PERFORM public.restore_inbox_capture(
+        '019b2000-0000-7000-8000-000000000101',
+        'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+      );
+    EXCEPTION WHEN SQLSTATE '22023' THEN v_rejected := true;
+    END;
+    IF NOT v_rejected THEN RAISE EXCEPTION 'Restore accepted a non-UUIDv7 audit ID'; END IF;
+
+    v_rejected := false;
+    BEGIN
+      PERFORM public.review_inbox_capture_part(
+        '019b2000-0000-7000-8000-000000000201',
+        'task','Invalid audit ID','edited',
+        'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+      );
+    EXCEPTION WHEN SQLSTATE '22023' THEN v_rejected := true;
+    END;
+    IF NOT v_rejected THEN RAISE EXCEPTION 'Part review accepted a non-UUIDv7 audit ID'; END IF;
+  END;
   IF NOT public.trash_inbox_capture(
     '019b2000-0000-7000-8000-000000000101',
     '019b2000-0000-7000-8000-000000000301'
