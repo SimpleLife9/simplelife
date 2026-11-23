@@ -186,6 +186,9 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
   const [editingEvent, setEditingEvent] = useState(null);
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [confirmAction, setConfirmAction] = useState(null);
+  const [occurrenceMutationMode, setOccurrenceMutationMode] = useState(null);
+  const [occurrenceDateValue, setOccurrenceDateValue] = useState('');
+  const [occurrenceEndValue, setOccurrenceEndValue] = useState('');
   const [pendingKey, setPendingKey] = useState(null);
   const [protectedConflictPrompt, setProtectedConflictPrompt] = useState(null);
   const [protectedConflictChoices, setProtectedConflictChoices] = useState({});
@@ -340,6 +343,7 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
               occurrence_id: row.id,
               occurrence_key: row.occurrence_key,
               occurrence_status: row.occurrence_status,
+              row_version: row.row_version,
               is_recurring_occurrence: true,
               temporal_kind: row.temporal_kind,
               start_date: row.start_date,
@@ -427,7 +431,31 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
   const openEventDetail = (event) => {
     setPendingKey(null);
     setConfirmAction(null);
+    setOccurrenceMutationMode(null);
     setSelectedEvent(event);
+  };
+
+  const openOccurrenceEditor = (mode) => {
+    if (!selectedEvent?.is_recurring_occurrence) return;
+    setConfirmAction(null);
+    setOccurrenceMutationMode(mode);
+    if (selectedEvent.temporal_kind === 'all_day') {
+      setOccurrenceDateValue(mode === 'move'
+        ? String(selectedEvent.start_date || selectedEvent.actual_local_date || '')
+        : String(selectedEvent.end_date_exclusive || ''));
+      setOccurrenceEndValue('');
+    } else {
+      setOccurrenceDateValue(localInputValue(selectedEvent.start_local).slice(0, 16));
+      setOccurrenceEndValue(mode === 'modify'
+        ? localInputValue(selectedEvent.end_local).slice(0, 16)
+        : '');
+    }
+  };
+
+  const requestOccurrenceCancellation = () => {
+    setPendingKey(null);
+    setOccurrenceMutationMode(null);
+    setConfirmAction('cancel_occurrence');
   };
 
   // Keep seconds and milliseconds from the persisted civil-time intent.
@@ -775,6 +803,67 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
     }
   };
 
+  const mutateSelectedOccurrence = async (action) => {
+    if (!selectedEvent?.is_recurring_occurrence || busy) return;
+    const target = selectedEvent;
+    const key = uuidv7();
+    setPendingKey(key);
+    const payload = {
+      occurrenceId: target.occurrence_id,
+      expectedRowVersion: target.row_version,
+      action,
+    };
+    if (action === 'move') {
+      if (target.temporal_kind === 'all_day') {
+        payload.actualLocalDate = occurrenceDateValue;
+      } else {
+        payload.actualLocalDate = occurrenceDateValue.slice(0, 10);
+        payload.actualLocalTime = occurrenceDateValue.slice(11);
+      }
+    } else if (action === 'modify') {
+      if (target.temporal_kind === 'all_day') {
+        payload.endDateExclusive = occurrenceDateValue;
+      } else {
+        payload.endLocalDateTime = occurrenceEndValue;
+      }
+    }
+
+    const messages = {
+      cancel: 'Esta ocurrencia fue cancelada. Las demás fechas de la serie se conservan.',
+      move: 'Esta ocurrencia fue reprogramada. Su identidad original se conserva.',
+      modify: 'La duración de esta ocurrencia fue modificada.',
+    };
+    const success = await runAction(async () => {
+      const { data, error } = await supabase.functions.invoke('agenda-event-occurrence-mutate', {
+        body: payload,
+        headers: { 'Idempotency-Key': key },
+      });
+      if (error) {
+        let message = error.message || 'No se pudo actualizar esta ocurrencia.';
+        try {
+          const response = error.context instanceof Response ? await error.context.clone().json() : null;
+          if (response?.error === 'PROTECTED_TIME_CONFLICTS') {
+            message = 'El cambio coincide con Tiempo Protegido. No se guardó la modificación.';
+          } else if (response?.error === 'TASK_SCHEDULE_CONFLICTS') {
+            message = 'El cambio coincide con una tarea reservada. No se guardó la modificación.';
+          } else if (response?.error === 'OCCURRENCE_VERSION_CONFLICT') {
+            message = 'La ocurrencia cambió en otra sesión. Recarga la Agenda y vuelve a intentarlo.';
+          } else if (response?.error) {
+            message = response.error;
+          }
+        } catch { /* keep SDK error message */ }
+        throw new Error(message);
+      }
+      if (!data?.occurrenceId) throw new Error('El servidor no confirmó el cambio de esta ocurrencia.');
+    }, messages[action] || 'Ocurrencia actualizada.');
+    if (success) {
+      setSelectedEvent(null);
+      setConfirmAction(null);
+      setOccurrenceMutationMode(null);
+      setPendingKey(null);
+    }
+  };
+
   const lifecycleLabel = (event) => event.deleted_at
     ? 'En papelera'
     : event.archived_at ? 'Archivado' : 'Activo';
@@ -810,6 +899,11 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
       title: 'Mover a papelera',
       description: 'El evento se conservará durante 30 días para permitir su restauración. No se borrará físicamente.',
       button: 'Mover a papelera',
+    },
+    cancel_occurrence: {
+      title: 'Cancelar esta ocurrencia',
+      description: 'Solo se cancelará esta fecha. La serie y sus demás ocurrencias permanecerán intactas.',
+      button: 'Cancelar esta fecha',
     },
   };
 
@@ -1251,11 +1345,73 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
                 <div><span>Recuperación hasta</span><strong>{new Intl.DateTimeFormat('es', { dateStyle: 'medium', timeStyle: 'short', timeZone }).format(new Date(selectedEvent.purge_after))}</strong></div>
               )}
             </div>
+            {selectedEvent.is_recurring_occurrence && occurrenceMutationMode && (
+              <form
+                className="agenda-occurrence-editor"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void mutateSelectedOccurrence(occurrenceMutationMode);
+                }}
+              >
+                <h3>{occurrenceMutationMode === 'move' ? 'Mover esta ocurrencia' : 'Modificar esta ocurrencia'}</h3>
+                {selectedEvent.temporal_kind === 'all_day' ? (
+                  <label>
+                    {occurrenceMutationMode === 'move' ? 'Nueva fecha de inicio' : 'Nueva fecha final exclusiva'}
+                    <input
+                      type="date"
+                      value={occurrenceDateValue}
+                      onChange={(event) => setOccurrenceDateValue(event.target.value)}
+                      required
+                    />
+                  </label>
+                ) : occurrenceMutationMode === 'move' ? (
+                  <label>
+                    Nueva fecha y hora de inicio
+                    <input
+                      type="datetime-local"
+                      step="0.001"
+                      value={occurrenceDateValue}
+                      onChange={(event) => setOccurrenceDateValue(event.target.value)}
+                      required
+                    />
+                  </label>
+                ) : (
+                  <label>
+                    Nueva fecha y hora de finalización
+                    <input
+                      type="datetime-local"
+                      step="0.001"
+                      value={occurrenceEndValue}
+                      onChange={(event) => setOccurrenceEndValue(event.target.value)}
+                      required
+                    />
+                  </label>
+                )}
+                <p className="agenda-recurrence-note">
+                  El cambio afecta solo esta fecha; no modifica la regla ni las demás ocurrencias. Los conflictos con Tiempo Protegido o tareas reservadas bloquean el guardado.
+                </p>
+                <div className="agenda-dialog-actions">
+                  <button type="button" className="agenda-secondary-button" onClick={() => setOccurrenceMutationMode(null)} disabled={busy}>Volver</button>
+                  <button type="submit" className="button button-primary" disabled={busy || !occurrenceDateValue}>
+                    {busy ? 'Guardando…' : 'Guardar esta fecha'}
+                  </button>
+                </div>
+              </form>
+            )}
             <div className="agenda-event-actions">
               {selectedEvent.is_recurring_occurrence ? (
-                <p className="agenda-recurrence-note">
-                  Esta fecha pertenece a una serie recurrente. La edición de una ocurrencia, de esta y las siguientes, y de toda la serie se gestiona en el editor de series.
-                </p>
+                <>
+                  <p className="agenda-recurrence-note">
+                    Estas acciones cambian solo la ocurrencia seleccionada. Los cambios de “esta y las siguientes” o de toda la serie aún no están disponibles.
+                  </p>
+                  {['scheduled', 'needs_review'].includes(selectedEvent.occurrence_status) && !occurrenceMutationMode && (
+                    <>
+                      <button type="button" className="agenda-secondary-button" onClick={() => openOccurrenceEditor('move')} disabled={busy}>Mover esta fecha</button>
+                      <button type="button" className="agenda-secondary-button" onClick={() => openOccurrenceEditor('modify')} disabled={busy}>Modificar duración</button>
+                      <button type="button" className="agenda-secondary-button agenda-action-warning" onClick={requestOccurrenceCancellation} disabled={busy}>Cancelar esta fecha</button>
+                    </>
+                  )}
+                </>
               ) : (
                 <>
               {canEditEvent(selectedEvent) && (
@@ -1471,7 +1627,14 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
             <p className="agenda-confirm-copy">{confirmDetails[confirmAction]?.description}</p>
             <footer className="agenda-dialog-actions">
               <button type="button" className="agenda-secondary-button" onClick={() => setConfirmAction(null)} disabled={busy}>Volver</button>
-              <button type="button" className="button button-primary" onClick={() => mutateSelectedEvent(confirmAction)} disabled={busy}>
+              <button
+                type="button"
+                className="button button-primary"
+                onClick={() => confirmAction === 'cancel_occurrence'
+                  ? mutateSelectedOccurrence('cancel')
+                  : mutateSelectedEvent(confirmAction)}
+                disabled={busy}
+              >
                 {busy ? 'Procesando…' : confirmDetails[confirmAction]?.button}
               </button>
             </footer>
