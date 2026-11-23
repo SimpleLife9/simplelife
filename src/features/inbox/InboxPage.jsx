@@ -38,6 +38,9 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
   const [captureSearch, setCaptureSearch] = useState('');
   const [attentionFilter, setAttentionFilter] = useState('needs_review');
   const reviewHistoryRequestRef = useRef(0);
+  const proposalMetadataRequestRef = useRef(0);
+  const [proposalMetadataLoading, setProposalMetadataLoading] = useState(false);
+  const [proposalMetadataError, setProposalMetadataError] = useState('');
   const [reviewHistoryPartId, setReviewHistoryPartId] = useState(null);
   const [reviewHistoryRows, setReviewHistoryRows] = useState([]);
   const [reviewHistoryLoading, setReviewHistoryLoading] = useState(false);
@@ -291,11 +294,12 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
     setSelectedPart(part || { id: uuidv7(), capture_id: capture.id, part_index: 0, original_fragment: capture.content_original });
     const source = String(part?.original_fragment || capture.content_original || '');
     const suggestedDestination = getSuggestedDestinationType(part?.category);
-    const processingProposal = processingRuns
-      .find((run) => run.capture_id === capture.id)?.result?.proposals
-      ?.find((proposal) => proposal.partIndex === (part?.part_index ?? 0));
-    setClarificationRequired(Boolean(processingProposal?.requiresClarification));
-    setClarificationPrompt(processingProposal?.clarificationPrompt || 'La sugerencia es ambigua. Explica brevemente qué significa.');
+    const requestToken = ++proposalMetadataRequestRef.current;
+    const isProcessed = capture.processing_status === 'processed';
+    setProposalMetadataLoading(isProcessed);
+    setProposalMetadataError('');
+    setClarificationRequired(false);
+    setClarificationPrompt('');
     setManualInterpretation('');
     setDestinationType(suggestedDestination);
     const suggestedTargets = suggestedDestination === 'goal' ? goals
@@ -313,10 +317,45 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
     setNewListName(String(part?.original_fragment || capture.content_original || '').slice(0, 200));
     setListItemText(String(part?.original_fragment || capture.content_original || '').slice(0, 500));
     setOperationIds({ partId: part?.id || uuidv7(), targetId: uuidv7(), itemId: uuidv7(), linkId: uuidv7() });
+
+    if (isProcessed) {
+      void (async () => {
+        try {
+          const { data, error } = await supabase.from('processing_run')
+            .select('result')
+            .eq('capture_id', capture.id)
+            .order('created_at', { ascending: false })
+            .limit(1);
+          if (error) throw error;
+          const latestRun = Array.isArray(data) ? data[0] : null;
+          const proposals = latestRun?.result?.proposals;
+          const proposal = Array.isArray(proposals)
+            ? proposals.find((item) => item.partIndex === (part?.part_index ?? 0))
+            : null;
+          if (!proposal) {
+            throw new Error('No se encontró la propuesta de esta parte en el historial de procesamiento.');
+          }
+          if (requestToken !== proposalMetadataRequestRef.current) return;
+          setClarificationRequired(Boolean(proposal.requiresClarification));
+          setClarificationPrompt(proposal.clarificationPrompt || 'La sugerencia es ambigua. Explica brevemente qué significa.');
+        } catch (error) {
+          if (requestToken === proposalMetadataRequestRef.current) {
+            setClarificationRequired(true);
+            setClarificationPrompt('No se pudo recuperar la aclaración de esta propuesta. Explica qué significa antes de confirmar.');
+            setProposalMetadataError(error?.message || 'No se pudieron verificar los metadatos de procesamiento.');
+          }
+        } finally {
+          if (requestToken === proposalMetadataRequestRef.current) setProposalMetadataLoading(false);
+        }
+      })();
+    }
   };
 
   const closeOrganizer = () => {
     if (busy) return;
+    proposalMetadataRequestRef.current += 1;
+    setProposalMetadataLoading(false);
+    setProposalMetadataError('');
     setSelectedCapture(null);
     setSelectedPart(null);
     setOperationIds(null);
@@ -338,7 +377,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
 
   const saveOrganization = async (event) => {
     event.preventDefault();
-    if (!isInboxDestinationReady(destinationType)) return;
+    if (!isInboxDestinationReady(destinationType) || proposalMetadataLoading) return;
     if (clarificationRequired && !manualInterpretation.trim()) return;
     if (!selectedCapture || !selectedPart || !operationIds || getConfirmedLink(selectedCapture.id, selectedPart.id)) return;
     const sourceText = String(selectedPart.original_fragment || selectedCapture.content_original || '');
@@ -604,6 +643,8 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
             <label className="field"><span>{clarificationRequired ? 'Aclaración necesaria para continuar' : 'Interpretación / aclaración (opcional)'}</span>
               <textarea aria-label="Aclaración / interpretación" maxLength={1000} rows={3} value={manualInterpretation} onChange={(event) => setManualInterpretation(event.target.value)} placeholder={clarificationRequired ? clarificationPrompt : 'Describe brevemente qué significa o qué quieres hacer con esta captura…'} required={clarificationRequired} disabled={busy} />
             </label>
+            {proposalMetadataLoading && <p className="capture-organizer-help" role="status">Verificando si la sugerencia necesita aclaración…</p>}
+            {proposalMetadataError && <p className="form-error" role="alert">{proposalMetadataError} Se exige una aclaración manual para continuar.</p>}
             {clarificationRequired && <p className="capture-organizer-help" role="status">{clarificationPrompt} Añade una aclaración antes de confirmar; el texto original no cambiará.</p>}
             {destinationType === 'task' && <>
               <label className="field"><span>Título de la tarea</span><input aria-label="Título de la tarea" maxLength={240} value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} required disabled={busy} /></label>
@@ -635,7 +676,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
                 <label className="field"><span>Texto del elemento (máximo 500 caracteres)</span><textarea aria-label="Texto del elemento" maxLength={500} rows={3} value={listItemText} onChange={(event) => setListItemText(event.target.value)} required disabled={busy} /></label>
               </>}
             </>}
-            <div className="capture-organizer-actions"><button type="button" className="capture-action-button" onClick={closeOrganizer} disabled={busy}>Cancelar</button><button type="submit" className="button button-primary" disabled={busy || !operationIds || !isInboxDestinationReady(destinationType) || (clarificationRequired && !manualInterpretation.trim())}>{busy ? 'Organizando…' : isInboxDestinationReady(destinationType) ? 'Confirmar y organizar' : 'Destino aún no disponible'} <span>→</span></button></div>
+            <div className="capture-organizer-actions"><button type="button" className="capture-action-button" onClick={closeOrganizer} disabled={busy}>Cancelar</button><button type="submit" className="button button-primary" disabled={busy || proposalMetadataLoading || !operationIds || !isInboxDestinationReady(destinationType) || (clarificationRequired && !manualInterpretation.trim())}>{busy ? 'Organizando…' : isInboxDestinationReady(destinationType) ? 'Confirmar y organizar' : 'Destino aún no disponible'} <span>→</span></button></div>
           </form>
         </section>
       </div>
