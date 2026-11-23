@@ -71,10 +71,12 @@ const profileB = sqlScalar("SELECT private.uuidv7()");
 const captureA = sqlScalar("SELECT private.uuidv7()");
 const captureRetry = sqlScalar("SELECT private.uuidv7()");
 const captureProcess = sqlScalar("SELECT private.uuidv7()");
+const captureDispatch = sqlScalar("SELECT private.uuidv7()");
 const keyA = sqlScalar("SELECT private.uuidv7()");
 const keyRetry = sqlScalar("SELECT private.uuidv7()");
 const keyProcess = sqlScalar("SELECT private.uuidv7()");
-for (const [value, label] of [[profileA,"profile A"],[profileB,"profile B"],[captureA,"capture A"],[captureRetry,"retry capture"],[captureProcess,"process capture"],[keyA,"key A"],[keyRetry,"retry key"],[keyProcess,"process key"]]) {
+const keyDispatch = sqlScalar("SELECT private.uuidv7()");
+for (const [value, label] of [[profileA,"profile A"],[profileB,"profile B"],[captureA,"capture A"],[captureRetry,"retry capture"],[captureProcess,"process capture"],[captureDispatch,"dispatcher capture"],[keyA,"key A"],[keyRetry,"retry key"],[keyProcess,"process key"],[keyDispatch,"dispatcher key"]]) {
   assertUuid(value, UUID_V7, label);
 }
 sqlExec(
@@ -84,7 +86,8 @@ sqlExec(
   "INSERT INTO public.capture (id,owner_user_id,created_by_user_id,content_original) VALUES " +
   "('" + captureA + "'::uuid,'" + profileA + "'::uuid,'" + profileA + "'::uuid,'Preserve this exact processing source.')," +
   "('" + captureRetry + "'::uuid,'" + profileA + "'::uuid,'" + profileA + "'::uuid,'Retry this disposable source.')," +
-  "('" + captureProcess + "'::uuid,'" + profileA + "'::uuid,'" + profileA + "'::uuid,'Comprar leche para el desayuno.');"
+  "('" + captureProcess + "'::uuid,'" + profileA + "'::uuid,'" + profileA + "'::uuid,'Comprar leche para el desayuno.')," +
+  "('" + captureDispatch + "'::uuid,'" + profileA + "'::uuid,'" + profileA + "'::uuid,'Comprar pan para la merienda.');"
 );
 
 async function startFunction(name, readyHeaders, readyStatus) {
@@ -132,6 +135,7 @@ async function stopServer(server) {
 let queueServer;
 let workerServer;
 let processServer;
+let dispatcherServer;
 try {
   queueServer = await startFunction("inbox-processing-queue", { apikey: publishable }, 401);
   const queue = async (token, captureId, idempotencyKey) => await fetch(queueServer.url, {
@@ -300,6 +304,38 @@ try {
   await stopServer(processServer.server);
   processServer = null;
 
+  // Verify the bounded scheduled dispatcher through the actual local Edge Runtime.
+  await stopServer(processServer.server);
+  processServer = null;
+  queueServer = await startFunction("inbox-processing-queue", { apikey: publishable }, 401);
+  const dispatchQueue = await queue(ownerA.accessToken, captureDispatch, keyDispatch);
+  equal(dispatchQueue.status, 202, "dispatcher fixture enqueue");
+  const dispatchBody = await responseJson(dispatchQueue, "dispatcher fixture queue");
+  await stopServer(queueServer.server);
+  queueServer = null;
+
+  dispatcherServer = await startFunction("inbox-processing-dispatcher", { apikey: secret }, 405);
+  const dispatchCall = (apiKey, payload) => fetch(dispatcherServer.url, {
+    method: "POST",
+    headers: { apikey: apiKey, "content-type": "application/json" },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(30000),
+  });
+  const publicDispatch = await dispatchCall(publishable, { maxJobs: 2 });
+  equal(publicDispatch.status, 401, "publishable key cannot run dispatcher");
+  const dispatchResponse = await dispatchCall(secret, { maxJobs: 2 });
+  equal(dispatchResponse.status, 200, "secret dispatcher status");
+  const dispatchResult = await responseJson(dispatchResponse, "secret dispatcher");
+  equal(dispatchResult.claimed, 1, "dispatcher claimed exactly its due fixture");
+  equal(dispatchResult.succeeded, 1, "dispatcher persisted one proposal batch");
+  equal(dispatchResult.queueEmpty, true, "dispatcher drained current due queue");
+  equal(sqlScalar("SELECT pr.status || ':' || c.processing_status FROM public.processing_run pr JOIN public.capture c ON c.id=pr.capture_id WHERE pr.id='" + dispatchBody.runId + "'::uuid"),
+    "succeeded:processed", "dispatcher terminal capture state");
+  equal(sqlScalar("SELECT cp.category || ':' || cp.review_status || ':' || cp.original_fragment FROM public.capture_part cp WHERE cp.capture_id='" + captureDispatch + "'::uuid"),
+    "task:unreviewed:Comprar pan para la merienda.", "dispatcher saved exact advisory proposal");
+  await stopServer(dispatcherServer.server);
+  dispatcherServer = null;
+
   console.log("PASS: user JWT and active profile are required to enqueue Inbox processing.");
   console.log("PASS: capture ownership is enforced before the privileged server-side queue call.");
   console.log("PASS: same-key enqueue replays one run; users cannot read another owner's processing run.");
@@ -313,4 +349,5 @@ try {
   if (queueServer) await stopServer(queueServer.server);
   if (workerServer) await stopServer(workerServer.server);
   if (processServer) await stopServer(processServer.server);
+  if (dispatcherServer) await stopServer(dispatcherServer.server);
 }
