@@ -33,8 +33,8 @@ function validateCandidate(candidate, materializationDate, horizonEndDate) {
   assert(candidate.status == null || candidate.status === 'scheduled',
     'Only scheduled candidates may be materialized.');
   const originalLocalDate = validDate(candidate.originalLocalDate, 'Candidate originalLocalDate');
-  assert(originalLocalDate >= materializationDate && originalLocalDate <= horizonEndDate,
-    'Candidate occurrence must be inside the current 90-calendar-day materialization horizon.');
+  assert(originalLocalDate <= horizonEndDate,
+    'Candidate occurrence must not exceed the current 90-calendar-day materialization horizon.');
 
   if (candidate.temporalKind === 'all_day') {
     const startDate = validDate(candidate.startDate, 'Candidate startDate');
@@ -143,6 +143,9 @@ export function planOccurrenceMaterializationReconciliation({
   for (const [occurrenceKey, candidate] of candidateMap) {
     const existing = existingMap.get(occurrenceKey);
     if (!existing) {
+    if (!existing && candidate.originalLocalDate < today) {
+      throw new RangeError('Historical occurrences cannot be newly materialized.');
+    }
       actions.push(Object.freeze({ action: 'insert', occurrenceKey, occurrence: candidate }));
       insertCount += 1;
       continue;
