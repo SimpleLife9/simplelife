@@ -441,11 +441,13 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
       const allParts = getCaptureParts(selectedCapture.id);
       const allPartsConfirmed = allParts.length > 0 && allParts.every((part) => part.id === partId
         || captureLinks.some((link) => link.capture_part_id === part.id && link.link_status === 'confirmed'));
-      const { data: captureUpdate, error: captureError } = await supabase.from('capture')
-        .update({ attention_status: allPartsConfirmed ? 'reviewed' : 'needs_review' })
-        .eq('id', selectedCapture.id).eq('owner_user_id', profile.id).select('id');
+      const { data: captureUpdate, error: captureError } = await supabase.rpc('set_inbox_capture_attention_status', {
+        p_capture_id: selectedCapture.id,
+        p_attention_status: allPartsConfirmed ? 'reviewed' : 'needs_review',
+        p_audit_id: uuidv7(),
+      });
       if (captureError) throw captureError;
-      if (!captureUpdate?.length) throw new Error('El elemento quedó creado, pero no se pudo actualizar el estado de su captura.');
+      if (captureUpdate !== true) throw new Error('El elemento quedó creado, pero no se pudo actualizar el estado de su captura.');
     }, successMessage);
 
     if (saved) closeOrganizer();

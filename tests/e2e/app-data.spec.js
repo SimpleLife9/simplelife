@@ -1490,7 +1490,9 @@ test('Inbox can turn a reviewed capture into an Agenda Event with an owner-scope
   await page.getByRole('button', { name: 'Ver historial' }).click();
   await expect(page.getByText('Sin categoría → Evento')).toBeVisible();
   await expect(page.getByText('Después: Clasificación manual confirmada: evento de Agenda.')).toBeVisible();
-  expect(reviewAuditEvents).toHaveLength(1);
+  expect(reviewAuditEvents).toHaveLength(2);
+  expect(reviewAuditEvents.map((event) => event.action).sort()).toEqual(['capture.attention_status_changed', 'capture.part_reviewed'].sort());
+  expect(reviewAuditEvents.find((event) => event.action === 'capture.attention_status_changed').details).toMatchObject({ attention_status_before: 'needs_review', attention_status_after: 'reviewed' });
   await expect(page.getByRole('button', { name: 'Abrir Agenda' })).toBeVisible();
   expect(captures[0].content_original).toBe('Llamar al proveedor antes del viernes');
 });
