@@ -253,41 +253,54 @@ $test$;
 
 RESET ROLE;
 
+-- Clearing an obsolete decision set is also an auditable change; it must
+-- retain both the prior consent and the resulting empty state.
+UPDATE public.protected_time_block
+SET task_schedule_conflict_decisions = '[]'::jsonb
+WHERE id = '019b0000-0000-7000-8000-000000000074'::uuid
+  AND owner_user_id = '019b0000-0000-7000-8000-000000000071'::uuid;
+
 DO $audit_assertions$
 DECLARE
-  v_details jsonb;
+  v_latest jsonb;
+  v_previous jsonb;
   v_audit_count bigint;
-  v_expected_decisions jsonb;
 BEGIN
   SELECT count(*) INTO v_audit_count
   FROM public.audit_event
   WHERE entity_type = 'protected_time_block'
     AND entity_id = '019b0000-0000-7000-8000-000000000074'::uuid
-    AND action = 'protected_time_block.task_schedule_decisions_recorded';
+    AND action = 'protected_time_block.task_schedule_decisions_changed';
 
-  IF v_audit_count <> 2 THEN
-    RAISE EXCEPTION 'Protected Time edit + restore must append exactly two decision audit rows; replay must add none; got %',
+  IF v_audit_count <> 3 THEN
+    RAISE EXCEPTION 'Protected Time edit, restore and decision revocation must append three audit rows; replay must add none; got %',
       v_audit_count;
   END IF;
 
-  SELECT details INTO v_details
+  SELECT details INTO v_latest
   FROM public.audit_event
   WHERE entity_type = 'protected_time_block'
     AND entity_id = '019b0000-0000-7000-8000-000000000074'::uuid
-    AND action = 'protected_time_block.task_schedule_decisions_recorded'
-  ORDER BY recorded_at DESC
+    AND action = 'protected_time_block.task_schedule_decisions_changed'
+  ORDER BY recorded_at DESC, id DESC
   LIMIT 1;
 
-  SELECT task_schedule_conflict_decisions INTO v_expected_decisions
-  FROM public.protected_time_block
-  WHERE id = '019b0000-0000-7000-8000-000000000074'::uuid;
+  SELECT details INTO v_previous
+  FROM public.audit_event
+  WHERE entity_type = 'protected_time_block'
+    AND entity_id = '019b0000-0000-7000-8000-000000000074'::uuid
+    AND action = 'protected_time_block.task_schedule_decisions_changed'
+  ORDER BY recorded_at DESC, id DESC
+  OFFSET 1 LIMIT 1;
 
-  IF v_details->>'decision_version' IS DISTINCT FROM 'protected-time-task-schedule-decision-v1'
-     OR v_details->'decisions' IS DISTINCT FROM v_expected_decisions
-     OR jsonb_array_length(v_details->'decisions') <> 1
-     OR v_details->'decisions'->0->>'decision' IS DISTINCT FROM 'keep_overlap' THEN
-    RAISE EXCEPTION 'Protected Time audit must preserve exact version-bound TaskSchedule decisions: %',
-      v_details;
+  IF v_latest->>'decision_version' IS DISTINCT FROM 'protected-time-task-schedule-decision-v1'
+     OR v_latest->'decisions_before' IS DISTINCT FROM v_previous->'decisions_after'
+     OR v_latest->'decisions_after' IS DISTINCT FROM '[]'::jsonb
+     OR v_latest->'decisions' IS DISTINCT FROM '[]'::jsonb
+     OR (v_latest->>'decision_count_before')::integer <> 1
+     OR (v_latest->>'decision_count_after')::integer <> 0 THEN
+    RAISE EXCEPTION 'Protected Time audit must preserve the exact removal of version-bound consent: %',
+      v_latest;
   END IF;
 END;
 $audit_assertions$;
