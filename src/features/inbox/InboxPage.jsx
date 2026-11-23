@@ -27,6 +27,12 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
   const { rows: lists } = useRows('user_list', profile, refreshKey, (query) => query
     .is('deleted_at', null).is('archived_at', null).eq('status', 'active').order('name'));
   const { rows: listItems } = useRows('list_item', profile, refreshKey, (query) => query.order('position').order('created_at'));
+  const { rows: goals } = useRows('goal', profile, refreshKey, (query) => query
+    .is('deleted_at', null).is('archived_at', null).order('title'));
+  const { rows: subgoals } = useRows('subgoal', profile, refreshKey, (query) => query
+    .is('deleted_at', null).is('archived_at', null).order('title'));
+  const { rows: projects } = useRows('project', profile, refreshKey, (query) => query
+    .is('deleted_at', null).is('archived_at', null).order('name'));
 
   const [captureSearch, setCaptureSearch] = useState('');
   const [attentionFilter, setAttentionFilter] = useState('needs_review');
@@ -126,6 +132,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
   const [selectedCapture, setSelectedCapture] = useState(null);
   const [selectedPart, setSelectedPart] = useState(null);
   const [destinationType, setDestinationType] = useState('task');
+  const [selectedDestinationId, setSelectedDestinationId] = useState('');
   const [taskTitle, setTaskTitle] = useState('');
   const [taskPriority, setTaskPriority] = useState('3');
   const [taskDueDate, setTaskDueDate] = useState('');
@@ -250,8 +257,14 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
     const source = String(part?.original_fragment || capture.content_original || '');
     const suggestedDestination = part?.category === 'event' ? 'event'
       : part?.category === 'note_idea' ? 'note'
-        : part?.category === 'list' ? 'list' : 'task';
+        : part?.category === 'list' ? 'list'
+          : part?.category === 'goal_subgoal' ? 'goal'
+            : part?.category === 'project' ? 'project' : 'task';
     setDestinationType(suggestedDestination);
+    const suggestedTargets = suggestedDestination === 'goal' ? goals
+      : suggestedDestination === 'subgoal' ? subgoals
+        : suggestedDestination === 'project' ? projects : [];
+    setSelectedDestinationId(suggestedTargets[0]?.id || '');
     setTaskTitle(source.slice(0, 240));
     setTaskPriority('3');
     setTaskDueDate('');
@@ -292,6 +305,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
     const sourceText = String(selectedPart.original_fragment || selectedCapture.content_original || '');
     if (!sourceText.trim()) return;
     if (destinationType === 'task' && !taskTitle.trim()) return;
+    if (['goal', 'subgoal', 'project'].includes(destinationType) && !selectedDestinationId) return;
     if (destinationType === 'event' && (!eventTitle.trim() || !eventDate)) return;
     if (destinationType === 'list' && listMode === 'new' && !newListName.trim()) return;
     if (destinationType === 'list' && listMode === 'existing' && !selectedListId) return;
@@ -299,19 +313,30 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
 
     const ids = operationIds;
     const selectedList = lists.find((list) => list.id === selectedListId);
+    const selectedGoal = destinationType === 'goal' ? goals.find((goal) => goal.id === selectedDestinationId) : null;
+    const selectedSubgoal = destinationType === 'subgoal' ? subgoals.find((subgoal) => subgoal.id === selectedDestinationId) : null;
+    const selectedProject = destinationType === 'project' ? projects.find((project) => project.id === selectedDestinationId) : null;
     const category = destinationType === 'task' ? 'task'
       : destinationType === 'event' ? 'event'
-        : destinationType === 'note' || destinationType === 'idea' ? 'note_idea' : 'list';
+        : destinationType === 'goal' || destinationType === 'subgoal' ? 'goal_subgoal'
+          : destinationType === 'project' ? 'project'
+            : destinationType === 'note' || destinationType === 'idea' ? 'note_idea' : 'list';
     const interpretation = destinationType === 'task' ? 'Clasificación manual confirmada: tarea.'
       : destinationType === 'event' ? 'Clasificación manual confirmada: evento de Agenda.'
-        : destinationType === 'note' ? 'Clasificación manual confirmada: nota.'
-          : destinationType === 'idea' ? 'Clasificación manual confirmada: idea.'
-            : 'Clasificación manual confirmada: lista.';
+        : destinationType === 'goal' ? 'Clasificación manual confirmada: meta existente.'
+          : destinationType === 'subgoal' ? 'Clasificación manual confirmada: submeta existente.'
+            : destinationType === 'project' ? 'Clasificación manual confirmada: proyecto existente.'
+              : destinationType === 'note' ? 'Clasificación manual confirmada: nota.'
+                : destinationType === 'idea' ? 'Clasificación manual confirmada: idea.'
+                  : 'Clasificación manual confirmada: lista.';
     const successMessage = destinationType === 'task' ? 'Captura organizada como tarea.'
       : destinationType === 'event' ? 'Evento creado en Agenda y vinculado al Inbox.'
-        : destinationType === 'note' ? 'Captura guardada como nota.'
-          : destinationType === 'idea' ? 'Captura guardada como idea.'
-            : 'Captura añadida a una lista.';
+        : destinationType === 'goal' ? 'Captura vinculada a la meta existente.'
+          : destinationType === 'subgoal' ? 'Captura vinculada a la submeta existente.'
+            : destinationType === 'project' ? 'Captura vinculada al proyecto existente.'
+              : destinationType === 'note' ? 'Captura guardada como nota.'
+                : destinationType === 'idea' ? 'Captura guardada como idea.'
+                  : 'Captura añadida a una lista.';
 
     const saved = await runAction(async () => {
       const partId = selectedPart?.id || ids.partId;
@@ -340,6 +365,12 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
         if (eventError) throw eventError;
         if (!eventData?.eventId) throw new Error('Agenda no devolvió el identificador del evento.');
         linkTarget = { calendar_event_id: eventData.eventId };
+      } else if (destinationType === 'goal' && selectedGoal) {
+        linkTarget = { goal_id: selectedGoal.id };
+      } else if (destinationType === 'subgoal' && selectedSubgoal) {
+        linkTarget = { subgoal_id: selectedSubgoal.id };
+      } else if (destinationType === 'project' && selectedProject) {
+        linkTarget = { project_id: selectedProject.id };
       } else if (destinationType === 'note' || destinationType === 'idea') {
         await ensureRow('note_idea', {
           id: ids.targetId, owner_user_id: profile.id, created_by_user_id: profile.id,
@@ -390,13 +421,15 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
   };
 
   const attentionLabels = { needs_review: 'Pendiente de revisión', reviewed: 'Revisada', archived: 'Archivada' };
-  const typeLabels = { task: 'Tarea', note_idea: 'Nota o idea', list: 'Lista', event: 'Evento' };
+  const typeLabels = { task: 'Tarea', note_idea: 'Nota o idea', list: 'Lista', event: 'Evento', goal_subgoal: 'Meta / submeta', project: 'Proyecto' };
   const openOrganizedTarget = (link) => {
     const kind = getLinkKind(link);
     if (kind === 'task') { setMorePage('tasks'); setActivePage('more'); }
     else if (kind === 'note_idea') { setMorePage('notes'); setActivePage('more'); }
     else if (kind === 'list') { setMorePage('lists'); setActivePage('more'); }
     else if (kind === 'event') { setActivePage('agenda'); setMorePage(null); }
+    else if (kind === 'goal_subgoal') { setActivePage('goals'); setMorePage(null); }
+    else if (kind === 'project') { setActivePage('projects'); setMorePage(null); }
   };
 
   return <div className="inbox-layout">
@@ -499,7 +532,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
           <div className="capture-original-preview"><span>CAPTURA ORIGINAL · NO SE MODIFICA</span><p>{selectedCapture.content_original}</p></div>
           <form className="capture-organizer-form" onSubmit={saveOrganization}>
             <label className="field"><span>Tipo de destino</span><select aria-label="Tipo de destino" value={destinationType} disabled={busy} onChange={(event) => { setDestinationType(event.target.value); resetTargetIds(); }}>
-              <option value="task">Tarea</option><option value="event">Evento de Agenda</option><option value="note">Nota</option><option value="idea">Idea</option><option value="list">Lista</option>
+              <option value="task">Tarea</option><option value="event">Evento de Agenda</option><option value="goal">Meta existente</option><option value="subgoal">Submeta existente</option><option value="project">Proyecto existente</option><option value="note">Nota</option><option value="idea">Idea</option><option value="list">Lista</option>
             </select></label>
             {destinationType === 'task' && <>
               <label className="field"><span>Título de la tarea</span><input aria-label="Título de la tarea" maxLength={240} value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} required disabled={busy} /></label>
@@ -514,6 +547,9 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
               <label className="field"><span>Fecha del evento</span><input aria-label="Fecha del evento" type="date" value={eventDate} onChange={(event) => setEventDate(event.target.value)} required disabled={busy} /></label>
               <p className="capture-organizer-help">El evento se crea en Agenda como compromiso de día completo. La creación respeta los conflictos de tiempo protegido y usa una clave de idempotencia estable para evitar duplicados si reintentas.</p>
             </>}
+            {destinationType === 'goal' && <label className="field"><span>Meta existente</span><select aria-label="Meta existente" value={selectedDestinationId} onChange={(event) => setSelectedDestinationId(event.target.value)} required disabled={busy}><option value="">Selecciona una meta</option>{goals.map((goal) => <option key={goal.id} value={goal.id}>{goal.title}</option>)}</select></label>}
+            {destinationType === 'subgoal' && <label className="field"><span>Submeta existente</span><select aria-label="Submeta existente" value={selectedDestinationId} onChange={(event) => setSelectedDestinationId(event.target.value)} required disabled={busy}><option value="">Selecciona una submeta</option>{subgoals.map((subgoal) => { const parent = goals.find((goal) => goal.id === subgoal.goal_id); return <option key={subgoal.id} value={subgoal.id}>{(parent?.title ? parent.title + ' · ' : '') + subgoal.title}</option>; })}</select></label>}
+            {destinationType === 'project' && <label className="field"><span>Proyecto existente</span><select aria-label="Proyecto existente" value={selectedDestinationId} onChange={(event) => setSelectedDestinationId(event.target.value)} required disabled={busy}><option value="">Selecciona un proyecto</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>}
             {(destinationType === 'note' || destinationType === 'idea') && <label className="field"><span>Título (opcional)</span><input aria-label="Título (opcional)" maxLength={200} value={noteTitle} onChange={(event) => setNoteTitle(event.target.value)} placeholder="Dale un nombre" disabled={busy} /></label>}
             {destinationType === 'list' && <>
               <label className="field"><span>Acción de lista</span><select aria-label="Acción de lista" value={listMode} onChange={(event) => { setListMode(event.target.value); resetTargetIds(); }} disabled={busy}>

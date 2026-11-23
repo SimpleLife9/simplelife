@@ -1298,6 +1298,73 @@ test('Inbox searches and paginates the complete capture archive beyond the first
   expect(captures).toHaveLength(257);
 });
 
+test('Inbox can link a capture to an existing Project and preserve provenance', async ({ page }) => {
+  const project = {
+    id: '019b6000-0000-7000-8000-000000000501',
+    owner_user_id: profile.id, created_by_user_id: profile.id,
+    name: 'Automatizar el negocio', purpose: 'Proyecto existente',
+    status: 'active', archived_at: null, deleted_at: null,
+  };
+  const { captures, captureParts, insertedCaptureLinks, reviewRequests } = await mockSupabaseSession(page, { projects: [project] });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+  await page.getByRole('button', { name: 'Organizar captura: Llamar al proveedor antes del viernes' }).click();
+  const organizer = page.getByRole('dialog', { name: 'Organizar captura' });
+  await organizer.getByLabel('Tipo de destino').selectOption('project');
+  await organizer.getByLabel('Proyecto existente').selectOption(project.id);
+  await organizer.getByRole('button', { name: 'Confirmar y organizar' }).click();
+  await expect(page.getByText('Captura vinculada al proyecto existente.')).toBeVisible();
+  expect(insertedCaptureLinks).toHaveLength(1);
+  expect(insertedCaptureLinks[0]).toMatchObject({ capture_part_id: captureParts[0].id, project_id: project.id, link_status: 'confirmed' });
+  expect(reviewRequests.at(-1)).toMatchObject({ p_category: 'project', p_review_status: 'accepted' });
+  await page.getByLabel('Filtrar capturas por revisión').selectOption('organized');
+  await expect(page.getByRole('button', { name: 'Abrir proyectos' })).toBeVisible();
+  expect(captures[0].content_original).toBe('Llamar al proveedor antes del viernes');
+});
+
+test('Inbox can link captures to existing Goals and Subgoals without duplicating objectives', async ({ page }) => {
+  const goal = {
+    id: '019b6000-0000-7000-8000-000000000601',
+    owner_user_id: profile.id, created_by_user_id: profile.id,
+    life_area_id: '019b6000-0000-7000-8000-000000000602',
+    title: 'Alcanzar libertad financiera', status: 'active', archived_at: null, deleted_at: null,
+  };
+  const subgoal = {
+    id: '019b6000-0000-7000-8000-000000000603',
+    goal_id: goal.id, created_by_user_id: profile.id,
+    title: 'Incrementar ingresos mensuales', status: 'active', archived_at: null, deleted_at: null,
+  };
+  const { captureParts, insertedCaptureLinks, reviewRequests } = await mockSupabaseSession(page, { goals: [goal], subgoals: [subgoal] });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  await page.getByRole('button', { name: 'Organizar captura: Llamar al proveedor antes del viernes' }).click();
+  let organizer = page.getByRole('dialog', { name: 'Organizar captura' });
+  await organizer.getByLabel('Tipo de destino').selectOption('goal');
+  await organizer.getByLabel('Meta existente').selectOption(goal.id);
+  await organizer.getByRole('button', { name: 'Confirmar y organizar' }).click();
+  await expect(page.getByText('Captura vinculada a la meta existente.')).toBeVisible();
+  expect(insertedCaptureLinks[0]).toMatchObject({ capture_part_id: captureParts[0].id, goal_id: goal.id });
+  expect(reviewRequests.at(-1)).toMatchObject({ p_category: 'goal_subgoal', p_review_status: 'accepted' });
+
+  await page.getByRole('button', { name: 'Organizar captura: Idea para mejorar el negocio' }).click();
+  organizer = page.getByRole('dialog', { name: 'Organizar captura' });
+  await organizer.getByLabel('Tipo de destino').selectOption('subgoal');
+  await organizer.getByLabel('Submeta existente').selectOption(subgoal.id);
+  await organizer.getByRole('button', { name: 'Confirmar y organizar' }).click();
+  await expect(page.getByText('Captura vinculada a la submeta existente.')).toBeVisible();
+  expect(insertedCaptureLinks[1]).toMatchObject({ capture_part_id: captureParts[1].id, subgoal_id: subgoal.id });
+  expect(reviewRequests.at(-1)).toMatchObject({ p_category: 'goal_subgoal', p_review_status: 'accepted' });
+});
+
 test('Inbox marks normalized duplicate text without merging or deleting captures', async ({ page }) => {
   const { captures, captureParts, captureLinks } = await mockSupabaseSession(page);
   const duplicate = {
