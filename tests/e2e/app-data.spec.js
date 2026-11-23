@@ -1281,6 +1281,29 @@ test('Inbox supports search, review states, archiving, restore and original capt
 });
 
 
+test('Inbox recovers a saved text capture whose first fragment insert previously failed', async ({ page }) => {
+  const { captures, captureParts, insertedCaptureParts } = await mockSupabaseSession(page, { captureParts: [] });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  const capture = captures[0];
+  await page.getByRole('button', { name: 'Organizar captura: ' + capture.content_original }).click();
+  await expect(page.getByText('CAPTURA ORIGINAL · NO SE MODIFICA')).toBeVisible();
+
+  expect(insertedCaptureParts).toHaveLength(1);
+  expect(captureParts).toHaveLength(1);
+  expect(captureParts[0]).toMatchObject({
+    capture_id: capture.id,
+    part_index: 0,
+    original_fragment: capture.content_original,
+  });
+  await page.getByRole('button', { name: 'Cerrar organizador' }).click();
+});
+
 test('Inbox runs advisory processing, records review, and restores soft-deleted captures', async ({ page }) => {
   const { captures, captureParts, processingRuns, queueRequests, processingRequests, reviewRequests, trashRequests, insertedTasks } = await mockSupabaseSession(page);
   await page.goto('/');
