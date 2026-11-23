@@ -428,6 +428,20 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
           response = error.context instanceof Response ? await error.context.clone().json() : null;
           if (response?.error) message = response.error;
         } catch { /* keep SDK error message */ }
+        if (response?.error === 'PROTECTED_TIME_CONFLICTS'
+          || response?.error === 'PROTECTED_TIME_CONFLICTS_CHANGED') {
+          if (response.error === 'PROTECTED_TIME_CONFLICTS_CHANGED') setPendingKey(null);
+          setProtectedConflictPrompt({
+            error: response.error,
+            action,
+            conflicts: Array.isArray(response.conflicts) ? response.conflicts : [],
+            taskScheduleDecisions: acceptedTaskScheduleDecisions,
+          });
+          setProtectedConflictChoices({});
+          message = response.error === 'PROTECTED_TIME_CONFLICTS_CHANGED'
+            ? 'Los bloques protegidos cambiaron mientras se reactivaba el evento. Revisa los cruces actuales.'
+            : 'El evento no se reabrió ni restauró. Decide explícitamente cómo conservar el tiempo protegido.';
+        }
         if (response?.error === 'TASK_SCHEDULE_CONFLICTS'
           || response?.error === 'TASK_SCHEDULE_CONFLICTS_CHANGED') {
           if (response.error === 'TASK_SCHEDULE_CONFLICTS_CHANGED') setPendingKey(null);
@@ -491,8 +505,14 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
       occurrenceStartsAt: conflict.occurrenceStartsAt,
       decision: protectedConflictChoices[conflict.conflictKey],
     }));
+    const promptAction = protectedConflictPrompt.action;
+    const taskScheduleDecisions = protectedConflictPrompt.taskScheduleDecisions;
     setProtectedConflictPrompt(null);
-    void submitEvent({ preventDefault() {} }, decisions);
+    if (promptAction === 'reopen' || promptAction === 'restore') {
+      void mutateSelectedEvent(promptAction, taskScheduleDecisions, decisions);
+    } else {
+      void submitEvent({ preventDefault() {} }, decisions, taskScheduleDecisions);
+    }
   };
 
   const taskScheduleConflictItems = taskScheduleConflictPrompt?.conflicts ?? [];
@@ -517,13 +537,17 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
     const protectedDecisions = taskScheduleConflictPrompt.protectedTimeDecisions;
     setTaskScheduleConflictPrompt(null);
     if (promptAction === 'reopen' || promptAction === 'restore') {
-      void mutateSelectedEvent(promptAction, decisions);
+      void mutateSelectedEvent(promptAction, decisions, protectedDecisions);
     } else {
       void submitEvent({ preventDefault() {} }, protectedDecisions, decisions);
     }
   };
 
-  const mutateSelectedEvent = async (action, acceptedTaskScheduleDecisions = undefined) => {
+  const mutateSelectedEvent = async (
+    action,
+    acceptedTaskScheduleDecisions = undefined,
+    acceptedProtectedTimeDecisions = undefined,
+  ) => {
     if (!selectedEvent) return;
     const key = pendingKey || uuidv7();
     setPendingKey(key);
@@ -543,6 +567,7 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
           expectedUpdatedAt: target.updated_at,
           action,
           ...(acceptedTaskScheduleDecisions === undefined ? {} : { taskScheduleDecisions: acceptedTaskScheduleDecisions }),
+          ...(acceptedProtectedTimeDecisions === undefined ? {} : { protectedTimeDecisions: acceptedProtectedTimeDecisions }),
         },
         headers: { 'Idempotency-Key': key },
       });
@@ -560,7 +585,7 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
             error: response.error,
             action,
             conflicts: Array.isArray(response.conflicts) ? response.conflicts : [],
-            protectedTimeDecisions: undefined,
+            protectedTimeDecisions: acceptedProtectedTimeDecisions,
           });
           setTaskScheduleConflictChoices({});
           message = response.error === 'TASK_SCHEDULE_CONFLICTS_CHANGED'
