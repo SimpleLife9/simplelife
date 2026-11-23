@@ -55,7 +55,7 @@ export function planRecurrenceEditScope({
     ? rule.startDate
     : parseCalendarDate(inputEffectiveFromDate).key;
   const segmentEnd = inputEffectiveThroughDate == null
-    ? rule.until
+    ? null
     : parseCalendarDate(inputEffectiveThroughDate).key;
   assert(segmentStart >= rule.startDate, 'effectiveFromDate cannot precede the recurrence anchor.');
   assert(selectedDateKey >= segmentStart, 'selectedDate cannot precede the active series segment.');
