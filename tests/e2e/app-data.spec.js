@@ -1024,6 +1024,16 @@ async function mockSupabaseSession(page, initialData = {}) {
       } else {
         series.recurrence_effective_through = selected.original_local_date;
         series.updated_at = updatedAt;
+        calendarEventOccurrences.forEach((row) => {
+          if (row.calendar_event_id === series.id
+            && row.owner_user_id === profile.id
+            && row.original_local_date > selected.original_local_date
+            && row.occurrence_status === 'scheduled'
+            && row.override_kind == null
+            && row.review_candidate == null) {
+            row.occurrence_status = 'superseded';
+          }
+        });
         childSeriesEventId = '019a0000-0000-7000-8000-000000009399';
         const childRule = {
           ...recurrenceRule,
