@@ -935,7 +935,6 @@ async function mockSupabaseSession(page, initialData = {}) {
           return;
         }
         taskScheduleConflictsForCommit = [...pendingEventTaskScheduleConflicts];
-        pendingEventTaskScheduleConflicts = [];
       }
       const accepted = new Map(decisions.map((item) => [
         item.blockId + ':' + item.occurrenceStartsAt,
@@ -951,6 +950,7 @@ async function mockSupabaseSession(page, initialData = {}) {
         await json(409, { error: 'PROTECTED_TIME_CONFLICTS', conflicts: protectedTimeConflicts });
         return;
       }
+      pendingEventTaskScheduleConflicts = [];
       const createdAt = '2026-11-22T18:00:00.000Z';
       const row = {
         id: '0190f47a-7b2c-7abc-8def-0123456789be',
@@ -3965,6 +3965,99 @@ test('Agenda requires one explicit Protected Time decision per hard/flexible ove
   ]);
   expect(insertedAgendaEvents).toHaveLength(1);
   expect(insertedAgendaEvents[0].protected_time_decisions).toHaveLength(2);
+});
+
+
+test('Agenda preserves TaskSchedule consent when Protected Time asks for a second decision', async ({ page }) => {
+  const today = await todayInBrowserHavana(page);
+  const taskScheduleId = '019a0000-0000-7000-8000-000000000691';
+  const taskScheduleUpdatedAt = '2026-11-22T18:00:00.000000Z';
+  const blockId = '019a0000-0000-7000-8000-000000000692';
+  const blockUpdatedAt = '2026-11-21T10:00:00.000000Z';
+  const occurrenceStartsAt = today + 'T14:00:00.000Z';
+  const protectedTimeConflicts = [{
+    conflictKey: blockId + ':' + occurrenceStartsAt,
+    blockId,
+    blockUpdatedAt,
+    label: 'Sueño protegido',
+    category: 'Salud',
+    protectionMode: 'hard',
+    patternKind: 'one_off',
+    occurrenceDate: today,
+    occurrenceStartsAt,
+    occurrenceEndsAt: today + 'T15:00:00.000Z',
+    overlapStartsAt: today + 'T14:15:00.000Z',
+    overlapEndsAt: today + 'T14:45:00.000Z',
+    timeZone: 'America/Havana',
+    requiredDecision: 'override_hard',
+  }];
+  const { calendarEvents, insertedAgendaEvents, idempotencyRequests } = await mockSupabaseSession(page, {
+    protectedTimeConflicts,
+    eventTaskScheduleConflictResponses: [{
+      status: 409,
+      body: {
+        error: 'TASK_SCHEDULE_CONFLICTS',
+        conflicts: [{
+          taskScheduleId,
+          taskScheduleUpdatedAt,
+          startsAt: today + 'T14:00:00.000Z',
+          endsAt: today + 'T15:00:00.000Z',
+          overlapStartsAt: today + 'T14:15:00.000Z',
+          overlapEndsAt: today + 'T14:45:00.000Z',
+          timeZone: 'America/Havana',
+          requiredDecision: 'keep_overlap',
+        }],
+      },
+    }],
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.getByRole('navigation', { name: 'Navegación principal' })
+    .getByRole('button', { name: /Agenda/ }).click();
+
+  await page.getByRole('button', { name: 'Nuevo evento' }).click();
+  const composer = page.getByRole('dialog', { name: 'Crear evento' });
+  await composer.getByLabel('Nombre del evento').fill('Reunión con doble consentimiento');
+  await composer.getByLabel('Desde', { exact: true }).fill(today);
+  await composer.getByLabel('Hasta (incluido)', { exact: true }).fill(today);
+  await composer.getByRole('button', { name: 'Guardar evento' }).click();
+
+  const taskDialog = page.getByRole('alertdialog', { name: 'El evento coincide con tiempo reservado' });
+  await expect(taskDialog).toBeVisible();
+  await taskDialog.getByLabel('Decisión para reserva de tarea').selectOption('keep_overlap');
+  await taskDialog.getByRole('button', { name: 'Guardar y mantener ambos' }).click();
+
+  const protectedDialog = page.getByRole('alertdialog', { name: 'Hay compromisos que se cruzan' });
+  await expect(protectedDialog).toBeVisible();
+  await protectedDialog.getByLabel('Tu decisión para este cruce').selectOption('override_hard');
+  expect(idempotencyRequests).toHaveLength(2);
+  expect(idempotencyRequests[1].taskScheduleDecisions).toEqual([{
+    taskScheduleId,
+    taskScheduleUpdatedAt,
+    decision: 'keep_overlap',
+  }]);
+  expect(idempotencyRequests[1].protectedTimeDecisions).toEqual([]);
+  await protectedDialog.getByRole('button', { name: 'Guardar con estas decisiones' }).click();
+
+  await expect(page.getByText('Evento guardado en Agenda.')).toBeVisible();
+  expect(idempotencyRequests).toHaveLength(3);
+  expect(idempotencyRequests[2].key).toBe(idempotencyRequests[0].key);
+  expect(idempotencyRequests[2].taskScheduleDecisions).toEqual([{
+    taskScheduleId,
+    taskScheduleUpdatedAt,
+    decision: 'keep_overlap',
+  }]);
+  expect(idempotencyRequests[2].protectedTimeDecisions).toEqual([{
+    blockId,
+    blockUpdatedAt,
+    occurrenceStartsAt,
+    decision: 'override_hard',
+  }]);
+  expect(insertedAgendaEvents).toHaveLength(1);
+  expect(calendarEvents[0].task_schedule_conflict_decisions).toHaveLength(1);
+  expect(calendarEvents[0].protected_time_decisions).toHaveLength(1);
 });
 
 
