@@ -109,13 +109,15 @@ BEGIN
       USING ERRCODE = '22023';
   END IF;
 
-  IF NOT (
-    (p_occurrence_patch->>'occurrence_status' = 'cancelled'
-      AND p_occurrence_patch->>'override_kind' = 'cancelled')
-    OR
-    (p_occurrence_patch->>'occurrence_status' = 'scheduled'
-      AND p_occurrence_patch->>'override_kind' IN ('moved', 'modified'))
-  ) THEN
+  IF p_occurrence_patch->>'occurrence_status' IS NULL
+     OR p_occurrence_patch->>'override_kind' IS NULL
+     OR NOT (
+       (p_occurrence_patch->>'occurrence_status' = 'cancelled'
+         AND p_occurrence_patch->>'override_kind' = 'cancelled')
+       OR
+       (p_occurrence_patch->>'occurrence_status' = 'scheduled'
+         AND p_occurrence_patch->>'override_kind' IN ('moved', 'modified'))
+     ) THEN
     RAISE EXCEPTION 'Occurrence mutation must be cancelled/cancelled or scheduled/moved|modified'
       USING ERRCODE = '22023';
   END IF;
