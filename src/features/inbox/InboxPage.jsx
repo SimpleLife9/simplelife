@@ -168,23 +168,17 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
   const organizedCount = activeRows.filter((capture) => captureIsOrganized(capture.id)).length;
   const pendingCount = activeRows.filter((capture) => capture.attention_status === 'needs_review' && !captureIsOrganized(capture.id)).length;
 
-  const visibleCaptures = useMemo(() => {
-    const terms = normalizeCaptureForDuplicate(captureSearch).split(' ').filter(Boolean);
-    return rows.filter((capture) => {
-      const parts = captureParts.filter((item) => item.capture_id === capture.id);
-      const organized = parts.length > 0 && parts.every((part) => captureLinks.some((link) => link.capture_part_id === part.id && link.link_status === 'confirmed'));
-      const statusMatches = attentionFilter === 'trash'
-        ? Boolean(capture.deleted_at)
-        : !capture.deleted_at && (attentionFilter === 'all'
-          || (attentionFilter === 'needs_review' && capture.attention_status === 'needs_review' && !organized)
-          || (attentionFilter === 'reviewed' && capture.attention_status === 'reviewed' && !organized)
-          || (attentionFilter === 'organized' && organized)
-          || (attentionFilter === 'archived' && capture.attention_status === 'archived'));
-      const normalizedContent = normalizeCaptureForDuplicate(capture.content_original);
-      const searchMatches = terms.length === 0 || terms.every((term) => normalizedContent.includes(term));
-      return statusMatches && searchMatches;
-    });
-  }, [rows, captureParts, captureLinks, captureSearch, attentionFilter]);
+  const visibleCaptures = useMemo(() => rows.filter((capture) => {
+    const parts = captureParts.filter((item) => item.capture_id === capture.id);
+    const organized = parts.length > 0 && parts.every((part) => captureLinks.some((link) => link.capture_part_id === part.id && link.link_status === 'confirmed'));
+    return attentionFilter === 'trash'
+      ? Boolean(capture.deleted_at)
+      : !capture.deleted_at && (attentionFilter === 'all'
+        || (attentionFilter === 'needs_review' && capture.attention_status === 'needs_review' && !organized)
+        || (attentionFilter === 'reviewed' && capture.attention_status === 'reviewed' && !organized)
+        || (attentionFilter === 'organized' && organized)
+        || (attentionFilter === 'archived' && capture.attention_status === 'archived'));
+  }), [rows, captureParts, captureLinks, attentionFilter]);
 
   const updateAttention = (capture, nextStatus) => runAction(async () => {
     const { data, error } = await supabase.from('capture')
@@ -449,7 +443,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
           </select>
         </label>
       </div>
-      {loading ? <p className="muted">Cargando…</p> : localError ? <div className="form-error">{localError}</div> : rows.length ? visibleCaptures.length ? (
+      {loading ? <p className="muted">Cargando…</p> : localError ? <div className="form-error">{localError}</div> : totalCount > 0 ? visibleCaptures.length ? (
         <div className="capture-list">{visibleCaptures.map((capture) => {
           const parts = getCaptureParts(capture.id);
           const part = parts[0];
@@ -512,7 +506,9 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
           </div>;
         })}</div>
       ) : <EmptyState title="No hay coincidencias" detail="Cambia la búsqueda o el filtro para encontrar otras capturas." icon="⌕" />
-      : <EmptyState title="El Inbox está vacío" detail="Empieza escribiendo cualquier cosa que no quieras olvidar." /> }
+      : captureSearch.trim() || attentionFilter !== 'needs_review'
+        ? <EmptyState title="No hay coincidencias" detail="Cambia la búsqueda o el filtro para encontrar otras capturas." icon="⌕" />
+        : <EmptyState title="El Inbox está vacío" detail="Empieza escribiendo cualquier cosa que no quieras olvidar." /> }
       {hasMore && <div className="capture-pagination">
         <button type="button" className="capture-action-button" disabled={loadingMore || loading} onClick={loadMoreCaptures}>
           {loadingMore ? 'Cargando…' : 'Cargar más capturas'}
