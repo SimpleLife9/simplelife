@@ -148,7 +148,9 @@ function mockContext({
   const supabaseAdmin = {
     from(table: string) {
       const builder: Record<string, unknown> = {};
-      for (const method of ["select", "eq"]) builder[method] = () => builder;
+      for (const method of ["select", "eq", "is", "in", "order", "limit"]) {
+        builder[method] = () => builder;
+      }
       builder.maybeSingle = async () => {
         if (table === "calendar_event_occurrence_mutation_request") {
           calls.receiptLookup = Number(calls.receiptLookup) + 1;
@@ -158,8 +160,15 @@ function mockContext({
           calls.occurrenceLookup = Number(calls.occurrenceLookup) + 1;
           return { data: occurrence, error: null };
         }
+        if (table === "user_preference") {
+          return { data: { time_zone: "America/Havana" }, error: null };
+        }
         throw new Error("unexpected admin table " + table);
       };
+      builder.then = (
+        resolve: (value: unknown) => unknown,
+        reject: (reason: unknown) => unknown,
+      ) => Promise.resolve({ data: [], error: null }).then(resolve, reject);
       return builder;
     },
     async rpc(name: string, args: Record<string, unknown>) {
