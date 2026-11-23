@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: simplelife-ci-v2-${{ github.ref }}
@@ -20,34 +20,22 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - name: Check whether an npm lockfile already exists
-        id: lockfile
+      - name: Require committed npm dependency lockfile
         run: |
-          if [ -f package-lock.json ]; then
-            echo "missing=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "missing=true" >> "$GITHUB_OUTPUT"
+          if [ ! -f package-lock.json ]; then
+            echo "::error::package-lock.json must be committed before CI can install dependencies."
+            exit 1
           fi
 
-      - name: Generate the pinned npm dependency lockfile
-        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
-
-      - name: Save the initial lockfile to main
-        if: github.event_name == 'push' && steps.lockfile.outputs.missing == 'true'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package-lock.json
-          git commit -m "chore: add npm dependency lockfile"
-          git push origin HEAD:main
-
-      - name: Install exactly the locked dependencies
+      - name: Install exactly the committed dependencies
         run: npm ci --no-audit --no-fund
 
       - name: Install Chromium for browser tests
