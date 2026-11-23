@@ -4,6 +4,8 @@ import { uuidv7 } from '../../lib/uuidv7.js';
 import { useRows } from '../../shared/hooks/useRows.js';
 import { SectionTitle } from '../../shared/components/SectionTitle.jsx';
 import { EmptyState } from '../../shared/components/EmptyState.jsx';
+import { CaptureComposer } from './components/CaptureComposer.jsx';
+import { persistTextCapture } from './data/capture-repository.js';
 
 export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage, setMorePage }) {
   const { rows, loading, localError } = useRows('capture', profile, refreshKey, (query) => query
@@ -73,26 +75,14 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
       ? 'Captura archivada.'
       : 'Captura devuelta a pendientes.');
 
-  const submit = async (event) => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const formElement = event.currentTarget;
-    const text = String(form.get('capture') || '').trim();
-    if (!text) return;
-    await runAction(async () => {
-      const captureId = uuidv7();
-      const { error: captureError } = await supabase.from('capture').insert({
-        id: captureId, owner_user_id: profile.id, created_by_user_id: profile.id,
-        input_type: 'text', content_original: text,
-      });
-      if (captureError) throw captureError;
-      const { error: partError } = await supabase.from('capture_part').insert({
-        id: uuidv7(), capture_id: captureId, part_index: 0, original_fragment: text,
-      });
-      if (partError) throw new Error('La captura se guardó, pero falta preparar su fragmento: ' + partError.message);
-      formElement.reset();
-    }, 'Captura guardada.');
-  };
+  const submit = async (contentOriginal) => runAction(async () => {
+    await persistTextCapture({
+      supabase,
+      ownerUserId: profile.id,
+      contentOriginal,
+      createId: uuidv7,
+    });
+  }, 'Captura guardada.');
 
   const openOrganizer = (capture) => {
     const part = getCapturePart(capture.id);
@@ -222,9 +212,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
   };
 
   return <div className="inbox-layout">
-    <div className="inbox-composer"><div className="composer-top"><span className="composer-icon">↳</span><div><strong>Sácalo de tu cabeza.</strong><p>Una frase basta. No necesitas organizarla ahora.</p></div></div>
-      <form onSubmit={submit}><textarea name="capture" rows="4" placeholder="Escribe aquí lo que tienes en mente…" required /><div className="composer-bottom"><span>✦ El original se conserva sin alteraciones.</span><button className="button button-primary" disabled={busy}>Guardar captura <span>→</span></button></div></form>
-    </div>
+    <CaptureComposer busy={busy} onSubmit={submit} />
     <div className="inbox-list-wrap">
       <SectionTitle detail={visibleCaptures.length + ' de ' + rows.length + ' capturas · ' + pendingCount + ' por organizar · ' + organizedCount + ' organizadas'}>Capturado recientemente</SectionTitle>
       <div className="capture-toolbar" aria-label="Buscar y revisar capturas">
