@@ -82,6 +82,7 @@ function mockContext({
   }],
   rpcError = null,
   taskSchedules = [] as Record<string, unknown>[],
+  restoreBlock = null as Record<string, unknown> | null,
 }: {
   authMode?: string;
   existing?: Record<string, unknown> | null;
@@ -89,6 +90,7 @@ function mockContext({
   rpcResult?: unknown;
   rpcError?: unknown;
   taskSchedules?: Record<string, unknown>[];
+  restoreBlock?: Record<string, unknown> | null;
 } = {}) {
   const calls: Record<string, unknown> = {
     profileLookup: 0, ledgerLookup: 0, rpc: 0, rpcName: null, rpcArgs: null,
@@ -118,12 +120,20 @@ function mockContext({
   const supabaseAdmin = {
     from(table: string) {
       if (table === "task_schedule") {
-        const query = {
+        const query: any = {
           select() { return query; },
           eq() { return query; },
           in() { return query; },
           order() { return query; },
           async limit() { return { data: taskSchedules, error: null }; },
+        };
+        return query;
+      }
+      if (table === "protected_time_block") {
+        const query: any = {
+          select() { return query; },
+          eq() { return query; },
+          async maybeSingle() { return { data: restoreBlock, error: null }; },
         };
         return query;
       }
@@ -360,6 +370,74 @@ Deno.test("Protected Time requires version-bound consent for overlapping TaskSch
   assertEquals(decisions[0].decision, "keep_overlap", "explicit keep-overlap decision");
   assertEquals(patch.task_schedule_snapshot, [{ id: taskScheduleId, updated_at: taskScheduleUpdatedAt }],
     "full active schedule snapshot sent to atomic RPC");
+});
+
+Deno.test("restoring archived Protected Time requires version-bound TaskSchedule consent", async () => {
+  const taskScheduleId = "019a0000-0000-7000-8000-000000000412";
+  const taskScheduleUpdatedAt = "2026-12-25T04:00:00.000Z";
+  const restoreBlock = {
+    id: BLOCK_ID,
+    updated_at: VERSION,
+    label: "Sueño protegido",
+    category: "sleep",
+    protection_mode: "hard",
+    pattern_kind: "one_off",
+    time_zone: "America/Havana",
+    starts_at: "2026-12-25T03:00:00.000Z",
+    ends_at: "2026-12-25T11:30:00.000Z",
+    start_date: null,
+    end_date_exclusive: null,
+    weekdays: null,
+    start_time_local: null,
+    end_time_local: null,
+    ends_next_day: null,
+    archived_at: "2026-11-22T18:00:00.000Z",
+    deleted_at: null,
+  };
+  const taskSchedules = [{
+    id: taskScheduleId,
+    updated_at: taskScheduleUpdatedAt,
+    starts_at: "2026-12-25T04:00:00.000Z",
+    ends_at: "2026-12-25T05:00:00.000Z",
+    time_zone: "America/Havana",
+    schedule_status: "confirmed",
+  }];
+  const { ctx, calls } = mockContext({
+    restoreBlock,
+    taskSchedules,
+    rpcResult: [{
+      http_status: 200,
+      response_body: { blockId: BLOCK_ID, updatedAt: "2026-11-22T18:15:00.000000Z", lifecycle: "active" },
+      replayed: false,
+    }],
+  });
+  const base = { action: "restore", blockId: BLOCK_ID, expectedUpdatedAt: VERSION };
+  const missing = await handleRequest(request(base), ctx, {
+    now: () => "2026-11-22T18:10:00.000Z",
+  });
+  assertEquals(missing.status, 409, "restore without schedule consent status");
+  assertEquals((await responseBody(missing)).error, "TASK_SCHEDULE_CONFLICTS", "restore conflict code");
+  assertEquals(calls.rpc, 0, "restore does not write before explicit consent");
+
+  const accepted = await handleRequest(request({
+    ...base,
+    taskScheduleDecisions: [{
+      taskScheduleId,
+      taskScheduleUpdatedAt,
+      occurrenceStartsAt: restoreBlock.starts_at,
+      decision: "keep_overlap",
+    }],
+  }), ctx, { now: () => "2026-11-22T18:11:00.000Z" });
+  assertEquals(accepted.status, 200, "restore with accepted conflict status");
+  const args = calls.rpcArgs as Record<string, unknown>;
+  assertEquals(args.p_payload_version, "protected-time-mutation-v2", "restore consent is hash-versioned");
+  assertEquals(args.p_block_patch && Object.keys(args.p_block_patch as Record<string, unknown>).length, 2,
+    "restore patch contains only decision evidence and the complete snapshot");
+  const patch = args.p_block_patch as Record<string, unknown>;
+  assertEquals((patch.task_schedule_conflict_decisions as Record<string, unknown>[])[0].taskScheduleId,
+    taskScheduleId, "restore stores the exact TaskSchedule consent");
+  assertEquals(patch.task_schedule_snapshot, [{ id: taskScheduleId, updated_at: taskScheduleUpdatedAt }],
+    "restore sends the complete TaskSchedule snapshot");
 });
 
 Deno.test("an inactive profile cannot write Protected Time", async () => {
