@@ -30,3 +30,6 @@ verify_jwt = true
 
 [functions.agenda-event-occurrence-mutate]
 verify_jwt = true
+
+[functions.agenda-event-series-mutate]
+verify_jwt = true
