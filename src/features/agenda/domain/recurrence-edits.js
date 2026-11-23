@@ -1,3 +1,4 @@
+import { parseCalendarDate } from './temporal.js';
 import {
   addRecurrenceCalendarDays,
   applyOccurrenceOverride,
@@ -30,15 +31,10 @@ function occurrenceAt(rule, seriesId, date) {
 /**
  * Plans a versioned series edit without writing data.
  *
- * "This and following" keeps the old recurrence anchor (the date from which
- * DAILY/WEEKLY/MONTHLY/YEARLY interval phase is calculated) while splitting
- * segment visibility at the selected original civil slot. The selected
- * occurrence keeps its original occurrenceKey and is carried into the new
- * segment; generation for that segment resumes strictly after it.
- *
- * Persistence must store effectiveFromDate/effectiveThroughDate separately
- * from the rule anchor, so an interval=2 weekly series does not change phase
- * when it is split on an every-other-week occurrence.
+ * "This and following" starts a new segment on the selected original civil
+ * date. The selected occurrence keeps its original occurrenceKey and is
+ * carried into the new segment; subsequent occurrences use the new segment's
+ * rule and identity. The previous segment ends the day before the selection.
  */
 export function planRecurrenceEditScope({
   scope,
@@ -53,16 +49,17 @@ export function planRecurrenceEditScope({
 }) {
   const seriesId = validSeriesId(inputSeriesId, 'seriesId');
   const rule = validateRecurrenceRule(inputRule);
-  const selectedOccurrence = occurrenceAt(rule, seriesId, selectedDate);
+  const selectedDateKey = parseCalendarDate(selectedDate).key;
+  const selectedOccurrence = occurrenceAt(rule, seriesId, selectedDateKey);
   const segmentStart = inputEffectiveFromDate == null
     ? rule.startDate
-    : inputEffectiveFromDate;
+    : parseCalendarDate(inputEffectiveFromDate).key;
   const segmentEnd = inputEffectiveThroughDate == null
     ? rule.until
-    : inputEffectiveThroughDate;
+    : parseCalendarDate(inputEffectiveThroughDate).key;
   assert(segmentStart >= rule.startDate, 'effectiveFromDate cannot precede the recurrence anchor.');
-  assert(selectedDate >= segmentStart, 'selectedDate cannot precede the active series segment.');
-  assert(segmentEnd == null || selectedDate <= segmentEnd,
+  assert(selectedDateKey >= segmentStart, 'selectedDate cannot precede the active series segment.');
+  assert(segmentEnd == null || selectedDateKey <= segmentEnd,
     'selectedDate cannot follow the active series segment.');
 
   if (scope === 'this_occurrence') {
@@ -96,8 +93,10 @@ export function planRecurrenceEditScope({
       'This-and-following edits must preserve the original recurrence anchor to retain interval phase.');
     assert(proposedRule.temporalKind === rule.temporalKind,
       'A split cannot change temporal kind.');
-    const previousThrough = addRecurrenceCalendarDays(selectedDate, -1);
-    const previousSegment = selectedDate === segmentStart
+    assert(proposedRule.startDate === selectedDateKey,
+      'This-and-following edits must start the new segment on the selected original date.');
+    const previousThrough = addRecurrenceCalendarDays(selectedDateKey, -1);
+    const previousSegment = selectedDateKey === segmentStart
       ? null
       : Object.freeze({
         seriesId,
@@ -111,10 +110,10 @@ export function planRecurrenceEditScope({
       nextSegment: Object.freeze({
         seriesId: newSeriesId,
         rule: proposedRule,
-        effectiveFromDate: selectedDate,
+        effectiveFromDate: selectedDateKey,
         effectiveThroughDate: segmentEnd,
         inheritedOccurrenceKey: selectedOccurrence.occurrenceKey,
-        materializeAfterDate: selectedDate,
+        materializeAfterDate: selectedDateKey,
       }),
       selectedOccurrenceKey: selectedOccurrence.occurrenceKey,
       preserveSelectedOccurrenceIdentity: true,
@@ -123,16 +122,16 @@ export function planRecurrenceEditScope({
 
   // Entire-series edits replace the future rule from the selected civil slot;
   // completed/history rows before the boundary are preserved verbatim.
-  assert(proposedRule.startDate === selectedDate,
+  assert(proposedRule.startDate === selectedDateKey,
     'Entire-series edits must anchor the replacement rule at the selected date.');
-  const proposedSelected = occurrenceAt(proposedRule, seriesId, selectedDate);
+  const proposedSelected = occurrenceAt(proposedRule, seriesId, selectedDateKey);
   return Object.freeze({
     scope,
     seriesId,
     historicalRule: rule,
     replacementRule: proposedRule,
-    preserveHistoryBeforeDate: selectedDate,
-    replaceFutureFromDate: selectedDate,
+    preserveHistoryBeforeDate: selectedDateKey,
+    replaceFutureFromDate: selectedDateKey,
     selectedOccurrenceKey: selectedOccurrence.occurrenceKey,
     replacementStartsWithOccurrence: proposedSelected.originalLocalDate === selectedDate,
   });
