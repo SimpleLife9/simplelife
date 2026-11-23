@@ -89,8 +89,6 @@ export function planRecurrenceEditScope({
   if (scope === 'this_and_following') {
     const newSeriesId = validSeriesId(inputNewSeriesId, 'newSeriesId');
     assert(newSeriesId !== seriesId, 'A split requires a new series ID.');
-    assert(proposedRule.startDate === rule.startDate,
-      'This-and-following edits must preserve the original recurrence anchor to retain interval phase.');
     assert(proposedRule.temporalKind === rule.temporalKind,
       'A split cannot change temporal kind.');
     assert(proposedRule.startDate === selectedDateKey,
@@ -133,6 +131,6 @@ export function planRecurrenceEditScope({
     preserveHistoryBeforeDate: selectedDateKey,
     replaceFutureFromDate: selectedDateKey,
     selectedOccurrenceKey: selectedOccurrence.occurrenceKey,
-    replacementStartsWithOccurrence: proposedSelected.originalLocalDate === selectedDate,
+    replacementStartsWithOccurrence: proposedSelected.originalLocalDate === selectedDateKey,
   });
 }
