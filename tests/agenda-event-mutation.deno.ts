@@ -375,7 +375,7 @@ Deno.test("Event edit requires explicit consent for an overlapping TaskSchedule"
   assertEquals(Object.keys(patch.task_schedule_window as object).length, 2, "edit supplies resolved UTC comparison window");
 });
 
-Deno.test("a detail-only Event edit preserves the original Protected Time consent timestamp", async () => {Deno.test("a detail-only Event edit preserves the original Protected Time consent timestamp", async () => {
+Deno.test("a detail-only Event edit preserves the original Protected Time consent timestamp", async () => {
   const blockId = "019a0000-0000-7000-8000-000000000211";
   const blockUpdatedAt = "2026-11-20T10:00:00.000000+00:00";
   const occurrenceStartsAt = "2026-12-24T06:00:00.000Z";
