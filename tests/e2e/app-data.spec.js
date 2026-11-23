@@ -1100,7 +1100,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     await json(404, { message: `Unexpected mocked Supabase request: ${method} ${url.pathname}` });
   });
 
-  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, calendarEventOccurrences, recurringEventRequests, protectedTimeBlocks, protectedTimeMutationRequests, taskSchedules, taskScheduleMutationRequests, protectedTimeConflicts, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
+  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, calendarEventOccurrences, recurringEventRequests, protectedTimeBlocks, protectedTimeMutationRequests, taskSchedules, taskScheduleMutationRequests, protectedTimeConflicts, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
 }
 
 test('mock-authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
@@ -4277,7 +4277,7 @@ test('Agenda creates a recurring all-day series and renders each persisted occur
   await composer.getByLabel('Nombre del evento').fill('Rutina diaria');
   await composer.getByLabel('Desde', { exact: true }).fill(today);
   await composer.getByLabel('Hasta (incluido)', { exact: true }).fill(today);
-  await composer.getByLabel('Repetición').selectOption('DAILY');
+  await composer.locator('select').selectOption('DAILY');
   await composer.getByLabel('Ocurrencias').fill('2');
   await composer.getByRole('button', { name: 'Crear serie recurrente' }).click();
 
