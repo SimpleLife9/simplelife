@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../../lib/supabase.js';
 import { uuidv7 } from '../../lib/uuidv7.js';
 import { SectionTitle } from '../../shared/components/SectionTitle.jsx';
@@ -36,6 +36,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
 
   const [captureSearch, setCaptureSearch] = useState('');
   const [attentionFilter, setAttentionFilter] = useState('needs_review');
+  const reviewHistoryRequestRef = useRef(0);
   const [reviewHistoryPartId, setReviewHistoryPartId] = useState(null);
   const [reviewHistoryRows, setReviewHistoryRows] = useState([]);
   const [reviewHistoryLoading, setReviewHistoryLoading] = useState(false);
@@ -227,10 +228,12 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
   }, 'Sugerencia descartada y decisión registrada en auditoría.');
 
   const toggleReviewHistory = async (part) => {
+    const requestToken = ++reviewHistoryRequestRef.current;
     if (reviewHistoryPartId === part.id) {
       setReviewHistoryPartId(null);
       setReviewHistoryRows([]);
       setReviewHistoryError('');
+      setReviewHistoryLoading(false);
       return;
     }
     setReviewHistoryPartId(part.id);
@@ -246,11 +249,13 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
         .order('occurred_at', { ascending: false })
         .limit(30);
       if (error) throw error;
-      setReviewHistoryRows(data || []);
+      if (requestToken === reviewHistoryRequestRef.current) setReviewHistoryRows(data || []);
     } catch (error) {
-      setReviewHistoryError(error?.message || 'No se pudo cargar el historial de revisión.');
+      if (requestToken === reviewHistoryRequestRef.current) {
+        setReviewHistoryError(error?.message || 'No se pudo cargar el historial de revisión.');
+      }
     } finally {
-      setReviewHistoryLoading(false);
+      if (requestToken === reviewHistoryRequestRef.current) setReviewHistoryLoading(false);
     }
   };
 

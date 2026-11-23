@@ -134,6 +134,7 @@ async function mockSupabaseSession(page, initialData = {}) {
   const queueRequests = [];
   const processingRequests = [];
   const reviewRequests = [];
+  const reviewAuditEvents = [];
   const trashRequests = [];
   const captureLinks = [...(initialData.captureLinks || [])];
   const insertedCaptureLinks = [];
@@ -923,15 +924,48 @@ async function mockSupabaseSession(page, initialData = {}) {
       return;
     }
 
+    if (url.pathname === '/rest/v1/audit_event' && method === 'GET') {
+      const entityId = url.searchParams.get('entity_id')?.replace(/^eq\./, '');
+      const entityType = url.searchParams.get('entity_type')?.replace(/^eq\./, '');
+      const action = url.searchParams.get('action')?.replace(/^eq\./, '');
+      const matching = reviewAuditEvents.filter((entry) =>
+        (!entityId || entry.entity_id === entityId)
+        && (!entityType || entry.entity_type === entityType)
+        && (!action || entry.action === action)
+      ).sort((a, b) => b.occurred_at.localeCompare(a.occurred_at)).slice(0, 30);
+      await json(200, matching);
+      return;
+    }
+
     if (url.pathname === '/rest/v1/rpc/review_inbox_capture_part' && method === 'POST') {
       const payload = request.postDataJSON();
       const part = captureParts.find((item) => item.id === payload.p_capture_part_id);
       reviewRequests.push(payload);
       if (!part) { await json(200, false); return; }
+      const before = {
+        category: part.category,
+        interpretation: part.interpretation,
+        review_status: part.review_status,
+      };
       Object.assign(part, {
         category: payload.p_category ?? part.category,
         interpretation: payload.p_interpretation ?? part.interpretation,
         review_status: payload.p_review_status,
+      });
+      reviewAuditEvents.push({
+        id: payload.p_audit_id,
+        entity_type: 'capture_part',
+        entity_id: part.id,
+        action: 'capture.part_reviewed',
+        occurred_at: new Date().toISOString(),
+        details: {
+          category_before: before.category,
+          category_after: part.category,
+          interpretation_before: before.interpretation,
+          interpretation_after: part.interpretation,
+          review_status_before: before.review_status,
+          review_status_after: part.review_status,
+        },
       });
       updatedCaptureParts.push({ id: part.id, category: part.category, interpretation: part.interpretation, review_status: part.review_status });
       await json(200, true);
@@ -972,7 +1006,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     await json(404, { message: `Unexpected mocked Supabase request: ${method} ${url.pathname}` });
   });
 
-  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, protectedTimeBlocks, protectedTimeMutationRequests, protectedTimeConflicts, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, processingRuns, queueRequests, processingRequests, reviewRequests, trashRequests, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
+  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, protectedTimeBlocks, protectedTimeMutationRequests, protectedTimeConflicts, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, processingRuns, queueRequests, processingRequests, reviewRequests, reviewAuditEvents, trashRequests, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
 }
 
 test('mock-authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
@@ -1432,6 +1466,10 @@ test('Inbox can turn a reviewed capture into an Agenda Event with an owner-scope
     p_review_status: 'accepted',
   });
   await page.getByLabel('Filtrar capturas por revisión').selectOption('organized');
+  await page.getByRole('button', { name: 'Ver historial' }).click();
+  await expect(page.getByText('Sin categoría → Evento')).toBeVisible();
+  await expect(page.getByText('Después: Clasificación manual confirmada: evento de Agenda.')).toBeVisible();
+  expect(reviewAuditEvents).toHaveLength(1);
   await expect(page.getByRole('button', { name: 'Abrir Agenda' })).toBeVisible();
   expect(captures[0].content_original).toBe('Llamar al proveedor antes del viernes');
 });
