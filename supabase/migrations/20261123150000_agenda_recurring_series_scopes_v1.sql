@@ -305,11 +305,16 @@ BEGIN
        OR (item.value->>'owner_user_id')::uuid IS DISTINCT FROM p_owner_user_id
        OR (item.value->>'created_by_user_id')::uuid IS DISTINCT FROM p_owner_user_id
        OR (item.value->>'updated_by_user_id')::uuid IS DISTINCT FROM p_owner_user_id
+       OR (item.value->>'calendar_event_id')::uuid IS DISTINCT FROM
+         CASE WHEN p_scope = 'entire_series' THEN p_series_event_id
+              ELSE (p_new_series_record->>'id')::uuid END
        OR item.value->>'occurrence_status' IS DISTINCT FROM 'scheduled'
        OR item.value->>'override_kind' IS NOT NULL
        OR item.value->'review_candidate' IS DISTINCT FROM 'null'::jsonb
        OR (item.value->>'original_local_date')::date < greatest(p_materialization_date, v_selected.original_local_date)
        OR (item.value->>'original_local_date')::date > v_horizon_end
+       OR (p_scope = 'this_and_following'
+         AND (item.value->>'original_local_date')::date = v_selected.original_local_date)
   ) THEN
     RAISE EXCEPTION 'Series edit occurrence batch includes invalid identity or dates outside its forward horizon'
       USING ERRCODE = '22023';
