@@ -1,6 +1,6 @@
 import { buildEventCreateIntent } from './event-idempotency.js';
 
-export const EVENT_MUTATION_INTENT_VERSION = 'event-mutation-v2';
+export const EVENT_MUTATION_INTENT_VERSION = 'event-mutation-v1';
 export const EVENT_MUTATION_ACTIONS = Object.freeze([
   'edit',
   'cancel',
