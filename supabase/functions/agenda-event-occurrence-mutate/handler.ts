@@ -56,6 +56,16 @@ function daysBetween(start: string, end: string): number {
   const endDate = new Date(end + "T00:00:00.000Z");
   return Math.round((endDate.getTime() - startDate.getTime()) / 86_400_000);
 }
+function shiftLocalDateTime(value: string, deltaMilliseconds: number): string {
+  if (!Number.isSafeInteger(deltaMilliseconds)) {
+    throw new RangeError("Civil-time shift must be a whole number of milliseconds.");
+  }
+  const normalized = localDateTime(value, "localDateTime");
+  const instant = Date.parse(normalized + "Z");
+  const shifted = new Date(instant + deltaMilliseconds);
+  if (!Number.isFinite(shifted.getTime())) throw new RangeError("Shifted local endpoint is outside the supported date range.");
+  return shifted.toISOString().slice(0, 23);
+}
 async function readBoundedBody(request: Request): Promise<string | null> {
   if (!request.body) return "";
   const reader = request.body.getReader();
@@ -235,13 +245,19 @@ export async function handleRequest(
       const oldDate = String(occurrence.start_local).slice(0, 10);
       const oldTime = String(occurrence.start_local).slice(11);
       if (nextDate === oldDate && nextTime === oldTime) throw new RangeError("La ocurrencia ya está en esa hora.");
-      const existingEndDate = String(occurrence.end_local).slice(0, 10);
-      const existingEndTime = String(occurrence.end_local).slice(11);
-      const dayOffset = daysBetween(oldDate, existingEndDate);
-      const end = input.endLocalDateTime == null
-        ? addRecurrenceCalendarDays(nextDate, dayOffset) + "T" + existingEndTime
-        : localDateTime(input.endLocalDateTime, "endLocalDateTime");
+      const oldStart = localDateTime(String(occurrence.start_local), "stored start_local");
+      const oldEnd = localDateTime(String(occurrence.end_local), "stored end_local");
+      const explicitCivilSpan = Date.parse(oldEnd + "Z") - Date.parse(oldStart + "Z");
+      if (!Number.isSafeInteger(explicitCivilSpan) || explicitCivilSpan <= 0) {
+        throw new RangeError("La duración civil guardada de esta ocurrencia no es válida.");
+      }
       const start = nextDate + "T" + nextTime;
+      // Preserve the previously stored explicit start/end wall-clock span.
+      // This never derives an end clock from durationMinutes; the user's
+      // explicit new end takes precedence when supplied.
+      const end = input.endLocalDateTime == null
+        ? shiftLocalDateTime(start, explicitCivilSpan)
+        : localDateTime(input.endLocalDateTime, "endLocalDateTime");
       const resolution = resolveLocalDateTimeRange({
         timeZone: String(occurrence.time_zone),
         start: {
