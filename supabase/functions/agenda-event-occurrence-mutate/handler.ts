@@ -1,6 +1,7 @@
 import { normalizeEventIdempotencyKey } from "../../../src/features/agenda/domain/event-idempotency.js";
 import { addRecurrenceCalendarDays } from "../../../src/features/agenda/domain/recurrence.js";
 import { uuidv7 } from "../../../src/lib/uuidv7.js";
+import { findProtectedTimeConflicts } from "../../../src/features/agenda/domain/protected-time-conflicts.js";
 import {
   resolveActiveEventProfile,
   type EventAuthenticatedContext,
@@ -288,6 +289,90 @@ export async function handleRequest(
       throw new RangeError("La acción no es compatible con el tipo de esta ocurrencia.");
     }
 
+    const [protectedResult, taskScheduleResult] = await Promise.all([
+      ctx.supabaseAdmin.from("protected_time_block")
+        .select("id,updated_at,label,category,protection_mode,pattern_kind,time_zone,starts_at,ends_at,start_date,end_date_exclusive,weekdays,start_time_local,end_time_local,ends_next_day,archived_at,deleted_at")
+        .eq("owner_user_id", profile.profileId)
+        .is("archived_at", null)
+        .is("deleted_at", null)
+        .order("id", { ascending: true })
+        .limit(501),
+      ctx.supabaseAdmin.from("task_schedule")
+        .select("id,updated_at,starts_at,ends_at,time_zone,schedule_status")
+        .eq("owner_user_id", profile.profileId)
+        .in("schedule_status", ["proposed", "confirmed"])
+        .order("id", { ascending: true })
+        .limit(501),
+    ]);
+    if (protectedResult.error) return json({ error: "PROTECTED_TIME_CONFLICT_LOOKUP_FAILED" }, 503);
+    if (taskScheduleResult.error) return json({ error: "TASK_SCHEDULE_CONFLICT_LOOKUP_FAILED" }, 503);
+    const protectedBlocks = Array.isArray(protectedResult.data) ? protectedResult.data : [];
+    const taskSchedules = Array.isArray(taskScheduleResult.data) ? taskScheduleResult.data : [];
+    if (protectedBlocks.length > 500 || taskSchedules.length > 500) {
+      return json({ error: "OCCURRENCE_CONFLICT_ANALYSIS_EXCEEDS_500_ACTIVE_ROWS" }, 422);
+    }
+    const protectedSnapshot = protectedBlocks.map((item: Record<string, unknown>) => ({
+      id: String(item.id), updated_at: String(item.updated_at),
+    }));
+    const taskScheduleSnapshot = taskSchedules.map((item: Record<string, unknown>) => ({
+      id: String(item.id), updated_at: String(item.updated_at),
+    }));
+
+    if (input.action !== "cancel") {
+      let calendarTimeZone = "America/Havana";
+      if (occurrence.temporal_kind === "all_day") {
+        const preference = await ctx.supabaseAdmin.from("user_preference")
+          .select("time_zone")
+          .eq("user_id", profile.profileId)
+          .maybeSingle();
+        if (preference.error) return json({ error: "AGENDA_TIME_ZONE_LOOKUP_FAILED" }, 503);
+        if (typeof preference.data?.time_zone === "string" && preference.data.time_zone.trim()) {
+          calendarTimeZone = preference.data.time_zone;
+        }
+      }
+      const candidateEvent = occurrence.temporal_kind === "all_day"
+        ? {
+          temporal_kind: "all_day",
+          start_date: patch.start_date ?? occurrence.start_date,
+          end_date_exclusive: patch.end_date_exclusive ?? occurrence.end_date_exclusive,
+        }
+        : {
+          temporal_kind: "zoned_civil",
+          starts_at: patch.starts_at ?? occurrence.starts_at,
+          ends_at: patch.ends_at ?? occurrence.ends_at,
+        };
+      const analysis = findProtectedTimeConflicts({
+        event: candidateEvent,
+        protectedBlocks,
+        calendarTimeZone,
+        resolveRange: resolveLocalDateTimeRange,
+      });
+      if (analysis.conflicts.length > 0) {
+        return json({
+          error: "PROTECTED_TIME_CONFLICTS",
+          conflicts: analysis.conflicts,
+        }, 409);
+      }
+      const candidateStart = Date.parse(analysis.candidate.startsAt);
+      const candidateEnd = Date.parse(analysis.candidate.endsAt);
+      const taskConflicts = taskSchedules.flatMap((schedule: Record<string, unknown>) => {
+        const start = Date.parse(String(schedule.starts_at));
+        const end = Date.parse(String(schedule.ends_at));
+        return Number.isFinite(start) && Number.isFinite(end)
+          && candidateStart < end && start < candidateEnd
+          ? [{
+            taskScheduleId: schedule.id,
+            taskScheduleUpdatedAt: schedule.updated_at,
+            startsAt: schedule.starts_at,
+            endsAt: schedule.ends_at,
+          }]
+          : [];
+      });
+      if (taskConflicts.length > 0) {
+        return json({ error: "TASK_SCHEDULE_CONFLICTS", conflicts: taskConflicts }, 409);
+      }
+    }
+
     const result = await ctx.supabaseAdmin.rpc("mutate_calendar_event_occurrence_once", {
       p_owner_user_id: profile.profileId,
       p_occurrence_id: occurrence.id,
@@ -295,6 +380,8 @@ export async function handleRequest(
       p_payload_hash_hex: payloadHash,
       p_expected_row_version: intent.expectedRowVersion,
       p_occurrence_patch: patch,
+      p_protected_time_snapshot: protectedSnapshot,
+      p_task_schedule_snapshot: taskScheduleSnapshot,
       p_now: (dependencies.now ?? (() => new Date().toISOString()))(),
     });
     if (result.error) {
