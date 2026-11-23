@@ -167,6 +167,9 @@ try {
   const foreignRuns = await responseJson(foreignRunRead, "foreign run read");
   equal(foreignRuns.length, 0, "other owner cannot read processing run");
 
+  stopServer(queueServer.server);
+  queueServer = null;
+
   workerServer = await startFunction("inbox-processing-worker", { apikey: secret }, 405);
   const worker = async (apiKey, payload) => await fetch(workerServer.url, {
     method: "POST",
@@ -203,9 +206,18 @@ try {
   );
   equal(savedStatus, "succeeded:processed", "atomic run/capture completion");
 
+  stopServer(workerServer.server);
+  workerServer = null;
+  queueServer = await startFunction("inbox-processing-queue", { apikey: publishable }, 401);
+
   const secondQueue = await queue(ownerA.accessToken, captureRetry, keyRetry);
   equal(secondQueue.status, 202, "retry fixture enqueue");
   const secondBody = await responseJson(secondQueue, "retry fixture queue");
+
+  stopServer(queueServer.server);
+  queueServer = null;
+  workerServer = await startFunction("inbox-processing-worker", { apikey: secret }, 405);
+
   const firstClaim = await worker(secret, { action: "claim", leaseSeconds: 90 });
   equal(firstClaim.status, 200, "retry fixture first claim");
   const firstJob = (await responseJson(firstClaim, "retry fixture claim")).job;
