@@ -142,3 +142,21 @@
   .agenda-month-day .agenda-task-schedule-chip{padding:3px 4px;font-size:.52rem}
   .agenda-task-schedule-chip.is-compact .agenda-task-schedule-chip-title{font-size:.52rem}
 }
+
+.agenda-upcoming-panel{display:grid;gap:12px;margin:0 0 17px;padding:15px 17px;border:1px solid #e7eee7;border-radius:13px;background:linear-gradient(135deg,#fbfdfb 0%,#f5f8f4 100%)}
+.agenda-upcoming-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:12px}
+.agenda-upcoming-heading h3{margin-top:4px;color:#345244;font-family:Manrope,sans-serif;font-size:.95rem;font-weight:800}
+.agenda-upcoming-heading>span{color:#8a9990;font-size:.62rem;text-align:right}
+.agenda-upcoming-list{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}
+.agenda-upcoming-card{display:grid;align-content:start;gap:5px;min-width:0;min-height:98px;padding:11px 12px;border:1px solid #e3ebe2;border-left:3px solid #6b9877;border-radius:10px;background:#fff;color:#3b5949;text-align:left}
+.agenda-upcoming-card:hover{border-color:#bfd2bf;background:#fbfdfb}
+.agenda-upcoming-card.is-task{border-style:dashed;border-left:3px dashed #7898a5;background:#f8fbfc}
+.agenda-upcoming-card .agenda-upcoming-kind{color:#819287;font-size:.56rem;font-weight:800;letter-spacing:.08em}
+.agenda-upcoming-card .agenda-upcoming-kind.is-task{color:#678391}
+.agenda-upcoming-card strong{overflow:hidden;color:#345244;font-size:.76rem;text-overflow:ellipsis;white-space:nowrap}
+.agenda-upcoming-start{color:#74857a;font-size:.65rem}
+.agenda-upcoming-countdown{color:#52765c;font-size:.66rem;font-weight:800;font-variant-numeric:tabular-nums}
+.agenda-upcoming-countdown.is-ongoing{color:#8a6d37}
+.agenda-upcoming-empty{margin:0;color:#89968d;font-size:.7rem}
+@media(max-width:850px){.agenda-upcoming-list{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){.agenda-upcoming-panel{margin:0 0 13px;padding:12px}.agenda-upcoming-heading{align-items:flex-start;flex-direction:column;gap:4px}.agenda-upcoming-heading>span{text-align:left}.agenda-upcoming-list{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.agenda-upcoming-card{min-height:90px;padding:9px}.agenda-upcoming-card strong{font-size:.7rem}.agenda-upcoming-start,.agenda-upcoming-countdown{font-size:.6rem}}
