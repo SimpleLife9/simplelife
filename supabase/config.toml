@@ -27,3 +27,6 @@ verify_jwt = true
 
 [functions.agenda-event-series-materialize]
 verify_jwt = true
+
+[functions.agenda-event-occurrence-mutate]
+verify_jwt = true
