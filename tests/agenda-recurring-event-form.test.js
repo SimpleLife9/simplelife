@@ -65,6 +65,20 @@ test('timed series carry the explicit end clock and offset, with duration as met
   assert.equal(result.recurrenceRule.disambiguation, 'earlier');
 });
 
+test('positive sub-minute civil intervals keep positive duration metadata', () => {
+  const result = buildRecurringEventCreatePayload({
+    eventDraft: { temporal: {
+      kind: 'zoned_civil',
+      startLocalDateTime: '2026-11-24T10:00:30',
+      endLocalDateTime: '2026-11-24T10:00:40',
+      timeZone: 'America/Havana',
+    } },
+    frequency: 'DAILY',
+  });
+  assert.equal(result.recurrenceRule.durationMinutes, 1);
+  assert.equal(result.endLocalTime, '10:00:40.000');
+});
+
 test('validates frequency, interval, count, day offsets and duplicate weekday input', () => {
   const eventDraft = { temporal: { kind: 'all_day', startDate: '2026-11-24', endDateExclusive: '2026-11-25' } };
   assert.throws(() => buildRecurringEventCreatePayload({ eventDraft, frequency: 'HOURLY' }), /frequency/);
