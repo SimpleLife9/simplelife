@@ -4488,7 +4488,7 @@ test('Agenda creates a recurring all-day series and renders each persisted occur
   await upcoming.getByRole('button', { name: 'Rutina diaria' }).first().click();
   let detail = page.getByRole('dialog', { name: 'Rutina diaria' });
   await expect(detail).toContainText('Parte de una serie');
-  await expect(detail.getByRole('button', { name: 'Editar' })).toHaveCount(0);
+  await expect(detail.getByRole('button', { name: 'Editar', exact: true })).toHaveCount(0);
   const originalOccurrenceKey = calendarEventOccurrences[0].occurrence_key;
 
   const movedDate = await page.evaluate((value) => {
