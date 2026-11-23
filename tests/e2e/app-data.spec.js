@@ -1311,6 +1311,33 @@ test('Inbox recovers and organizes a saved text capture whose first fragment ins
   expect(updatedCaptures.some((row) => row.id === capture.id && row.attention_status === 'reviewed')).toBe(true);
 });
 
+test('Inbox refuses to invent fragments for an already processed capture', async ({ page }) => {
+  const capture = {
+    ...defaultCaptures[0],
+    id: '00000000-0000-7000-8000-000000000777',
+    processing_status: 'processed',
+    content_original: 'Processed capture with missing part history',
+  };
+  const { captures, insertedCaptureParts } = await mockSupabaseSession(page, {
+    captures: [capture],
+    captureParts: [],
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  await page.getByRole('button', { name: 'Organizar captura: ' + capture.content_original }).click();
+  await expect(page.getByRole('alert')).toContainText('ya fue procesada');
+  await expect(page.getByText(capture.content_original)).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(insertedCaptureParts).toHaveLength(0);
+  expect(captureParts).toHaveLength(0);
+  expect(captures).toHaveLength(1);
+});
+
 test('Inbox runs advisory processing, records review, and restores soft-deleted captures', async ({ page }) => {
   const { captures, captureParts, processingRuns, queueRequests, processingRequests, reviewRequests, trashRequests, insertedTasks } = await mockSupabaseSession(page);
   await page.goto('/');
@@ -1580,7 +1607,11 @@ test('Inbox ignores a delayed pagination response after the archive search chang
   await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
 
   await expect(page.getByText('Historical capture 1')).toBeVisible();
+  const delayedPageRequest = page.waitForRequest((request) =>
+    request.url().includes('/rest/v1/capture') && request.headers()['range'] === '100-199'
+  );
   await page.getByRole('button', { name: 'Cargar más capturas' }).click();
+  await delayedPageRequest;
   await page.getByLabel('Buscar capturas').fill('SEARCH_RACE_TARGET_UNIQUE');
   await expect(page.getByText('SEARCH_RACE_TARGET_UNIQUE')).toBeVisible();
   await page.waitForTimeout(1100);
