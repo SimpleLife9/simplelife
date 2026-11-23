@@ -230,7 +230,8 @@ Deno.test("moves one timed occurrence through the pinned IANA resolver and keeps
     actualLocalDate: "2026-11-25",
     actualLocalTime: "11:30",
   }), ctx, { now: () => "2026-11-23T12:00:00.000Z" });
-  assertEquals(response.status, 200, "move status");
+  const moveResponse = await body(response);
+  assertEquals(response.status, 200, "move status: " + JSON.stringify(moveResponse));
   const args = calls.rpcArgs as Record<string, unknown>;
   const patch = args.p_occurrence_patch as Record<string, unknown>;
   assertEquals(patch.override_kind, "moved", "move override kind");
