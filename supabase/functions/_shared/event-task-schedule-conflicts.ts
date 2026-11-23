@@ -57,20 +57,21 @@ function normalizeTaskScheduleEventDecisions(
     byId.set(id, { updatedAt: item.taskScheduleUpdatedAt, decision: "keep_overlap" });
   }
 
-  if (byId.size === 0 && conflicts.length > 0) {
+  if (conflicts.length > 0 && byId.size === 0) {
     return { ok: false, code: "TASK_SCHEDULE_CONFLICTS" };
   }
-  if (byId.size !== conflicts.length) {
-    return { ok: false, code: "TASK_SCHEDULE_CONFLICTS" };
+  const conflictIds = new Set(conflicts.map((item) => String(item.taskScheduleId).toLowerCase()));
+  if ([...byId.keys()].some((id) => !conflictIds.has(id))) {
+    return { ok: false, code: "TASK_SCHEDULE_CONFLICTS_CHANGED" };
   }
 
   const timestamp = instant(now, "now");
   const decisions: Record<string, unknown>[] = [];
   for (const conflict of conflicts) {
-    const id = String(conflict.taskScheduleId);
+    const id = String(conflict.taskScheduleId).toLowerCase();
     const suppliedDecision = byId.get(id);
-    if (!suppliedDecision
-      || suppliedDecision.updatedAt !== conflict.taskScheduleUpdatedAt
+    if (!suppliedDecision) return { ok: false, code: "TASK_SCHEDULE_CONFLICTS" };
+    if (suppliedDecision.updatedAt !== conflict.taskScheduleUpdatedAt
       || suppliedDecision.decision !== "keep_overlap") {
       return { ok: false, code: "TASK_SCHEDULE_CONFLICTS_CHANGED" };
     }
