@@ -230,7 +230,10 @@ test('serializes per-occurrence Protected Time consent and transient owner snaps
     id: decision.blockId,
     updated_at: decision.blockUpdatedAt,
   }]);
-  assert.equal(Object.keys(record).length, 28);
+  assert.deepEqual(record.task_schedule_conflict_decisions, []);
+  assert.deepEqual(record.task_schedule_snapshot, []);
+  assert.equal(record.task_schedule_window, undefined);
+  assert.equal(Object.keys(record).length, 30);
 });
 
 test('rejects malformed Protected Time snapshot evidence at the Event serializer boundary', () => {
