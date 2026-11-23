@@ -1,6 +1,6 @@
 import {
   addRecurrenceCalendarDays,
-  planRecurrenceMaterializationBatch,
+  expandRecurrenceDates,
   validateRecurrenceRule,
 } from "../../../src/features/agenda/domain/recurrence.js";
 import {
@@ -304,20 +304,34 @@ export async function handleRequest(
       }
       const seriesTimeZone = rule.temporalKind === "zoned_civil" ? rule.timeZone : calendarTimeZone;
       const materializationDate = localDateAt(now, seriesTimeZone);
-      const batch = planRecurrenceMaterializationBatch({
+      const horizonEndInclusive = addRecurrenceCalendarDays(materializationDate, 89);
+      const horizonEndExclusive = addRecurrenceCalendarDays(materializationDate, 90);
+      const effectiveFrom = typeof event.recurrence_effective_from === "string"
+        ? event.recurrence_effective_from
+        : rule.startDate;
+      const firstEligibleDate = effectiveFrom > materializationDate ? effectiveFrom : materializationDate;
+      const effectiveThrough = typeof event.recurrence_effective_through === "string"
+        ? event.recurrence_effective_through
+        : null;
+      if (firstEligibleDate > horizonEndInclusive
+        || (effectiveThrough != null && effectiveThrough < firstEligibleDate)) continue;
+      const lastEligibleDate = effectiveThrough != null && effectiveThrough < horizonEndInclusive
+        ? effectiveThrough
+        : horizonEndInclusive;
+      const candidates = expandRecurrenceDates({
         rule,
         seriesId,
-        anchorDate: materializationDate,
-        batchSize: 500,
+        rangeStart: firstEligibleDate,
+        rangeEnd: lastEligibleDate,
+        maxOccurrences: 500,
       });
-      const horizonEndExclusive = addRecurrenceCalendarDays(materializationDate, 90);
 
       const existingResult = await ctx.supabaseAdmin.from("calendar_event_occurrence")
         .select("*")
         .eq("owner_user_id", profile.profileId)
         .eq("calendar_event_id", seriesId)
-        .gte("original_local_date", materializationDate)
-        .lt("original_local_date", horizonEndExclusive)
+        .gte("original_local_date", firstEligibleDate)
+        .lt("original_local_date", addRecurrenceCalendarDays(lastEligibleDate, 1))
         .order("original_local_date", { ascending: true })
         .order("occurrence_key", { ascending: true })
         .limit(MAX_ACTIVE_CONFLICT_ROWS + 1);
@@ -331,7 +345,7 @@ export async function handleRequest(
       // Existing rows, regardless of override/review/terminal state, are never
       // rewritten by a rolling-horizon top-up.
       const existingKeys = new Set(existingRows.map((row: Record<string, any>) => row.occurrence_key));
-      const insertOccurrences = batch.occurrences
+      const insertOccurrences = candidates
         .filter((occurrence) => !existingKeys.has(occurrence.occurrenceKey));
       if (insertOccurrences.length === 0) continue;
 
