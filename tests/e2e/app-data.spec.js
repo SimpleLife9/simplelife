@@ -3585,7 +3585,7 @@ test('Protected Time exige consentimiento explícito antes de cruzar reservas de
 
   const decisionDialog = page.getByRole('alertdialog', { name: 'Hay reservas de tareas que se cruzan' });
   await expect(decisionDialog).toBeVisible();
-  await expect(decisionDialog.getByText(scheduleId)).toBeVisible();
+  await expect(decisionDialog.getByText('Gimnasio protegido')).toBeVisible();
   await expect(composer).toBeVisible();
   expect(protectedTimeMutationRequests).toHaveLength(1);
   expect(protectedTimeMutationRequests[0].payload.taskScheduleDecisions).toBeUndefined();
