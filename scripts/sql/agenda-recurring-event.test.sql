@@ -51,6 +51,7 @@ DECLARE
   v_result record;
   v_audit_count bigint;
   v_seen_count bigint;
+  v_top_up_inserted integer;
   v_rejected boolean := false;
 BEGIN
   IF NOT EXISTS (
@@ -202,6 +203,108 @@ BEGIN
     RAISE EXCEPTION 'Series and occurrence must append two audit rows in the same transaction; got %', v_audit_count;
   END IF;
 
+  -- Authenticated calendar reads top up only missing keys. Existing rows and
+  -- their lifecycle/override state are never rewritten; duplicate retries insert zero.
+  SELECT public.materialize_recurring_calendar_event_once(
+    v_owner,
+    v_event_id,
+    '2026-11-24'::date,
+    jsonb_build_array(jsonb_build_object(
+      'id', '019a0000-0000-7000-8000-000000000105',
+      'owner_user_id', v_owner,
+      'created_by_user_id', v_owner,
+      'updated_by_user_id', v_owner,
+      'calendar_event_id', v_event_id,
+      'occurrence_key', 'v1:019a0000-0000-7000-8000-000000000101:2026-11-25:ALL_DAY',
+      'original_local_date', '2026-11-25',
+      'original_local_time', NULL,
+      'actual_local_date', '2026-11-25',
+      'actual_local_time', NULL,
+      'temporal_kind', 'all_day',
+      'start_date', '2026-11-25',
+      'end_date_exclusive', '2026-11-26',
+      'start_local', NULL,
+      'end_local', NULL,
+      'time_zone', NULL,
+      'starts_at', NULL,
+      'ends_at', NULL,
+      'start_disambiguation', NULL,
+      'end_disambiguation', NULL,
+      'start_gap_strategy', NULL,
+      'end_gap_strategy', NULL,
+      'resolver_metadata', NULL,
+      'occurrence_status', 'scheduled',
+      'override_kind', NULL,
+      'review_candidate', NULL,
+      'row_version', 1,
+      'created_at', v_now,
+      'updated_at', v_now
+    )),
+    '[]'::jsonb,
+    '[]'::jsonb
+  ) INTO v_top_up_inserted;
+  IF v_top_up_inserted <> 1 THEN
+    RAISE EXCEPTION 'First materialization top-up should insert one missing occurrence; got %', v_top_up_inserted;
+  END IF;
+
+  SELECT public.materialize_recurring_calendar_event_once(
+    v_owner,
+    v_event_id,
+    '2026-11-24'::date,
+    jsonb_build_array(jsonb_build_object(
+      'id', '019a0000-0000-7000-8000-000000000106',
+      'owner_user_id', v_owner,
+      'created_by_user_id', v_owner,
+      'updated_by_user_id', v_owner,
+      'calendar_event_id', v_event_id,
+      'occurrence_key', 'v1:019a0000-0000-7000-8000-000000000101:2026-11-25:ALL_DAY',
+      'original_local_date', '2026-11-25',
+      'original_local_time', NULL,
+      'actual_local_date', '2026-11-25',
+      'actual_local_time', NULL,
+      'temporal_kind', 'all_day',
+      'start_date', '2026-11-25',
+      'end_date_exclusive', '2026-11-26',
+      'start_local', NULL,
+      'end_local', NULL,
+      'time_zone', NULL,
+      'starts_at', NULL,
+      'ends_at', NULL,
+      'start_disambiguation', NULL,
+      'end_disambiguation', NULL,
+      'start_gap_strategy', NULL,
+      'end_gap_strategy', NULL,
+      'resolver_metadata', NULL,
+      'occurrence_status', 'scheduled',
+      'override_kind', NULL,
+      'review_candidate', NULL,
+      'row_version', 1,
+      'created_at', v_now,
+      'updated_at', v_now
+    )),
+    '[]'::jsonb,
+    '[]'::jsonb
+  ) INTO v_top_up_inserted;
+  IF v_top_up_inserted <> 0 THEN
+    RAISE EXCEPTION 'Repeated materialization must not duplicate an existing occurrence; inserted %', v_top_up_inserted;
+  END IF;
+
+  SELECT count(*) INTO v_seen_count
+  FROM public.calendar_event_occurrence
+  WHERE calendar_event_id = v_event_id AND owner_user_id = v_owner;
+  IF v_seen_count <> 2 THEN
+    RAISE EXCEPTION 'Recurring top-up must leave exactly two occurrence rows; got %', v_seen_count;
+  END IF;
+
+  SELECT count(*) INTO v_audit_count
+  FROM public.audit_event
+  WHERE account_user_id = v_owner
+    AND entity_type = 'calendar_event_occurrence'
+    AND entity_id = '019a0000-0000-7000-8000-000000000105';
+  IF v_audit_count <> 1 THEN
+    RAISE EXCEPTION 'Top-up must append exactly one occurrence audit row; got %', v_audit_count;
+  END IF;
+
   -- A retry may use a newly generated provisional series/occurrence ID, but the
   -- same owner + key + canonical payload must replay the original winning IDs.
   v_event := jsonb_set(v_event, '{id}', to_jsonb('019a0000-0000-7000-8000-000000000199'::text));
@@ -290,8 +393,8 @@ BEGIN
   SELECT count(*) INTO v_seen
   FROM public.calendar_event_occurrence
   WHERE calendar_event_id = '019a0000-0000-7000-8000-000000000101';
-  IF v_seen <> 1 THEN
-    RAISE EXCEPTION 'Owner A should read its own recurring occurrence; got %', v_seen;
+  IF v_seen <> 2 THEN
+    RAISE EXCEPTION 'Owner A should read its two own recurring occurrences; got %', v_seen;
   END IF;
 END;
 $test$;
