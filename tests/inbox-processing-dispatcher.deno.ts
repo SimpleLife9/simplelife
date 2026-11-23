@@ -46,6 +46,7 @@ Deno.test("dispatcher claims, processes and atomically completes a bounded due b
           return { data: job ? [{ ...job, attempt_number: 1 }] : [], error: null };
         }
         if (name === "complete_inbox_processing_run_with_parts") return { data: true, error: null };
+        if (name === "purge_expired_inbox_captures") return { data: [{ purged_count: 0, purged_capture_ids: [] }], error: null };
         throw new Error("Unexpected RPC " + name);
       },
     },
@@ -87,6 +88,7 @@ Deno.test("dispatcher makes a persistence failure retryable and reports a lost l
         };
         if (name === "complete_inbox_processing_run_with_parts") return { data: false, error: { message: "db unavailable" } };
         if (name === "fail_inbox_processing_run") return { data: false, error: null };
+        if (name === "purge_expired_inbox_captures") return { data: [{ purged_count: 0, purged_capture_ids: [] }], error: null };
         return { data: false, error: null };
       },
     },

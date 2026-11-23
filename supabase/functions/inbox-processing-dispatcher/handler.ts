@@ -183,10 +183,34 @@ export async function handleRequest(
     }
   }
 
+  let purgedCount = 0;
+  let purgeFailed = false;
+  const purgeAuditIds = Array.from({ length: 10 }, () => uuidv7());
+  try {
+    const purge = await ctx.supabaseAdmin.rpc("purge_expired_inbox_captures", {
+      p_batch_size: 10,
+      p_audit_ids: purgeAuditIds,
+    });
+    if (purge.error) {
+      purgeFailed = true;
+    } else {
+      const purgeRow = Array.isArray(purge.data) ? purge.data[0] : purge.data;
+      if (isRecord(purgeRow) && typeof purgeRow.purged_count === "number") {
+        purgedCount = purgeRow.purged_count;
+      } else {
+        purgeFailed = true;
+      }
+    }
+  } catch {
+    purgeFailed = true;
+  }
+
   return json({
     accepted: true,
     status: stats.claimed === 0 ? "queue_empty" : "completed",
     ...stats,
+    purgedCount,
+    purgeFailed,
     maxJobs,
     queueEmpty: stats.claimed < maxJobs,
   }, 200);

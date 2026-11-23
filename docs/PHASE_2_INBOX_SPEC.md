@@ -124,7 +124,7 @@ Each slice should be a focused PR with exact-SHA CI. The phase closes only when 
 - Owner-authenticated processing bridge. The browser can only request a run visible through its own RLS-scoped client; service-role operations remain server-side.
 - Provider-free deterministic rules processor (inbox-rules-v1) that proposes the eight categories. This is explicitly **heuristic processing, not an AI model**; confidence is heuristic affinity, not a probability.
 - Multi-item splitting only at explicit list/bullet boundaries. The SQL completion RPC validates that concatenating every stored fragment reconstructs content_original exactly. Parts remain unreviewed.
-- Inbox UI processing/retry control, per-part review, manual correction, rejection, and explicit task/note/list destination confirmation. No destination is created by classification.
+- Inbox UI processing/retry control, per-part review, manual correction, rejection, and explicit task, Agenda Event, existing Goal/Subgoal, Project, note/idea and list destination confirmation. Existing objectives are linked rather than duplicated; no destination is created by classification.
 - Owner-scoped, audited, recoverable trash with a 30-day retention window and idempotent restore/trash RPCs.
 - Authenticated Inbox → Agenda Event creation through the existing idempotent Agenda writer, with a single-target owner-scoped provenance link to `calendar_event`.
 - Indexed full-text search across the complete capture archive, paginated in 100-row pages rather than limited to the latest 250 captures.
@@ -138,8 +138,8 @@ Each slice should be a focused PR with exact-SHA CI. The phase closes only when 
 2. **Actual AI classification:** no AI provider/model or credentials have been approved. The deterministic processor is a safe provider-independent baseline, not a substitute for an AI capability.
 3. **Offline private capture/sync:** remains disabled until encryption, key recovery, conflict handling, idempotency, deletion and platform-specific tests are proven.
 4. **Background retry schedule:** the secure dispatcher is implemented and tested in local Edge Runtime, but no hosted cron/scheduler or secret invocation has been configured or activated.
-5. **Retention purge:** trash/restore enforces a 30-day recovery window; scheduled physical purge after expiry still needs a separately tested, auditable retention worker.
+5. **Retention schedule:** a server-only physical purge now removes expired capture records, parts, links and processing runs in bounded batches, while preserving privacy-safe audit metadata and skipping active leases. Its invocation still needs a hosted scheduler.
 6. **Manual acceptance:** Playwright desktop/mobile does not replace owner acceptance on desktop and a physical Android device.
-7. **Destination readiness:** Event creation is linked to Agenda; Habit and Request remain proposals only because their owning destination workflows belong to later product phases.
+7. **Destination readiness:** Inbox can link to existing Goal/Subgoal and Project records and create Events through Agenda. Habit and Request remain proposals only because their owning destination workflows belong to later product phases.
 
 No hosted migration, production Edge deployment, secret change, merge, release or production data write is part of this branch. Do not mark Phase 2 closed until every required exit gate has either been implemented and evidenced or explicitly accepted as a deferral by the owner.
