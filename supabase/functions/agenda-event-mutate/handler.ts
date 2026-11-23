@@ -182,7 +182,7 @@ export async function handleRequest(
   const allowedKeys = input.action === "edit"
     ? [...requiredKeys, "protectedTimeDecisions", "taskScheduleDecisions"]
     : input.action === "reopen" || input.action === "restore"
-    ? [...requiredKeys, "taskScheduleDecisions"]
+    ? [...requiredKeys, "protectedTimeDecisions", "taskScheduleDecisions"]
     : requiredKeys;
   if (requiredKeys.some((key) => !(key in input))
     || Object.keys(input).some((key) => !allowedKeys.includes(key))) {
@@ -395,12 +395,71 @@ export async function handleRequest(
     } else if (mutation.action === "reopen" || mutation.action === "restore") {
       const currentResult = await ctx.supabaseAdmin
         .from("calendar_event")
-        .select("temporal_kind,start_date,end_date_exclusive,starts_at,ends_at,task_schedule_conflict_decisions")
+        .select("temporal_kind,start_date,end_date_exclusive,starts_at,ends_at,protected_time_decisions,task_schedule_conflict_decisions")
         .eq("owner_user_id", profile.profileId)
         .eq("id", mutation.eventId)
         .maybeSingle();
       if (currentResult.error) return json({ error: "EVENT_CONFLICT_CONTEXT_LOOKUP_FAILED" }, 503);
       if (!currentResult.data) return json({ error: "EVENT_NOT_FOUND" }, 404);
+
+      const priorProtectedRecords = Array.isArray(currentResult.data.protected_time_decisions)
+        ? currentResult.data.protected_time_decisions as Record<string, unknown>[]
+        : [];
+      const priorProtectedByKey = storedDecisionMap(priorProtectedRecords);
+      const priorProtectedInputs = storedDecisionInputs(priorProtectedRecords);
+      const retainProtectedConsent = input.protectedTimeDecisions === undefined;
+      let protectedDecisionInputs = retainProtectedConsent
+        ? priorProtectedInputs
+        : requestedProtectedTimeDecisions;
+      let protectedAssessment = await assessOwnerProtectedTimeConflicts({
+        supabaseAdmin: ctx.supabaseAdmin,
+        ownerProfileId: profile.profileId,
+        event: currentResult.data,
+        suppliedDecisions: protectedDecisionInputs,
+        now,
+      });
+
+      // Reuse an earlier Protected Time approval only while the exact block
+      // version and occurrence remain unchanged. New or edited blocks require
+      // a fresh, explicit decision before an Event can become active again.
+      if (!protectedAssessment.ok && retainProtectedConsent) {
+        const reusable = protectedAssessment.conflicts.flatMap((conflict) => {
+          const previous = priorProtectedByKey.get(
+            typeof conflict.conflictKey === "string" ? conflict.conflictKey : "",
+          );
+          if (!previous
+            || previous.blockUpdatedAt !== conflict.blockUpdatedAt
+            || previous.decision !== conflict.requiredDecision) return [];
+          return [{
+            blockId: conflict.blockId,
+            blockUpdatedAt: conflict.blockUpdatedAt,
+            occurrenceStartsAt: conflict.occurrenceStartsAt,
+            decision: conflict.requiredDecision,
+          }];
+        });
+        protectedDecisionInputs = reusable;
+        protectedAssessment = await assessOwnerProtectedTimeConflicts({
+          supabaseAdmin: ctx.supabaseAdmin,
+          ownerProfileId: profile.profileId,
+          event: currentResult.data,
+          suppliedDecisions: protectedDecisionInputs,
+          now,
+        });
+      }
+      if (!protectedAssessment.ok) {
+        return json({
+          error: protectedAssessment.code,
+          conflicts: protectedAssessment.conflicts,
+        }, 409);
+      }
+      const protectedDecisionsToPersist = retainProtectedConsent
+        ? protectedAssessment.assessment.conflicts.flatMap((conflict) => {
+          const previous = priorProtectedByKey.get(
+            typeof conflict.conflictKey === "string" ? conflict.conflictKey : "",
+          );
+          return previous ? [previous] : [];
+        })
+        : protectedAssessment.assessment.decisions;
 
       const priorRecords = Array.isArray(currentResult.data.task_schedule_conflict_decisions)
         ? currentResult.data.task_schedule_conflict_decisions as Record<string, unknown>[]
@@ -460,6 +519,8 @@ export async function handleRequest(
         })
         : assessment.assessment.decisions;
       eventPatch = {
+        protected_time_decisions: [...protectedDecisionsToPersist],
+        protected_time_snapshot: [...protectedAssessment.assessment.snapshot],
         task_schedule_conflict_decisions: [...decisionsToPersist],
         task_schedule_snapshot: [...assessment.assessment.snapshot],
         task_schedule_window: assessment.assessment.candidate,
