@@ -377,7 +377,8 @@ Deno.test("restoring archived Protected Time requires version-bound TaskSchedule
   const taskScheduleUpdatedAt = "2026-12-25T04:00:00.000Z";
   const restoreBlock = {
     id: BLOCK_ID,
-    updated_at: VERSION,
+    // PostgREST's UTC offset form is the same instant as VERSION's Z form.
+    updated_at: "2026-11-22T18:00:00.123456+00:00",
     label: "Sueño protegido",
     category: "sleep",
     protection_mode: "hard",
@@ -430,6 +431,7 @@ Deno.test("restoring archived Protected Time requires version-bound TaskSchedule
   }), ctx, { now: () => "2026-11-22T18:11:00.000Z" });
   assertEquals(accepted.status, 200, "restore with accepted conflict status");
   const args = calls.rpcArgs as Record<string, unknown>;
+  assertEquals(args.p_expected_updated_at, VERSION, "full-precision expected version reaches SQL CAS unchanged");
   assertEquals(args.p_payload_version, "protected-time-mutation-v2", "restore consent is hash-versioned");
   assertEquals(args.p_block_patch && Object.keys(args.p_block_patch as Record<string, unknown>).length, 2,
     "restore patch contains only decision evidence and the complete snapshot");
