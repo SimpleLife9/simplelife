@@ -17,7 +17,7 @@ ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO public.user_profile (id, auth_user_id, display_name)
 VALUES (
-  '019a0000-0000-7000-8000-000000000071',
+  '019b0000-0000-7000-8000-000000000071',
   'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
   'Protected Time TaskSchedule owner'
 )
@@ -26,9 +26,9 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.task (
   id, owner_user_id, created_by_user_id, action, status, time_zone
 ) VALUES (
-  '019a0000-0000-7000-8000-000000000072',
-  '019a0000-0000-7000-8000-000000000071',
-  '019a0000-0000-7000-8000-000000000071',
+  '019b0000-0000-7000-8000-000000000072',
+  '019b0000-0000-7000-8000-000000000071',
+  '019b0000-0000-7000-8000-000000000071',
   'Reservation backing task', 'todo', 'America/Havana'
 );
 
@@ -36,14 +36,14 @@ SET LOCAL ROLE service_role;
 
 DO $test$
 DECLARE
-  v_owner uuid := '019a0000-0000-7000-8000-000000000071';
-  v_task uuid := '019a0000-0000-7000-8000-000000000072';
-  v_schedule uuid := '019a0000-0000-7000-8000-000000000073';
-  v_block uuid := '019a0000-0000-7000-8000-000000000074';
-  v_create_key uuid := '019a0000-0000-7000-8000-000000000075';
-  v_edit_key uuid := '019a0000-0000-7000-8000-000000000076';
-  v_archive_key uuid := '019a0000-0000-7000-8000-000000000077';
-  v_restore_key uuid := '019a0000-0000-7000-8000-000000000078';
+  v_owner uuid := '019b0000-0000-7000-8000-000000000071';
+  v_task uuid := '019b0000-0000-7000-8000-000000000072';
+  v_schedule uuid := '019b0000-0000-7000-8000-000000000073';
+  v_block uuid := '019b0000-0000-7000-8000-000000000074';
+  v_create_key uuid := '019b0000-0000-7000-8000-000000000075';
+  v_edit_key uuid := '019b0000-0000-7000-8000-000000000076';
+  v_archive_key uuid := '019b0000-0000-7000-8000-000000000077';
+  v_restore_key uuid := '019b0000-0000-7000-8000-000000000078';
   v_schedule_version timestamptz;
   v_block_version timestamptz;
   v_patch jsonb;
@@ -262,7 +262,7 @@ BEGIN
   SELECT count(*) INTO v_audit_count
   FROM public.audit_event
   WHERE entity_type = 'protected_time_block'
-    AND entity_id = '019a0000-0000-7000-8000-000000000074'::uuid
+    AND entity_id = '019b0000-0000-7000-8000-000000000074'::uuid
     AND action = 'protected_time_block.task_schedule_decisions_recorded';
 
   IF v_audit_count <> 2 THEN
@@ -273,14 +273,14 @@ BEGIN
   SELECT details INTO v_details
   FROM public.audit_event
   WHERE entity_type = 'protected_time_block'
-    AND entity_id = '019a0000-0000-7000-8000-000000000074'::uuid
+    AND entity_id = '019b0000-0000-7000-8000-000000000074'::uuid
     AND action = 'protected_time_block.task_schedule_decisions_recorded'
   ORDER BY recorded_at DESC
   LIMIT 1;
 
   SELECT task_schedule_conflict_decisions INTO v_expected_decisions
   FROM public.protected_time_block
-  WHERE id = '019a0000-0000-7000-8000-000000000074'::uuid;
+  WHERE id = '019b0000-0000-7000-8000-000000000074'::uuid;
 
   IF v_details->>'decision_version' IS DISTINCT FROM 'protected-time-task-schedule-decision-v1'
      OR v_details->'decisions' IS DISTINCT FROM v_expected_decisions
