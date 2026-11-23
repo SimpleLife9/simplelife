@@ -32,14 +32,14 @@ test('this and following splits the active segment while retaining the original 
     seriesId: 'series-a',
     newSeriesId: 'series-b',
     rule: baseRule,
-    proposedRule: { ...baseRule, byWeekday: ['MO'] },
+    proposedRule: { ...baseRule, startDate: '2026-01-19', byWeekday: ['MO'] },
     selectedDate: '2026-01-19',
     effectiveFromDate: '2026-01-05',
   });
   assert.equal(result.previousSegment.effectiveThroughDate, '2026-01-18');
   assert.equal(result.previousSegment.rule.startDate, '2026-01-05');
   assert.equal(result.nextSegment.seriesId, 'series-b');
-  assert.equal(result.nextSegment.rule.startDate, '2026-01-05');
+  assert.equal(result.nextSegment.rule.startDate, '2026-01-19');
   assert.equal(result.nextSegment.effectiveFromDate, '2026-01-19');
   assert.equal(result.nextSegment.materializeAfterDate, '2026-01-19');
   assert.equal(result.nextSegment.inheritedOccurrenceKey, 'v1:series-a:2026-01-19:ALL_DAY');
@@ -92,8 +92,8 @@ test('edit scopes fail closed for non-occurrence dates, missing split IDs and ch
   assert.throws(() => planRecurrenceEditScope({
     scope: 'this_and_following', seriesId: 'series-a', newSeriesId: 'series-b',
     rule: baseRule, selectedDate: '2026-01-19',
-    proposedRule: { ...baseRule, startDate: '2026-01-19' },
-  }), /preserve the original recurrence anchor/);
+    proposedRule: { ...baseRule, startDate: '2026-01-20' },
+  }), /start the new segment on the selected original date/);
 });
 
 test('all three edit scopes reject a selected date outside an effective segment', () => {
