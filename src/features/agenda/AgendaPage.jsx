@@ -428,20 +428,6 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
           response = error.context instanceof Response ? await error.context.clone().json() : null;
           if (response?.error) message = response.error;
         } catch { /* keep SDK error message */ }
-        if (response?.error === 'PROTECTED_TIME_CONFLICTS'
-          || response?.error === 'PROTECTED_TIME_CONFLICTS_CHANGED') {
-          if (response.error === 'PROTECTED_TIME_CONFLICTS_CHANGED') setPendingKey(null);
-          setProtectedConflictPrompt({
-            error: response.error,
-            action,
-            conflicts: Array.isArray(response.conflicts) ? response.conflicts : [],
-            taskScheduleDecisions: acceptedTaskScheduleDecisions,
-          });
-          setProtectedConflictChoices({});
-          message = response.error === 'PROTECTED_TIME_CONFLICTS_CHANGED'
-            ? 'Los bloques protegidos cambiaron mientras se reactivaba el evento. Revisa los cruces actuales.'
-            : 'El evento no se reabrió ni restauró. Decide explícitamente cómo conservar el tiempo protegido.';
-        }
         if (response?.error === 'TASK_SCHEDULE_CONFLICTS'
           || response?.error === 'TASK_SCHEDULE_CONFLICTS_CHANGED') {
           if (response.error === 'TASK_SCHEDULE_CONFLICTS_CHANGED') setPendingKey(null);
@@ -578,6 +564,20 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
           response = error.context instanceof Response ? await error.context.clone().json() : null;
           if (response?.error) message = response.error;
         } catch { /* keep SDK error message */ }
+        if (response?.error === 'PROTECTED_TIME_CONFLICTS'
+          || response?.error === 'PROTECTED_TIME_CONFLICTS_CHANGED') {
+          if (response.error === 'PROTECTED_TIME_CONFLICTS_CHANGED') setPendingKey(null);
+          setProtectedConflictPrompt({
+            error: response.error,
+            action,
+            conflicts: Array.isArray(response.conflicts) ? response.conflicts : [],
+            taskScheduleDecisions: acceptedTaskScheduleDecisions,
+          });
+          setProtectedConflictChoices({});
+          message = response.error === 'PROTECTED_TIME_CONFLICTS_CHANGED'
+            ? 'Los bloques protegidos cambiaron mientras se reactivaba el evento. Revisa los cruces actuales.'
+            : 'El evento no se reabrió ni restauró. Decide explícitamente cómo conservar el tiempo protegido.';
+        }
         if (response?.error === 'TASK_SCHEDULE_CONFLICTS'
           || response?.error === 'TASK_SCHEDULE_CONFLICTS_CHANGED') {
           if (response.error === 'TASK_SCHEDULE_CONFLICTS_CHANGED') setPendingKey(null);
