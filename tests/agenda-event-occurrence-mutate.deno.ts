@@ -237,6 +237,7 @@ Deno.test("moves one timed occurrence through the pinned IANA resolver and keeps
   assertEquals(patch.actual_local_date, "2026-11-25", "effective moved date");
   assertEquals(patch.actual_local_time, "11:30:00.000", "effective moved clock");
   assertEquals(patch.start_local, "2026-11-25T11:30:00.000", "resolved local start");
+  assertEquals(patch.end_local, "2026-11-25T12:30:00.000", "explicit civil span shifts with the moved start");
   assert(typeof patch.starts_at === "string" && typeof patch.ends_at === "string"
     && Date.parse(String(patch.ends_at)) > Date.parse(String(patch.starts_at)),
   "moved occurrence must receive a positive authoritative UTC interval");
@@ -259,7 +260,7 @@ Deno.test("modifies one all-day occurrence duration without changing its origina
   const patch = (calls.rpcArgs as Record<string, unknown>).p_occurrence_patch as Record<string, unknown>;
   assertEquals(patch.override_kind, "modified", "modify override kind");
   assertEquals(patch.end_date_exclusive, "2026-11-27", "modified exclusive end");
-  assertEquals(patch.actual_local_date, "2026-11-24", "original effective start remains unchanged");
+  assertEquals(patch.actual_local_date, undefined, "duration-only edit does not patch the original effective start");
 });
 
 Deno.test("replays a completed occurrence mutation before reading or resolving the row", async () => {
