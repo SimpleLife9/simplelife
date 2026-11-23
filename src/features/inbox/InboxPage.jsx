@@ -637,7 +637,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
                             </div>;
                           }) : <p className="muted">No hay cambios de revisión registrados.</p>}
                     </div>}
-                  </div>
+                  </div>}
                   {capturePart.original_fragment !== capture.content_original && <p>{capturePart.original_fragment}</p>}
                   {partLink ? <span className="muted">Destino vinculado y trazable.</span> : <>
                     <button type="button" className="capture-action-button" disabled={busy || capture.attention_status === 'archived' || Boolean(capture.deleted_at)} onClick={() => openOrganizer(capture, capturePart)}>Revisar y confirmar destino</button>
