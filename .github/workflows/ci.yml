@@ -182,3 +182,5 @@ jobs:
 # Phase 2: CI covers capture security, processing proposals and authenticated worker paths.
 
 # Keep the original queue lifecycle contract tests in the phase 2 integration suite.
+
+# Phase 2 final exact-SHA validation includes the secure capture, processing, review and trash slices.
