@@ -124,6 +124,11 @@ async function mockSupabaseSession(page, initialData = {}) {
     review_status: 'unreviewed',
   })))];
   const updatedCaptureParts = [];
+  const processingRuns = [];
+  const queueRequests = [];
+  const processingRequests = [];
+  const reviewRequests = [];
+  const trashRequests = [];
   const captureLinks = [...(initialData.captureLinks || [])];
   const insertedCaptureLinks = [];
   const noteIdeas = [...(initialData.noteIdeas || [])];
@@ -399,6 +404,11 @@ async function mockSupabaseSession(page, initialData = {}) {
       return;
     }
 
+    if (url.pathname === '/rest/v1/processing_run' && method === 'GET') {
+      await json(200, processingRuns);
+      return;
+    }
+
     if (url.pathname === '/rest/v1/capture_part' && method === 'GET') {
       const idFilter = url.searchParams.get('id') || '';
       const captureFilter = url.searchParams.get('capture_id') || '';
@@ -529,7 +539,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     }
 
     if (url.pathname === '/rest/v1/capture' && method === 'GET') {
-      await json(200, captures.filter((capture) => !capture.deleted_at));
+      await json(200, captures);
       return;
     }
 
@@ -833,6 +843,87 @@ async function mockSupabaseSession(page, initialData = {}) {
       return;
     }
 
+    if (url.pathname === '/functions/v1/inbox-processing-queue' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const run = {
+        id: '00000000-0000-7000-8000-000000000901',
+        capture_id: payload.captureId,
+        status: 'queued',
+        created_at: new Date().toISOString(),
+        result: {},
+      };
+      processingRuns.unshift(run);
+      queueRequests.push(payload);
+      await json(200, { runId: run.id, replayed: false });
+      return;
+    }
+
+    if (url.pathname === '/functions/v1/inbox-processing-process' && method === 'POST') {
+      const payload = request.postDataJSON();
+      processingRequests.push(payload);
+      const run = processingRuns.find((item) => item.id === payload.runId);
+      const capture = run && captures.find((item) => item.id === run.capture_id);
+      const part = capture && captureParts.find((item) => item.capture_id === capture.id);
+      if (!run || !capture || !part) {
+        await json(404, { error: 'PROCESSING_FIXTURE_NOT_FOUND' });
+        return;
+      }
+      part.category = 'task';
+      part.interpretation = 'Sugerencia heurística; requiere confirmación.';
+      part.review_status = 'unreviewed';
+      run.status = 'succeeded';
+      run.result = {
+        engine: 'deterministic-rules',
+        processorVersion: 'inbox-rules-v1',
+        classification: 'advisory-only',
+        proposals: [{ partIndex: 0, category: 'task', confidence: 0.68, requiresClarification: false }],
+      };
+      capture.processing_status = 'processed';
+      await json(200, { status: 'succeeded', engine: 'deterministic-rules', proposalCount: 1 });
+      return;
+    }
+
+    if (url.pathname === '/rest/v1/rpc/review_inbox_capture_part' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const part = captureParts.find((item) => item.id === payload.p_capture_part_id);
+      reviewRequests.push(payload);
+      if (!part) { await json(200, false); return; }
+      Object.assign(part, {
+        category: payload.p_category ?? part.category,
+        interpretation: payload.p_interpretation ?? part.interpretation,
+        review_status: payload.p_review_status,
+      });
+      updatedCaptureParts.push({ id: part.id, category: part.category, interpretation: part.interpretation, review_status: part.review_status });
+      await json(200, true);
+      return;
+    }
+
+    if (url.pathname === '/rest/v1/rpc/trash_inbox_capture' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const capture = captures.find((item) => item.id === payload.p_capture_id);
+      trashRequests.push({ action: 'trash', ...payload });
+      if (!capture || capture.deleted_at) { await json(200, false); return; }
+      const now = Date.now();
+      capture.deleted_at = new Date(now).toISOString();
+      capture.purge_after = new Date(now + 30 * 24 * 60 * 60 * 1000).toISOString();
+      await json(200, true);
+      return;
+    }
+
+    if (url.pathname === '/rest/v1/rpc/restore_inbox_capture' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const capture = captures.find((item) => item.id === payload.p_capture_id);
+      trashRequests.push({ action: 'restore', ...payload });
+      if (!capture || !capture.deleted_at || new Date(capture.purge_after).getTime() <= Date.now()) {
+        await json(200, false);
+        return;
+      }
+      capture.deleted_at = null;
+      capture.purge_after = null;
+      await json(200, true);
+      return;
+    }
+
     if (url.pathname.startsWith('/rest/v1/')) {
       await json(200, []);
       return;
@@ -841,7 +932,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     await json(404, { message: `Unexpected mocked Supabase request: ${method} ${url.pathname}` });
   });
 
-  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, protectedTimeBlocks, protectedTimeMutationRequests, protectedTimeConflicts, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
+  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, protectedTimeBlocks, protectedTimeMutationRequests, protectedTimeConflicts, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, processingRuns, queueRequests, processingRequests, reviewRequests, trashRequests, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
 }
 
 test('mock-authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
@@ -1086,6 +1177,79 @@ test('Inbox supports search, review states, archiving, restore and original capt
   await expect(page.getByText(original)).toBeVisible();
 });
 
+
+test('Inbox runs advisory processing, records review, and restores soft-deleted captures', async ({ page }) => {
+  const { captures, captureParts, processingRuns, queueRequests, processingRequests, reviewRequests, trashRequests, insertedTasks } = await mockSupabaseSession(page);
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  const original = captures[0].content_original;
+  await page.getByRole('button', { name: 'Generar sugerencias' }).first().click();
+  await expect(page.getByText('Propuestas preparadas. Revisa cada fragmento; no se creó ningún destino automáticamente.')).toBeVisible();
+  expect(queueRequests).toHaveLength(1);
+  expect(processingRequests).toHaveLength(1);
+  expect(processingRuns[0].result).toMatchObject({
+    engine: 'deterministic-rules',
+    classification: 'advisory-only',
+  });
+  expect(captureParts[0]).toMatchObject({ category: 'task', review_status: 'unreviewed', original_fragment: original });
+  expect(insertedTasks).toHaveLength(0);
+  await expect(page.getByText('Afinidad heurística: 68%')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Descartar sugerencia' }).click();
+  await expect(page.getByText('Sugerencia descartada y decisión registrada en auditoría.')).toBeVisible();
+  expect(reviewRequests.at(-1)).toMatchObject({
+    p_capture_part_id: captureParts[0].id,
+    p_review_status: 'rejected',
+  });
+  expect(captureParts[0].review_status).toBe('rejected');
+
+  await page.getByRole('button', { name: 'Enviar a papelera' }).first().click();
+  await expect(page.getByText('Captura movida a la papelera. Se conservará durante 30 días antes de poder purgarse.')).toBeVisible();
+  expect(trashRequests.at(-1).action).toBe('trash');
+  expect(captures[0].deleted_at).toBeTruthy();
+  expect(new Date(captures[0].purge_after).getTime() - new Date(captures[0].deleted_at).getTime()).toBe(30 * 24 * 60 * 60 * 1000);
+
+  await page.getByLabel('Filtrar capturas por revisión').selectOption('trash');
+  await expect(page.getByText(original)).toBeVisible();
+  await page.getByRole('button', { name: 'Restaurar desde papelera' }).click();
+  await expect(page.getByText('Captura restaurada desde la papelera.')).toBeVisible();
+  expect(trashRequests.at(-1).action).toBe('restore');
+  expect(captures[0].deleted_at).toBeNull();
+  expect(captures[0].purge_after).toBeNull();
+  await page.getByLabel('Filtrar capturas por revisión').selectOption('needs_review');
+  await expect(page.getByText(original)).toBeVisible();
+  expect(insertedTasks).toHaveLength(0);
+});
+
+test('Inbox marks normalized duplicate text without merging or deleting captures', async ({ page }) => {
+  const { captures, captureParts, captureLinks } = await mockSupabaseSession(page);
+  const duplicate = {
+    ...captures[0],
+    id: '00000000-0000-7000-8000-000000000111',
+    content_original: 'LLAMAR AL PROVEEDOR ANTES DEL VIERNES!',
+    captured_at: '2026-11-20T12:00:00.000Z',
+  };
+  captures.push(duplicate);
+  captureParts.push({
+    ...captureParts[0], id: '00000000-0000-7000-8000-000000000211',
+    capture_id: duplicate.id,
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+  await expect(page.getByText('Posible duplicado normalizado · revisar antes de combinar')).toHaveCount(2);
+  expect(captures).toHaveLength(3);
+  expect(captureLinks).toHaveLength(0);
+  expect(captures.every((capture) => !capture.deleted_at)).toBe(true);
+});
 
 test('Projects support search, lifecycle, editing, archive, restore and linked task detail', async ({ page }) => {
   const projectA = {
