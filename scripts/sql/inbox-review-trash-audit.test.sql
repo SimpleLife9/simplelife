@@ -20,6 +20,25 @@ VALUES
  ('019b2000-0000-7000-8000-000000000002','bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb','Inbox other owner')
 ON CONFLICT(id) DO NOTHING;
 
+DO $test$
+BEGIN
+  IF has_column_privilege('authenticated','public.capture','attention_status','UPDATE') THEN
+    RAISE EXCEPTION 'Authenticated users must not bypass the audited attention-status RPC';
+  END IF;
+  IF has_column_privilege('authenticated','public.capture_part','category','UPDATE')
+     OR has_column_privilege('authenticated','public.capture_part','interpretation','UPDATE')
+     OR has_column_privilege('authenticated','public.capture_part','review_status','UPDATE') THEN
+    RAISE EXCEPTION 'Authenticated users must not bypass the audited part-review RPC';
+  END IF;
+  IF NOT has_function_privilege('authenticated',
+      'public.set_inbox_capture_attention_status(uuid,text,uuid)','EXECUTE')
+     OR NOT has_function_privilege('authenticated',
+      'public.review_inbox_capture_part(uuid,text,text,text,uuid)','EXECUTE') THEN
+    RAISE EXCEPTION 'Authenticated users are missing owner-checked review RPCs';
+  END IF;
+END;
+$test$;
+
 SET LOCAL ROLE authenticated;
 SET LOCAL request.jwt.claim.sub = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 INSERT INTO public.capture(id,owner_user_id,created_by_user_id,content_original)

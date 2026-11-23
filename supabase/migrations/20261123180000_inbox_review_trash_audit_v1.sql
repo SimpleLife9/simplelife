@@ -1,6 +1,10 @@
 -- Owner-scoped Inbox trash and review audit RPCs.
 -- Private capture content stays in place; soft-deleted captures are retained for 30 days.
 
+-- Review-state and classifier corrections must go through the audited RPCs below.
+REVOKE UPDATE (attention_status) ON public.capture FROM authenticated;
+REVOKE UPDATE (interpretation, category, review_status) ON public.capture_part FROM authenticated;
+
 CREATE OR REPLACE FUNCTION public.trash_inbox_capture(
   p_capture_id uuid,
   p_audit_id uuid
