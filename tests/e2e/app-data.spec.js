@@ -4289,7 +4289,7 @@ test('Agenda creates a recurring all-day series and renders each persisted occur
   const detail = page.getByRole('dialog', { name: 'Rutina diaria' });
   await expect(detail).toContainText('Parte de una serie');
   await expect(detail.getByRole('button', { name: 'Editar' })).toHaveCount(0);
-  await detail.getByRole('button', { name: 'Cerrar' }).click();
+  await detail.getByLabel('Cerrar').click();
 
   expect(recurringEventRequests).toHaveLength(1);
   expect(recurringEventRequests[0].key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
