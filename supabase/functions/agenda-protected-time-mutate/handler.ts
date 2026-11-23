@@ -14,6 +14,7 @@ import {
   type EventAuthenticatedContext,
 } from "../_shared/agenda-event-profile.ts";
 import { resolveLocalDateTimeRange, TzdbVersionError } from "../agenda-time-resolve/resolver.ts";
+import { assessOwnerProtectedTimeTaskScheduleConflicts } from "../_shared/protected-time-task-schedule-conflicts.ts";
 
 export const MAX_REQUEST_BYTES = 32 * 1024;
 const JSON_HEADERS = {
@@ -120,14 +121,21 @@ export async function handleRequest(
   if (typeof action !== "string" || !PROTECTED_TIME_MUTATIONS.includes(action)) {
     return json({ error: "UNSUPPORTED_PROTECTED_TIME_MUTATION" }, 422);
   }
-  const expectedKeys = action === "create"
+  const requiredKeys = action === "create"
     ? ["action", "block"]
     : action === "edit"
     ? ["action", "blockId", "expectedUpdatedAt", "block"]
     : ["action", "blockId", "expectedUpdatedAt"];
-  if (Object.keys(input).length !== expectedKeys.length
-    || Object.keys(input).some((key) => !expectedKeys.includes(key))) {
+  const allowedKeys = action === "create" || action === "edit"
+    ? [...requiredKeys, "taskScheduleDecisions"]
+    : requiredKeys;
+  if (requiredKeys.some((key) => !(key in input))
+    || Object.keys(input).some((key) => !allowedKeys.includes(key))) {
     return json({ error: "PROTECTED_TIME_BODY_HAS_UNSUPPORTED_FIELDS" }, 422);
+  }
+  const suppliedTaskScheduleDecisions = input.taskScheduleDecisions ?? [];
+  if (!Array.isArray(suppliedTaskScheduleDecisions)) {
+    return json({ error: "TASK_SCHEDULE_DECISIONS_MUST_BE_AN_ARRAY" }, 422);
   }
 
   let blockId = "";
@@ -176,6 +184,7 @@ export async function handleRequest(
       blockId,
       expectedUpdatedAt,
       blockDraft,
+      taskScheduleDecisions: suppliedTaskScheduleDecisions,
     });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : "PROTECTED_TIME_INTENT_INVALID" }, 422);
@@ -209,6 +218,33 @@ export async function handleRequest(
   }
 
   const now = (dependencies.now ?? (() => new Date().toISOString()))();
+  if (blockDraft) {
+    try {
+      const assessment = await assessOwnerProtectedTimeTaskScheduleConflicts({
+        supabaseAdmin: ctx.supabaseAdmin,
+        ownerProfileId: profile.profileId,
+        block: { ...blockPatch, id: blockId, updated_at: now },
+        suppliedDecisions: suppliedTaskScheduleDecisions,
+        now,
+      });
+      if (!assessment.ok) {
+        return json({
+          error: assessment.code,
+          taskScheduleConflicts: assessment.conflicts,
+        }, 409);
+      }
+      blockPatch.task_schedule_conflict_decisions = [...assessment.assessment.decisions];
+      blockPatch.task_schedule_snapshot = [...assessment.assessment.snapshot];
+    } catch (error) {
+      if (error instanceof TypeError || error instanceof RangeError) {
+        return json({ error: error.message }, 422);
+      }
+      if (error instanceof Error && error.message === "PROTECTED_TIME_TASK_SCHEDULE_LOOKUP_FAILED") {
+        return json({ error: error.message }, 503);
+      }
+      return json({ error: "PROTECTED_TIME_TASK_SCHEDULE_ANALYSIS_FAILED" }, 500);
+    }
+  }
   const result = await ctx.supabaseAdmin.rpc("mutate_protected_time_block_once", {
     p_owner_user_id: profile.profileId,
     p_block_id: blockId,
