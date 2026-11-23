@@ -96,6 +96,16 @@ BEGIN
     RETURN;
   END IF;
 
+  -- The row may have changed while we waited for a worker's run lock.
+  -- Re-read processing state after that lock resolves so a just-completed
+  -- capture cannot be re-queued by a concurrent fresh-key request.
+  SELECT * INTO v_capture
+  FROM public.capture
+  WHERE id = p_capture_id AND owner_user_id = p_owner_profile_id AND deleted_at IS NULL;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'CAPTURE_NOT_FOUND_OR_FORBIDDEN' USING ERRCODE = '42501';
+  END IF;
+
   IF v_capture.processing_status = 'processed' THEN
     RAISE EXCEPTION 'CAPTURE_ALREADY_PROCESSED' USING ERRCODE = '55000';
   END IF;
