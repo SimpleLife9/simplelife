@@ -196,9 +196,11 @@ export function buildEventCreateIntent(eventDraft, protectedTimeDecisions = [], 
   const eventTuple = createIntentTuple(eventDraft);
   const decisions = protectedTimeDecisionTuple(protectedTimeDecisions);
   const scheduleDecisions = taskScheduleDecisionTuple(taskScheduleDecisions);
-  const canonicalPayload = JSON.stringify(decisions.length || scheduleDecisions.length
-    ? [...eventTuple, PROTECTED_TIME_DECISION_VERSION, decisions, 'event-task-schedule-decision-v1', scheduleDecisions]
-    : eventTuple);
+  const canonicalTuple = decisions.length
+    ? [...eventTuple, PROTECTED_TIME_DECISION_VERSION, decisions]
+    : eventTuple;
+  if (scheduleDecisions.length) canonicalTuple.push('event-task-schedule-decision-v1', scheduleDecisions);
+  const canonicalPayload = JSON.stringify(canonicalTuple);
   return Object.freeze({
     version: EVENT_CREATE_INTENT_VERSION,
     canonicalPayload,
