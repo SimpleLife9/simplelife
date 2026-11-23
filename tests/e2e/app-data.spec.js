@@ -2876,12 +2876,19 @@ test('Agenda navigates day, week and month views and creates a confirmed all-day
   const sideNavigation = page.getByRole('navigation', { name: 'Navegación principal' });
   await sideNavigation.getByRole('button', { name: /Agenda/ }).click();
   await expect(page.locator('.page-heading h1')).toHaveText('Agenda');
+  const upcomingPanel = page.getByRole('region', { name: 'Próximos compromisos' });
+  await expect(upcomingPanel).toBeVisible();
+  await expect(upcomingPanel.getByRole('button', { name: /Día de familia/ })).toBeVisible();
+  await upcomingPanel.getByRole('button', { name: /Día de familia/ }).click();
+  const upcomingEventDetail = page.getByRole('dialog', { name: 'Día de familia' });
+  await expect(upcomingEventDetail).toBeVisible();
+  await upcomingEventDetail.getByRole('button', { name: 'Cerrar' }).click();
   await expect(page.getByRole('button', { name: 'Día de familia', exact: true })).toBeVisible();
   await expect(page.getByRole('group', { name: 'Tarea reservada: Preparar informe semanal' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Día', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Agenda diaria' })).toBeVisible();
-  await expect(page.getByRole('button', { name: /Día de familia/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Día de familia', exact: true })).toBeVisible();
   await expect(page.getByRole('group', { name: 'Tarea reservada: Preparar informe semanal' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Mes', exact: true }).click();
