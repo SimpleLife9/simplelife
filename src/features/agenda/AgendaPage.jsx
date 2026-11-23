@@ -187,6 +187,7 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [confirmAction, setConfirmAction] = useState(null);
   const [occurrenceMutationMode, setOccurrenceMutationMode] = useState(null);
+  const [seriesEditScope, setSeriesEditScope] = useState(null);
   const [occurrenceDateValue, setOccurrenceDateValue] = useState('');
   const [occurrenceEndValue, setOccurrenceEndValue] = useState('');
   const [pendingKey, setPendingKey] = useState(null);
@@ -343,6 +344,8 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
               occurrence_id: row.id,
               occurrence_key: row.occurrence_key,
               occurrence_status: row.occurrence_status,
+              override_kind: row.override_kind,
+              review_candidate: row.review_candidate,
               row_version: row.row_version,
               is_recurring_occurrence: true,
               temporal_kind: row.temporal_kind,
@@ -407,6 +410,7 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
   }), [events, taskSchedules, scheduledTasks, clockNow, timeZone]);
   const openComposer = () => {
     setEditingEvent(null);
+    setSeriesEditScope(null);
     setTitle('');
     setDescription('');
     setLocationLabel('');
@@ -463,6 +467,7 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
   const localInputValue = (value) => String(value || '').replace(' ', 'T').slice(0, 23);
 
   const openEditComposer = (event) => {
+    setSeriesEditScope(null);
     setEditingEvent(event);
     setTitle(event.title || '');
     setDescription(event.description || '');
@@ -490,10 +495,47 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
     setShowComposer(true);
   };
 
+  const openRecurringSeriesComposer = (event, scope) => {
+    if (!event?.is_recurring_occurrence
+      || !['entire_series', 'this_and_following'].includes(scope)
+      || event.occurrence_status !== 'scheduled'
+      || event.override_kind != null
+      || !event.recurrence_rule
+      || !event.occurrence_id
+      || !event.series_event_id
+      || !event.updated_at) return;
+
+    const rule = event.recurrence_rule;
+    setEditingEvent(event);
+    setSeriesEditScope(scope);
+    setTitle(event.title || '');
+    setDescription(event.description || '');
+    setLocationLabel(event.location_label || '');
+    setLocationKind(event.location_kind || '');
+    setTemporalKind(event.temporal_kind);
+    if (event.temporal_kind === 'all_day') {
+      setStartDate(event.start_date);
+      setEndDate(addCalendarDays(event.end_date_exclusive, -1));
+    } else {
+      setStartLocalDateTime(localInputValue(event.start_local));
+      setEndLocalDateTime(localInputValue(event.end_local));
+    }
+    setEventTimeZone(event.time_zone || timeZone);
+    setRecurrenceFrequency(rule.frequency || 'DAILY');
+    setRecurrenceInterval(String(rule.interval ?? 1));
+    setRecurrenceCount(String(rule.count ?? 12));
+    setRecurrenceWeekdays(Array.isArray(rule.byWeekday) ? [...rule.byWeekday] : []);
+    setRecurrenceWeekdaysTouched(true);
+    setPendingKey(null);
+    setSelectedEvent(null);
+    setShowComposer(true);
+  };
+
   const closeComposer = () => {
     if (busy) return;
     setShowComposer(false);
     setEditingEvent(null);
+    setSeriesEditScope(null);
     setRecurrenceFrequency('none');
     setRecurrenceWeekdays([]);
     setRecurrenceWeekdaysTouched(false);
@@ -507,6 +549,7 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
   ) => {
     event.preventDefault();
     const key = pendingKey || uuidv7();
+    const editingRecurringSeries = Boolean(seriesEditScope && editingEvent?.is_recurring_occurrence);
     const creatingRecurring = !editingEvent && recurrenceFrequency !== 'none';
     setPendingKey(key);
     const success = await runAction(async () => {
@@ -555,6 +598,50 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
         };
       }
       const draft = createEventDraft(draftInput);
+      if (editingRecurringSeries) {
+        if (!['entire_series', 'this_and_following'].includes(seriesEditScope)
+          || recurrenceFrequency === 'none') {
+          throw new Error('Selecciona un alcance y una regla válida para guardar la serie.');
+        }
+        const recurring = buildRecurringEventCreatePayload({
+          eventDraft: draft,
+          frequency: recurrenceFrequency,
+          interval: Number(recurrenceInterval),
+          count: Number(recurrenceCount),
+          weekdays: recurrenceWeekdays,
+        });
+        const { data, error } = await supabase.functions.invoke('agenda-event-series-mutate', {
+          body: {
+            seriesId: editingEvent.series_event_id,
+            expectedUpdatedAt: editingEvent.updated_at,
+            selectedOccurrenceId: editingEvent.occurrence_id,
+            scope: seriesEditScope,
+            event: buildEventRequest(draft),
+            recurrenceRule: recurring.recurrenceRule,
+            endLocalTime: recurring.endLocalTime,
+            endDayOffset: recurring.endDayOffset,
+          },
+          headers: { 'Idempotency-Key': key },
+        });
+        if (error) {
+          let message = error.message || 'No se pudo actualizar la serie recurrente.';
+          try {
+            const response = error.context instanceof Response ? await error.context.clone().json() : null;
+            if (response?.error === 'PROTECTED_TIME_CONFLICTS') {
+              message = 'La ocurrencia ' + (response.occurrenceKey || '') + ' coincide con Tiempo Protegido. No se modificó la serie.';
+            } else if (response?.error === 'TASK_SCHEDULE_CONFLICTS') {
+              message = 'La ocurrencia ' + (response.occurrenceKey || '') + ' coincide con una tarea reservada. No se modificó la serie.';
+            } else if (response?.error) {
+              message = response.error;
+            }
+          } catch { /* keep SDK error message */ }
+          throw new Error(message);
+        }
+        if (!data?.seriesEventId || data.scope !== seriesEditScope) {
+          throw new Error('El servidor no confirmó el alcance de edición de la serie.');
+        }
+        return;
+      }
       if (creatingRecurring) {
         const recurring = buildRecurringEventCreatePayload({
           eventDraft: draft,
@@ -654,11 +741,12 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
         throw new Error(message);
       }
       if (!data?.eventId) throw new Error('El servidor no devolvió el identificador del evento.');
-    }, creatingRecurring ? 'Serie recurrente creada en Agenda.' : editingEvent ? 'Cambios guardados.' : 'Evento guardado en Agenda.');
+    }, editingRecurringSeries ? 'Serie recurrente actualizada en Agenda.' : creatingRecurring ? 'Serie recurrente creada en Agenda.' : editingEvent ? 'Cambios guardados.' : 'Evento guardado en Agenda.');
 
     if (success) {
       setShowComposer(false);
       setEditingEvent(null);
+      setSeriesEditScope(null);
       setSelectedEvent(null);
       setPendingKey(null);
       setProtectedConflictPrompt(null);
@@ -1164,7 +1252,7 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
         <div className="agenda-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeComposer(); }}>
           <section className="agenda-dialog" role="dialog" aria-modal="true" aria-labelledby="agenda-create-title">
             <header className="agenda-dialog-header">
-              <div><span className="agenda-section-kicker">{editingEvent ? 'EDITAR COMPROMISO' : 'NUEVO COMPROMISO'}</span><h2 id="agenda-create-title">{editingEvent ? 'Editar evento' : 'Crear evento'}</h2></div>
+              <div><span className="agenda-section-kicker">{seriesEditScope ? 'EDITAR SERIE RECURRENTE' : editingEvent ? 'EDITAR COMPROMISO' : 'NUEVO COMPROMISO'}</span><h2 id="agenda-create-title">{seriesEditScope ? 'Editar serie recurrente' : editingEvent ? 'Editar evento' : 'Crear evento'}</h2></div>
               <button type="button" className="agenda-close-button" aria-label="Cerrar" onClick={closeComposer} disabled={busy}>×</button>
             </header>
             <form className="agenda-form" onSubmit={submitEvent}>
@@ -1246,7 +1334,7 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
                 <span>Descripción (opcional)</span>
                 <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={3} maxLength={5000} placeholder="Detalles útiles para este compromiso…" />
               </label>
-              {!editingEvent && temporalKind !== 'fixed_instant' && (
+              {(!editingEvent || seriesEditScope) && temporalKind !== 'fixed_instant' && (
                 <section className="agenda-recurrence-form" aria-label="Repetición del evento">
                   <label className="agenda-field">
                     <span>Repetición</span>
@@ -1317,7 +1405,7 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
                   className="button button-primary"
                   disabled={busy || !title.trim() || (recurrenceFrequency === 'WEEKLY' && recurrenceWeekdays.length === 0)}
                 >
-                  {busy ? 'Guardando…' : editingEvent ? 'Guardar cambios' : recurrenceFrequency !== 'none' ? 'Crear serie recurrente' : 'Guardar evento'}
+                  {busy ? 'Guardando…' : seriesEditScope ? 'Guardar cambios de la serie' : editingEvent ? 'Guardar cambios' : recurrenceFrequency !== 'none' ? 'Crear serie recurrente' : 'Guardar evento'}
                 </button>
               </footer>
             </form>
@@ -1404,8 +1492,14 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
               {selectedEvent.is_recurring_occurrence ? (
                 <>
                   <p className="agenda-recurrence-note">
-                    Estas acciones cambian solo la ocurrencia seleccionada. Los cambios de “esta y las siguientes” o de toda la serie aún no están disponibles.
+                    Puedes cambiar esta fecha de forma aislada o actualizar la regla desde aquí. Las ediciones de serie conservan el historial anterior y bloquean los conflictos de horario.
                   </p>
+                  {selectedEvent.occurrence_status === 'scheduled' && selectedEvent.override_kind == null && (
+                    <>
+                      <button type="button" className="agenda-secondary-button" onClick={() => openRecurringSeriesComposer(selectedEvent, 'this_and_following')} disabled={busy}>Editar esta y las siguientes</button>
+                      <button type="button" className="agenda-secondary-button" onClick={() => openRecurringSeriesComposer(selectedEvent, 'entire_series')} disabled={busy}>Editar toda la serie</button>
+                    </>
+                  )}
                   {['scheduled', 'needs_review'].includes(selectedEvent.occurrence_status) && !occurrenceMutationMode && (
                     <>
                       <button type="button" className="agenda-secondary-button" onClick={() => openOccurrenceEditor('move')} disabled={busy}>Mover esta fecha</button>
