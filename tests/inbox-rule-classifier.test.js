@@ -26,3 +26,20 @@ test("leading and trailing whitespace around a multi-line capture is preserved e
   assert.equal(parts[0].originalFragment.startsWith("  \n"), true);
   assert.equal(parts.at(-1).originalFragment.endsWith("\n  "), true);
 });
+
+
+test("ambiguous category matches return a contextual clarification prompt", () => {
+  const [overlapping] = classifyInboxCapture("Mañana comprar leche");
+  assert.equal(overlapping.requiresClarification, true);
+  assert.match(overlapping.clarificationPrompt, /más de una categoría/);
+
+  const [unclassified] = classifyInboxCapture("No olvidar la idea del menú");
+  assert.equal(unclassified.requiresClarification, true);
+  assert.match(unclassified.clarificationPrompt, /qué quieres hacer o recordar/);
+});
+
+test("clear category matches do not request unnecessary clarification", () => {
+  const [task] = classifyInboxCapture("Comprar leche");
+  assert.equal(task.requiresClarification, false);
+  assert.equal(task.clarificationPrompt, null);
+});
