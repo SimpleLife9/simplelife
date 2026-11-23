@@ -1433,7 +1433,12 @@ test('Inbox requires an explicit clarification before accepting an ambiguous pro
     capture_id: capture.id,
     created_at: '2026-11-19T15:01:00.000Z',
     result: {
-      proposals: [{ partIndex: 0, confidence: 0.42, requiresClarification: true }],
+      proposals: [{
+        partIndex: 0,
+        confidence: 0.42,
+        requiresClarification: true,
+        clarificationPrompt: '¿Qué quieres hacer o recordar con este texto?',
+      }],
     },
   };
   const { insertedNoteIdeas, reviewRequests } = await mockSupabaseSession(page, {
@@ -1452,6 +1457,7 @@ test('Inbox requires an explicit clarification before accepting an ambiguous pro
   await page.getByRole('button', { name: 'Organizar captura: Pensar en cómo mejorar mi rutina' }).click();
   const organizer = page.getByRole('dialog', { name: 'Organizar captura' });
   const confirm = organizer.getByRole('button', { name: 'Confirmar y organizar' });
+  await expect(organizer.getByText('¿Qué quieres hacer o recordar con este texto?')).toBeVisible();
   await expect(organizer.getByLabel('Aclaración / interpretación')).toBeVisible();
   await expect(confirm).toBeDisabled();
   await organizer.getByLabel('Aclaración / interpretación').fill('Es una idea para diseñar una rutina semanal sostenible.');
