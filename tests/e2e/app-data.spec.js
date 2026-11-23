@@ -1429,7 +1429,7 @@ test('Inbox marks normalized duplicate text without merging or deleting captures
 });
 
 test('Inbox can turn a reviewed capture into an Agenda Event with an owner-scoped provenance link', async ({ page }) => {
-  const { captures, captureParts, idempotencyRequests, insertedAgendaEvents, insertedCaptureLinks, reviewRequests } = await mockSupabaseSession(page);
+  const { captures, captureParts, idempotencyRequests, insertedAgendaEvents, insertedCaptureLinks, reviewRequests, reviewAuditEvents } = await mockSupabaseSession(page);
   await page.goto('/');
   await page.getByLabel('Correo electrónico').fill(authUser.email);
   await page.getByLabel('Contraseña').fill('not-a-real-password');
