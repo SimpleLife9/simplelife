@@ -207,6 +207,7 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
   const [recurrenceInterval, setRecurrenceInterval] = useState('1');
   const [recurrenceCount, setRecurrenceCount] = useState('12');
   const [recurrenceWeekdays, setRecurrenceWeekdays] = useState([]);
+  const [recurrenceWeekdaysTouched, setRecurrenceWeekdaysTouched] = useState(false);
 
   useEffect(() => {
     const timer = window.setInterval(() => setClockNow(Date.now()), 30_000);
@@ -388,7 +389,8 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
     setRecurrenceFrequency('none');
     setRecurrenceInterval('1');
     setRecurrenceCount('12');
-    setRecurrenceWeekdays([isoWeekdayForDate(activeDate)]);
+    setRecurrenceWeekdays([]);
+    setRecurrenceWeekdaysTouched(false);
     setPendingKey(null);
     setShowComposer(true);
   };
@@ -425,6 +427,7 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
     setRecurrenceInterval('1');
     setRecurrenceCount('12');
     setRecurrenceWeekdays([]);
+    setRecurrenceWeekdaysTouched(false);
     setPendingKey(null);
     setSelectedEvent(null);
     setShowComposer(true);
@@ -436,6 +439,7 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
     setEditingEvent(null);
     setRecurrenceFrequency('none');
     setRecurrenceWeekdays([]);
+    setRecurrenceWeekdaysTouched(false);
     setPendingKey(null);
   };
 
@@ -1063,13 +1067,25 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
               </div>
               {temporalKind === 'all_day' ? (
                 <div className="agenda-form-row">
-                  <label className="agenda-field"><span>Desde</span><input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} required /></label>
+                  <label className="agenda-field"><span>Desde</span><input type="date" value={startDate} onChange={(event) => {
+                    const nextDate = event.target.value;
+                    setStartDate(nextDate);
+                    if (recurrenceFrequency === 'WEEKLY' && !recurrenceWeekdaysTouched && nextDate) {
+                      setRecurrenceWeekdays([isoWeekdayForDate(nextDate)]);
+                    }
+                  }} required /></label>
                   <label className="agenda-field"><span>Hasta (incluido)</span><input type="date" value={endDate} min={startDate} onChange={(event) => setEndDate(event.target.value)} required /></label>
                 </div>
               ) : temporalKind === 'zoned_civil' ? (
                 <>
                   <div className="agenda-form-row">
-                    <label className="agenda-field"><span>Comienza</span><input type="datetime-local" step="0.001" value={startLocalDateTime} onChange={(event) => setStartLocalDateTime(event.target.value)} required /></label>
+                    <label className="agenda-field"><span>Comienza</span><input type="datetime-local" step="0.001" value={startLocalDateTime} onChange={(event) => {
+                      const nextValue = event.target.value;
+                      setStartLocalDateTime(nextValue);
+                      if (recurrenceFrequency === 'WEEKLY' && !recurrenceWeekdaysTouched && nextValue) {
+                        setRecurrenceWeekdays([isoWeekdayForDate(nextValue.slice(0, 10))]);
+                      }
+                    }} required /></label>
                     <label className="agenda-field"><span>Termina</span><input type="datetime-local" step="0.001" value={endLocalDateTime} onChange={(event) => setEndLocalDateTime(event.target.value)} required /></label>
                   </div>
                   <label className="agenda-field agenda-field-full">
@@ -1149,9 +1165,12 @@ function AgendaCalendarPage({ profile, refreshKey, runAction, busy }) {
                                 <input
                                   type="checkbox"
                                   checked={recurrenceWeekdays.includes(day.code)}
-                                  onChange={(event) => setRecurrenceWeekdays((current) => event.target.checked
-                                    ? [...current, day.code]
-                                    : current.filter((value) => value !== day.code))}
+                                  onChange={(event) => {
+                                    setRecurrenceWeekdaysTouched(true);
+                                    setRecurrenceWeekdays((current) => event.target.checked
+                                      ? [...current, day.code]
+                                      : current.filter((value) => value !== day.code));
+                                  }}
                                 />
                                 <span>{day.label}</span>
                               </label>
