@@ -252,11 +252,11 @@ try {
     fail("Child materialized an inherited date twice or attached an occurrence to the wrong segment.");
   }
 
-  const parent = await fetch(base + "/rest/v1/calendar_event?id=eq." + seriesId + "&select=recurrence_effective_through", {
+  const parentBoundaryResponse = await fetch(base + "/rest/v1/calendar_event?id=eq." + seriesId + "&select=recurrence_effective_through", {
     headers: { apikey: secret, authorization: "Bearer " + secret },
     signal: AbortSignal.timeout(10000),
   });
-  const parentRowsAfter = await parent.json();
+  const parentRowsAfter = await parentBoundaryResponse.json();
   equal(parentRowsAfter[0].recurrence_effective_through, selectedDate, "Parent effective-through date");
 
   console.log("PASS: real Auth JWT executes recurring series scope mutation in local Edge Runtime.");
