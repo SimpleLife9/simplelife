@@ -339,6 +339,7 @@ DECLARE
   v_claimed_rows integer;
   v_payload_hash bytea;
   v_response jsonb;
+  v_recurrence_anchor date;
 BEGIN
   IF current_user <> 'service_role' THEN
     RAISE EXCEPTION 'create_recurring_calendar_event_once requires service_role'
@@ -425,6 +426,12 @@ BEGIN
   SELECT * INTO v_event
   FROM jsonb_populate_record(NULL::public.calendar_event, p_event_record);
 
+  IF v_event.temporal_kind = 'all_day' THEN
+    v_recurrence_anchor := v_event.start_date;
+  ELSIF v_event.temporal_kind = 'zoned_civil' THEN
+    v_recurrence_anchor := v_event.start_local::date;
+  END IF;
+
   IF v_event.id IS NULL
      OR (get_byte(uuid_send(v_event.id), 6) >> 4) <> 7
      OR (get_byte(uuid_send(v_event.id), 8) & 192) <> 128
@@ -435,9 +442,7 @@ BEGIN
      OR v_event.archived_at IS NOT NULL OR v_event.deleted_at IS NOT NULL OR v_event.purge_after IS NOT NULL
      OR v_event.recurrence_rule IS NULL
      OR v_event.recurrence_end_day_offset NOT BETWEEN 0 AND 30
-     OR v_event.recurrence_rule->>'startDate' IS DISTINCT FROM
-       CASE WHEN v_event.temporal_kind = 'all_day' THEN v_event.start_date::text
-       ELSE to_char(v_event.start_local, 'YYYY-MM-DD') END THEN
+     OR v_event.recurrence_rule->>'startDate' IS DISTINCT FROM v_recurrence_anchor::text THEN
     RAISE EXCEPTION 'Recurring Event identity, owner or recurrence anchor is invalid'
       USING ERRCODE = '22023';
   END IF;
