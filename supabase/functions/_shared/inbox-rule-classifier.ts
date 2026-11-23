@@ -1,9 +1,29 @@
 export const INBOX_RULE_PROCESSOR_VERSION = "inbox-rules-v1";
-export const INBOX_RULE_CATEGORIES = Object.freeze([
+export const INBOX_RULE_CATEGORIES = [
   "task", "event", "request", "habit", "goal_subgoal", "project", "note_idea", "list",
-]);
+] as const;
 
-const CATEGORY_PATTERNS = [
+type InboxCategory = typeof INBOX_RULE_CATEGORIES[number];
+type ClassificationRule = readonly [InboxCategory, RegExp, number];
+type ClassificationResult = {
+  category: InboxCategory;
+  confidence: number;
+  requiresClarification: boolean;
+  rule: string;
+};
+export type InboxProposal = {
+  partIndex: number;
+  startOffset: number;
+  endOffset: number;
+  originalFragment: string;
+  category: InboxCategory;
+  confidence: number;
+  requiresClarification: boolean;
+  interpretation: string;
+  partId?: string;
+};
+
+const CATEGORY_PATTERNS: readonly ClassificationRule[] = [
   ["request", /\b(por favor|necesito que|solicito|me gustaría que|me gustaria que|puedes|podrías|podrias|please|could you|can you)\b/i, 0.76],
   ["habit", /\b(cada día|cada dia|todos los días|todos los dias|diariamente|cada semana|semanalmente|rutina|habit)\b/i, 0.78],
   ["goal_subgoal", /\b(mi meta|mi objetivo|objetivo principal|quiero lograr|me propongo|goal|submeta)\b/i, 0.76],
@@ -12,7 +32,7 @@ const CATEGORY_PATTERNS = [
   ["task", /\b(comprar|llamar|enviar|pagar|revisar|hacer|terminar|reservar|crear|escribir|buscar|agendar|preparar|actualizar|solicitar|organizar|buy|call|send|pay|review|finish|book|create|write|prepare)\b/i, 0.68],
 ];
 
-function classifyFragment(fragment) {
+function classifyFragment(fragment: string): ClassificationResult {
   const text = fragment.trim();
   const lower = text.toLocaleLowerCase("es");
   if (/^(lista|pendientes|checklist|to do)\s*:?$/i.test(text)) {
@@ -36,7 +56,7 @@ function classifyFragment(fragment) {
  * one part. Every source character, including whitespace, is retained.
  * Confidence is heuristic affinity, never a calibrated probability.
  */
-export function classifyInboxCapture(contentOriginal) {
+export function classifyInboxCapture(contentOriginal: string): InboxProposal[] {
   if (typeof contentOriginal !== "string" || !contentOriginal.trim()) {
     throw new TypeError("A non-empty original capture is required.");
   }
@@ -56,7 +76,7 @@ export function classifyInboxCapture(contentOriginal) {
   if (!hasBullet || starts.length < 2) starts.splice(0, starts.length, 0);
 
   const boundaries = [...starts, contentOriginal.length];
-  const proposals = [];
+  const proposals: InboxProposal[] = [];
   let pendingPrefix = "";
   let pendingStartOffset = null;
   for (let index = 0; index < boundaries.length - 1; index += 1) {
