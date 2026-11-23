@@ -42,8 +42,11 @@ BEGIN
     RAISE EXCEPTION 'Unsupported Protected Time TaskSchedule decision audit operation: %', TG_OP;
   END IF;
 
-  IF jsonb_typeof(NEW.task_schedule_conflict_decisions) IS DISTINCT FROM 'array'
-     OR jsonb_array_length(NEW.task_schedule_conflict_decisions) > 500 THEN
+  IF CASE
+       WHEN jsonb_typeof(NEW.task_schedule_conflict_decisions) = 'array'
+         THEN jsonb_array_length(NEW.task_schedule_conflict_decisions) > 500
+       ELSE true
+     END THEN
     RAISE EXCEPTION 'TaskSchedule decision evidence must be a bounded JSON array';
   END IF;
 
