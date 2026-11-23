@@ -213,7 +213,18 @@ export async function handleRequest(
       .maybeSingle();
     if (restored.error) return json({ error: "PROTECTED_TIME_BLOCK_LOOKUP_FAILED" }, 503);
     if (!restored.data) return json({ error: "PROTECTED_TIME_BLOCK_NOT_FOUND" }, 404);
-    if (restored.data.updated_at !== expectedUpdatedAt) {
+    // PostgREST may serialize the same timestamptz with a different UTC
+    // offset suffix (for example, Z vs +00:00). Compare the represented instant
+    // here; the SQL RPC below remains the authoritative full-precision CAS.
+    const restoredVersionMs = typeof restored.data.updated_at === "string"
+      ? Date.parse(restored.data.updated_at)
+      : Number.NaN;
+    const expectedVersionMs = expectedUpdatedAt === null
+      ? Number.NaN
+      : Date.parse(expectedUpdatedAt);
+    if (!Number.isFinite(restoredVersionMs)
+      || !Number.isFinite(expectedVersionMs)
+      || restoredVersionMs !== expectedVersionMs) {
       return json({ error: "PROTECTED_TIME_VERSION_CONFLICT" }, 409);
     }
     restoreBlock = restored.data as Record<string, unknown>;
