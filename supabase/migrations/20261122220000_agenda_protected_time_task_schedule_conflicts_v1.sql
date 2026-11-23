@@ -147,8 +147,20 @@ BEGIN
       RAISE EXCEPTION 'Protected Time patch must contain exactly the 20 editable fields'
         USING ERRCODE = '22023';
     END IF;
+  ELSIF p_mutation = 'restore' AND p_block_patch IS DISTINCT FROM '{}'::jsonb THEN
+    IF p_block_patch IS NULL OR jsonb_typeof(p_block_patch) IS DISTINCT FROM 'object'
+       OR (SELECT count(*) FROM jsonb_object_keys(p_block_patch)) <> 2
+       OR EXISTS (
+         SELECT 1 FROM jsonb_object_keys(p_block_patch) AS supplied(key)
+         WHERE supplied.key <> ALL (ARRAY[
+           'task_schedule_conflict_decisions', 'task_schedule_snapshot'
+         ]::text[])
+       ) THEN
+      RAISE EXCEPTION 'Protected Time restore accepts only TaskSchedule conflict evidence'
+        USING ERRCODE = '22023';
+    END IF;
   ELSIF p_block_patch IS DISTINCT FROM '{}'::jsonb THEN
-    RAISE EXCEPTION 'Only Protected Time create/edit may contain a block patch'
+    RAISE EXCEPTION 'Only Protected Time create/edit or evidence-bearing restore may contain a block patch'
       USING ERRCODE = '22023';
   END IF;
 
@@ -156,8 +168,9 @@ BEGIN
   -- transaction lock. It serializes the read/compare/commit boundary.
   PERFORM pg_advisory_xact_lock(hashtextextended(p_owner_user_id::text, 8102026));
 
-  IF p_mutation IN ('create', 'edit') AND
-     (SELECT count(*) FROM jsonb_object_keys(p_block_patch)) = 22 THEN
+  IF (p_mutation IN ('create', 'edit') AND
+      (SELECT count(*) FROM jsonb_object_keys(p_block_patch)) = 22)
+     OR (p_mutation = 'restore' AND p_block_patch IS DISTINCT FROM '{}'::jsonb) THEN
     IF jsonb_typeof(p_block_patch->'task_schedule_conflict_decisions') IS DISTINCT FROM 'array'
        OR jsonb_typeof(p_block_patch->'task_schedule_snapshot') IS DISTINCT FROM 'array' THEN
       RAISE EXCEPTION 'TaskSchedule decisions and snapshot must be JSON arrays'
@@ -207,10 +220,20 @@ BEGIN
       SELECT 1
       FROM jsonb_array_elements(p_block_patch->'task_schedule_conflict_decisions') AS supplied(item)
       WHERE jsonb_typeof(supplied.item) IS DISTINCT FROM 'object'
-         OR (SELECT count(*) FROM jsonb_object_keys(supplied.item)) <> 14
+         OR CASE
+              WHEN jsonb_typeof(supplied.item) = 'object'
+                THEN (SELECT count(*) FROM jsonb_object_keys(supplied.item)) <> 14
+              ELSE true
+            END
          OR supplied.item->>'policyVersion' IS DISTINCT FROM 'protected-time-task-schedule-decision-v1'
          OR supplied.item->>'decision' IS DISTINCT FROM 'keep_overlap'
-         OR supplied.item->>'protectionMode' IS DISTINCT FROM p_block_patch->>'protection_mode'
+         OR supplied.item->>'protectionMode' IS DISTINCT FROM CASE
+              WHEN p_mutation = 'restore' THEN (
+                SELECT protection_mode FROM public.protected_time_block
+                WHERE id = p_block_id AND owner_user_id = p_owner_user_id
+              )
+              ELSE p_block_patch->>'protection_mode'
+            END
          OR NOT EXISTS (
            SELECT 1
            FROM public.task_schedule AS schedule
@@ -233,7 +256,7 @@ BEGIN
       RETURN QUERY SELECT 409, jsonb_build_object('error', 'TASK_SCHEDULE_CONFLICTS_CHANGED'), false;
       RETURN;
     END IF;
-  ELSIF p_mutation IN ('create', 'edit') AND p_payload_version = 'protected-time-mutation-v2' THEN
+  ELSIF p_mutation IN ('create', 'edit', 'restore') AND p_payload_version = 'protected-time-mutation-v2' THEN
     RAISE EXCEPTION 'TaskSchedule consent requires the complete conflict snapshot'
       USING ERRCODE = '22023';
   END IF;
@@ -376,7 +399,14 @@ BEGIN
         WHEN 'restore' THEN
           IF v_lifecycle IN ('archived', 'trash') THEN
             UPDATE public.protected_time_block
-            SET archived_at = NULL, deleted_at = NULL, updated_by_user_id = p_owner_user_id
+            SET archived_at = NULL,
+                deleted_at = NULL,
+                task_schedule_conflict_decisions = CASE
+                  WHEN p_block_patch ? 'task_schedule_conflict_decisions'
+                    THEN p_block_patch->'task_schedule_conflict_decisions'
+                  ELSE task_schedule_conflict_decisions
+                END,
+                updated_by_user_id = p_owner_user_id
             WHERE id = p_block_id AND owner_user_id = p_owner_user_id
             RETURNING * INTO v_block;
             v_status := 200;
