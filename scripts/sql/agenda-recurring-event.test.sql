@@ -52,6 +52,10 @@ DECLARE
   v_audit_count bigint;
   v_seen_count bigint;
   v_top_up_inserted integer;
+  v_mutation_result record;
+  v_mutation_key uuid := '019a0000-0000-7000-8000-000000000301';
+  v_stale_key uuid := '019a0000-0000-7000-8000-000000000302';
+  v_mutation_audit bigint;
   v_rejected boolean := false;
 BEGIN
   IF NOT EXISTS (
@@ -92,6 +96,25 @@ BEGIN
      OR has_table_privilege('authenticated', 'public.calendar_event_series_mutation_request', 'SELECT')
      OR has_table_privilege('anon', 'public.calendar_event_series_mutation_request', 'SELECT') THEN
     RAISE EXCEPTION 'recurring Event idempotency receipts must be service-role-only';
+  END IF;
+
+  IF NOT has_function_privilege(
+       'service_role',
+       'public.mutate_calendar_event_occurrence_once(uuid,uuid,uuid,text,bigint,jsonb,jsonb,jsonb,timestamp with time zone)',
+       'EXECUTE'
+     )
+     OR has_function_privilege(
+       'authenticated',
+       'public.mutate_calendar_event_occurrence_once(uuid,uuid,uuid,text,bigint,jsonb,jsonb,jsonb,timestamp with time zone)',
+       'EXECUTE'
+     )
+     OR has_function_privilege(
+       'anon',
+       'public.mutate_calendar_event_occurrence_once(uuid,uuid,uuid,text,bigint,jsonb,jsonb,jsonb,timestamp with time zone)',
+       'EXECUTE'
+     )
+     OR has_table_privilege('authenticated', 'public.calendar_event_occurrence_mutation_request', 'SELECT') THEN
+    RAISE EXCEPTION 'occurrence mutation receipts and writer RPC must be service-role-only';
   END IF;
 
   IF NOT EXISTS (
@@ -303,6 +326,104 @@ BEGIN
     AND entity_id = '019a0000-0000-7000-8000-000000000105';
   IF v_audit_count <> 1 THEN
     RAISE EXCEPTION 'Top-up must append exactly one occurrence audit row; got %', v_audit_count;
+  END IF;
+
+  -- Cancel one occurrence using optimistic row-version CAS. The original
+  -- occurrence identity remains immutable and the audit append is atomic.
+  SELECT * INTO v_mutation_result
+  FROM public.mutate_calendar_event_occurrence_once(
+    v_owner,
+    '019a0000-0000-7000-8000-000000000105',
+    v_mutation_key,
+    repeat('c', 64),
+    1,
+    jsonb_build_object(
+      'occurrence_status', 'cancelled',
+      'override_kind', 'cancelled',
+      'review_candidate', NULL
+    ),
+    '[]'::jsonb,
+    '[]'::jsonb,
+    v_now
+  );
+  IF v_mutation_result.http_status <> 200 OR v_mutation_result.replayed
+     OR v_mutation_result.response_body->>'occurrenceStatus' <> 'cancelled'
+     OR (v_mutation_result.response_body->>'rowVersion')::bigint <> 2 THEN
+    RAISE EXCEPTION 'Occurrence cancellation must update only the selected row with CAS: %', row_to_json(v_mutation_result);
+  END IF;
+
+  -- Same owner/key/payload replays the original receipt before checking the now-stale version.
+  SELECT * INTO v_mutation_result
+  FROM public.mutate_calendar_event_occurrence_once(
+    v_owner,
+    '019a0000-0000-7000-8000-000000000105',
+    v_mutation_key,
+    repeat('c', 64),
+    1,
+    jsonb_build_object(
+      'occurrence_status', 'cancelled',
+      'override_kind', 'cancelled',
+      'review_candidate', NULL
+    ),
+    '[]'::jsonb,
+    '[]'::jsonb,
+    v_now
+  );
+  IF v_mutation_result.http_status <> 200 OR NOT v_mutation_result.replayed
+     OR v_mutation_result.response_body->>'occurrenceStatus' <> 'cancelled' THEN
+    RAISE EXCEPTION 'Occurrence mutation retry must replay its committed result';
+  END IF;
+
+  SELECT * INTO v_mutation_result
+  FROM public.mutate_calendar_event_occurrence_once(
+    v_owner,
+    '019a0000-0000-7000-8000-000000000105',
+    v_mutation_key,
+    repeat('d', 64),
+    1,
+    jsonb_build_object(
+      'occurrence_status', 'cancelled',
+      'override_kind', 'cancelled',
+      'review_candidate', NULL
+    ),
+    '[]'::jsonb,
+    '[]'::jsonb,
+    v_now
+  );
+  IF v_mutation_result.http_status <> 409
+     OR v_mutation_result.response_body->>'error' <> 'IDEMPOTENCY_KEY_REUSED' THEN
+    RAISE EXCEPTION 'Reusing an occurrence mutation key with changed intent must return 409';
+  END IF;
+
+  SELECT * INTO v_mutation_result
+  FROM public.mutate_calendar_event_occurrence_once(
+    v_owner,
+    '019a0000-0000-7000-8000-000000000105',
+    v_stale_key,
+    repeat('e', 64),
+    1,
+    jsonb_build_object(
+      'occurrence_status', 'cancelled',
+      'override_kind', 'cancelled',
+      'review_candidate', NULL
+    ),
+    '[]'::jsonb,
+    '[]'::jsonb,
+    v_now
+  );
+  IF v_mutation_result.http_status <> 409
+     OR v_mutation_result.response_body->>'error' <> 'OCCURRENCE_VERSION_CONFLICT' THEN
+    RAISE EXCEPTION 'Stale occurrence row version must be rejected with 409';
+  END IF;
+
+  SELECT count(*) INTO v_mutation_audit
+  FROM public.audit_event
+  WHERE account_user_id = v_owner
+    AND entity_type = 'calendar_event_occurrence'
+    AND entity_id = '019a0000-0000-7000-8000-000000000105'
+    AND action = 'calendar_event_occurrence.updated';
+  IF v_mutation_audit <> 1 THEN
+    RAISE EXCEPTION 'Occurrence cancellation and replay must append exactly one mutation audit row; got %', v_mutation_audit;
   END IF;
 
   -- A retry may use a newly generated provisional series/occurrence ID, but the
