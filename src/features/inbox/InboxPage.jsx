@@ -30,6 +30,8 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
   const [taskTitle, setTaskTitle] = useState('');
   const [taskPriority, setTaskPriority] = useState('3');
   const [taskDueDate, setTaskDueDate] = useState('');
+  const [eventTitle, setEventTitle] = useState('');
+  const [eventDate, setEventDate] = useState('');
   const [noteTitle, setNoteTitle] = useState('');
   const [listMode, setListMode] = useState('new');
   const [selectedListId, setSelectedListId] = useState('');
@@ -48,6 +50,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
     return parts.length > 0 && parts.every((part) => Boolean(getConfirmedLink(captureId, part.id)));
   };
   const getLinkKind = (link) => {
+    if (link?.calendar_event_id) return 'event';
     if (link?.task_id) return 'task';
     if (link?.note_idea_id) return 'note_idea';
     if (link?.user_list_id || link?.list_item_id) return 'list';
@@ -144,10 +147,16 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
   const openOrganizer = (capture, part = getCapturePart(capture.id)) => {
     setSelectedCapture(capture);
     setSelectedPart(part || { id: uuidv7(), capture_id: capture.id, part_index: 0, original_fragment: capture.content_original });
-    setDestinationType('task');
-    setTaskTitle(String(part?.original_fragment || capture.content_original || '').slice(0, 240));
+    const source = String(part?.original_fragment || capture.content_original || '');
+    const suggestedDestination = part?.category === 'event' ? 'event'
+      : part?.category === 'note_idea' ? 'note'
+        : part?.category === 'list' ? 'list' : 'task';
+    setDestinationType(suggestedDestination);
+    setTaskTitle(source.slice(0, 240));
     setTaskPriority('3');
     setTaskDueDate('');
+    setEventTitle(source.slice(0, 200));
+    setEventDate('');
     setNoteTitle('');
     setListMode('new');
     setSelectedListId(lists[0]?.id || '');
@@ -183,6 +192,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
     const sourceText = String(selectedPart.original_fragment || selectedCapture.content_original || '');
     if (!sourceText.trim()) return;
     if (destinationType === 'task' && !taskTitle.trim()) return;
+    if (destinationType === 'event' && (!eventTitle.trim() || !eventDate)) return;
     if (destinationType === 'list' && listMode === 'new' && !newListName.trim()) return;
     if (destinationType === 'list' && listMode === 'existing' && !selectedListId) return;
     if (destinationType === 'list' && !listItemText.trim()) return;
@@ -190,15 +200,18 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
     const ids = operationIds;
     const selectedList = lists.find((list) => list.id === selectedListId);
     const category = destinationType === 'task' ? 'task'
-      : destinationType === 'note' || destinationType === 'idea' ? 'note_idea' : 'list';
+      : destinationType === 'event' ? 'event'
+        : destinationType === 'note' || destinationType === 'idea' ? 'note_idea' : 'list';
     const interpretation = destinationType === 'task' ? 'Clasificación manual confirmada: tarea.'
-      : destinationType === 'note' ? 'Clasificación manual confirmada: nota.'
-        : destinationType === 'idea' ? 'Clasificación manual confirmada: idea.'
-          : 'Clasificación manual confirmada: lista.';
+      : destinationType === 'event' ? 'Clasificación manual confirmada: evento de Agenda.'
+        : destinationType === 'note' ? 'Clasificación manual confirmada: nota.'
+          : destinationType === 'idea' ? 'Clasificación manual confirmada: idea.'
+            : 'Clasificación manual confirmada: lista.';
     const successMessage = destinationType === 'task' ? 'Captura organizada como tarea.'
-      : destinationType === 'note' ? 'Captura guardada como nota.'
-        : destinationType === 'idea' ? 'Captura guardada como idea.'
-          : 'Captura añadida a una lista.';
+      : destinationType === 'event' ? 'Evento creado en Agenda y vinculado al Inbox.'
+        : destinationType === 'note' ? 'Captura guardada como nota.'
+          : destinationType === 'idea' ? 'Captura guardada como idea.'
+            : 'Captura añadida a una lista.';
 
     const saved = await runAction(async () => {
       const partId = selectedPart?.id || ids.partId;
@@ -214,6 +227,19 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
           priority: Number(taskPriority), due_date: taskDueDate || null, time_zone: 'America/Havana',
         });
         linkTarget = { task_id: ids.targetId };
+      } else if (destinationType === 'event') {
+        const [year, month, day] = eventDate.split('-').map(Number);
+        const endDateExclusive = new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
+        const { data: eventData, error: eventError } = await supabase.functions.invoke('agenda-event-create', {
+          body: { event: {
+            title: eventTitle.trim(), temporalKind: 'all_day',
+            startDate: eventDate, endDateExclusive,
+          } },
+          headers: { 'Idempotency-Key': ids.targetId },
+        });
+        if (eventError) throw eventError;
+        if (!eventData?.eventId) throw new Error('Agenda no devolvió el identificador del evento.');
+        linkTarget = { calendar_event_id: eventData.eventId };
       } else if (destinationType === 'note' || destinationType === 'idea') {
         await ensureRow('note_idea', {
           id: ids.targetId, owner_user_id: profile.id, created_by_user_id: profile.id,
@@ -264,12 +290,13 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
   };
 
   const attentionLabels = { needs_review: 'Pendiente de revisión', reviewed: 'Revisada', archived: 'Archivada' };
-  const typeLabels = { task: 'Tarea', note_idea: 'Nota o idea', list: 'Lista' };
+  const typeLabels = { task: 'Tarea', note_idea: 'Nota o idea', list: 'Lista', event: 'Evento' };
   const openOrganizedTarget = (link) => {
     const kind = getLinkKind(link);
     if (kind === 'task') { setMorePage('tasks'); setActivePage('more'); }
     else if (kind === 'note_idea') { setMorePage('notes'); setActivePage('more'); }
     else if (kind === 'list') { setMorePage('lists'); setActivePage('more'); }
+    else if (kind === 'event') { setActivePage('agenda'); setMorePage(null); }
   };
 
   return <div className="inbox-layout">
@@ -336,7 +363,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
                 {capture.processing_status !== 'processed' && capture.attention_status !== 'archived' ? <button type="button" className="capture-action-button" disabled={busy} onClick={() => processCapture(capture)}>{capture.processing_status === 'queued' || capture.processing_status === 'processing' ? 'Reintentar procesamiento' : 'Generar sugerencias'}</button> : null}
                 {confirmedLink ? (
                   <>
-                    <button type="button" className="capture-action-button" onClick={() => openOrganizedTarget(confirmedLink)}>Abrir {linkKind === 'task' ? 'tareas' : linkKind === 'note_idea' ? 'notas e ideas' : 'listas'} →</button>
+                    <button type="button" className="capture-action-button" onClick={() => openOrganizedTarget(confirmedLink)}>{linkKind === 'event' ? 'Abrir Agenda' : 'Abrir ' + (linkKind === 'task' ? 'tareas' : linkKind === 'note_idea' ? 'notas e ideas' : 'listas')} →</button>
                     <button type="button" className="capture-action-button capture-archive-button" disabled={busy} onClick={() => updateAttention(capture, capture.attention_status === 'archived' ? 'needs_review' : 'archived')} aria-label={capture.attention_status === 'archived' ? 'Restaurar captura: ' + capture.content_original : 'Archivar captura: ' + capture.content_original}>{capture.attention_status === 'archived' ? 'Restaurar' : 'Archivar'}</button>
                   </>
                 ) : capture.attention_status !== 'archived' ? (
@@ -367,7 +394,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
           <div className="capture-original-preview"><span>CAPTURA ORIGINAL · NO SE MODIFICA</span><p>{selectedCapture.content_original}</p></div>
           <form className="capture-organizer-form" onSubmit={saveOrganization}>
             <label className="field"><span>Tipo de destino</span><select aria-label="Tipo de destino" value={destinationType} disabled={busy} onChange={(event) => { setDestinationType(event.target.value); resetTargetIds(); }}>
-              <option value="task">Tarea</option><option value="note">Nota</option><option value="idea">Idea</option><option value="list">Lista</option>
+              <option value="task">Tarea</option><option value="event">Evento de Agenda</option><option value="note">Nota</option><option value="idea">Idea</option><option value="list">Lista</option>
             </select></label>
             {destinationType === 'task' && <>
               <label className="field"><span>Título de la tarea</span><input aria-label="Título de la tarea" maxLength={240} value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} required disabled={busy} /></label>
@@ -376,6 +403,11 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
                 <label className="field"><span>Fecha objetivo (opcional)</span><input aria-label="Fecha objetivo" type="date" value={taskDueDate} onChange={(event) => setTaskDueDate(event.target.value)} disabled={busy} /></label>
               </div>
               <p className="capture-organizer-help">El texto completo de la captura quedará guardado en la descripción de la tarea.</p>
+            </>}
+            {destinationType === 'event' && <>
+              <label className="field"><span>Nombre del evento</span><input aria-label="Nombre del evento" maxLength={200} value={eventTitle} onChange={(event) => setEventTitle(event.target.value)} required disabled={busy} /></label>
+              <label className="field"><span>Fecha del evento</span><input aria-label="Fecha del evento" type="date" value={eventDate} onChange={(event) => setEventDate(event.target.value)} required disabled={busy} /></label>
+              <p className="capture-organizer-help">El evento se crea en Agenda como compromiso de día completo. La creación respeta los conflictos de tiempo protegido y usa una clave de idempotencia estable para evitar duplicados si reintentas.</p>
             </>}
             {(destinationType === 'note' || destinationType === 'idea') && <label className="field"><span>Título (opcional)</span><input aria-label="Título (opcional)" maxLength={200} value={noteTitle} onChange={(event) => setNoteTitle(event.target.value)} placeholder="Dale un nombre" disabled={busy} /></label>}
             {destinationType === 'list' && <>
