@@ -24,6 +24,11 @@ BEGIN
   IF v_profile_id IS NULL THEN
     RAISE EXCEPTION 'Active owner profile required' USING ERRCODE = '42501';
   END IF;
+  IF p_audit_id IS NULL
+     OR (get_byte(uuid_send(p_audit_id), 6) >> 4) <> 7
+     OR (get_byte(uuid_send(p_audit_id), 8) & 192) <> 128 THEN
+    RAISE EXCEPTION 'Audit identifier must be a valid UUIDv7' USING ERRCODE = '22023';
+  END IF;
   SELECT c.deleted_at INTO v_deleted_at
   FROM public.capture c
   WHERE c.id = p_capture_id AND c.owner_user_id = v_profile_id
@@ -68,6 +73,11 @@ BEGIN
   WHERE up.auth_user_id = auth.uid() AND up.account_status = 'active';
   IF v_profile_id IS NULL THEN
     RAISE EXCEPTION 'Active owner profile required' USING ERRCODE = '42501';
+  END IF;
+  IF p_audit_id IS NULL
+     OR (get_byte(uuid_send(p_audit_id), 6) >> 4) <> 7
+     OR (get_byte(uuid_send(p_audit_id), 8) & 192) <> 128 THEN
+    RAISE EXCEPTION 'Audit identifier must be a valid UUIDv7' USING ERRCODE = '22023';
   END IF;
   SELECT c.deleted_at, c.purge_after INTO v_deleted_at, v_purge_after
   FROM public.capture c
@@ -179,21 +189,34 @@ BEGIN
   IF v_profile_id IS NULL THEN
     RAISE EXCEPTION 'Active owner profile required' USING ERRCODE = '42501';
   END IF;
-  IF p_review_status IS NULL OR p_review_status NOT IN ('accepted','edited','rejected')
+  IF p_audit_id IS NULL
+     OR (get_byte(uuid_send(p_audit_id), 6) >> 4) <> 7
+     OR (get_byte(uuid_send(p_audit_id), 8) & 192) <> 128
+     OR p_review_status IS NULL OR p_review_status NOT IN ('accepted','edited','rejected')
      OR (p_category IS NOT NULL AND p_category NOT IN (
        'task','event','request','habit','goal_subgoal','project','note_idea','list'
      ))
      OR (p_review_status <> 'rejected' AND p_category IS NULL)
      OR length(COALESCE(p_interpretation,'')) > 1000 THEN
-    RAISE EXCEPTION 'Invalid Inbox review payload' USING ERRCODE = '22023';
+    RAISE EXCEPTION 'Invalid Inbox review payload or audit identifier' USING ERRCODE = '22023';
   END IF;
 
-  SELECT cp.capture_id, cp.category, cp.review_status, cp.interpretation
-  INTO v_capture_id, v_before_category, v_before_status, v_before_interpretation
+  -- Lock parent capture before the part. This serializes review with trash and
+  -- retention purge, which also acquire the capture row before deleting parts.
+  SELECT c.id INTO v_capture_id
+  FROM public.capture c
+  JOIN public.capture_part cp ON cp.capture_id = c.id
+  WHERE cp.id = p_capture_part_id
+    AND c.owner_user_id = v_profile_id
+    AND c.deleted_at IS NULL
+  FOR UPDATE OF c;
+  IF NOT FOUND THEN RETURN false; END IF;
+
+  SELECT cp.category, cp.review_status, cp.interpretation
+  INTO v_before_category, v_before_status, v_before_interpretation
   FROM public.capture_part cp
-  JOIN public.capture c ON c.id = cp.capture_id
-  WHERE cp.id = p_capture_part_id AND c.owner_user_id = v_profile_id AND c.deleted_at IS NULL
-  FOR UPDATE OF cp;
+  WHERE cp.id = p_capture_part_id AND cp.capture_id = v_capture_id
+  FOR UPDATE;
   IF NOT FOUND THEN RETURN false; END IF;
 
   UPDATE public.capture_part cp
