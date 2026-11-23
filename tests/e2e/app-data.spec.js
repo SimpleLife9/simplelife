@@ -54,6 +54,7 @@ async function mockSupabaseSession(page, initialData = {}) {
   const taskScheduleMutationRequests = [];
   const taskScheduleConflictResponses = [...(initialData.taskScheduleConflictResponses || [])];
   const eventTaskScheduleConflictResponses = [...(initialData.eventTaskScheduleConflictResponses || [])];
+  let pendingEventTaskScheduleConflicts = [];
   const protectedTimeConflicts = [...(initialData.protectedTimeConflicts || [])];
   const insertedAgendaEvents = [];
   const idempotencyRequests = [];
@@ -881,18 +882,25 @@ async function mockSupabaseSession(page, initialData = {}) {
       });
       const queuedTaskConflict = eventTaskScheduleConflictResponses.shift();
       if (queuedTaskConflict) {
-        const required = queuedTaskConflict.body?.taskScheduleConflicts || [];
+        pendingEventTaskScheduleConflicts = queuedTaskConflict.body?.taskScheduleConflicts || [];
+      }
+      if (pendingEventTaskScheduleConflicts.length) {
         const acceptedTaskDecisions = new Map(taskDecisions.map((item) => [item.taskScheduleId, item]));
-        const allAccepted = required.every((conflict) => {
+        const allAccepted = pendingEventTaskScheduleConflicts.every((conflict) => {
           const choice = acceptedTaskDecisions.get(conflict.taskScheduleId);
           return choice
             && choice.taskScheduleUpdatedAt === conflict.taskScheduleUpdatedAt
             && choice.decision === conflict.requiredDecision;
         });
         if (!allAccepted) {
-          await json(queuedTaskConflict.status || 409, queuedTaskConflict.body);
+          const responseBody = queuedTaskConflict?.body || {
+            error: 'TASK_SCHEDULE_CONFLICTS',
+            conflicts: pendingEventTaskScheduleConflicts,
+          };
+          await json(queuedTaskConflict?.status || 409, responseBody);
           return;
         }
+        pendingEventTaskScheduleConflicts = [];
       }
       const accepted = new Map(decisions.map((item) => [
         item.blockId + ':' + item.occurrenceStartsAt,
