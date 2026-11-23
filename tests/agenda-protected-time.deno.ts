@@ -81,12 +81,14 @@ function mockContext({
     replayed: false,
   }],
   rpcError = null,
+  taskSchedules = [] as Record<string, unknown>[],
 }: {
   authMode?: string;
   existing?: Record<string, unknown> | null;
   lookupError?: unknown;
   rpcResult?: unknown;
   rpcError?: unknown;
+  taskSchedules?: Record<string, unknown>[];
 } = {}) {
   const calls: Record<string, unknown> = {
     profileLookup: 0, ledgerLookup: 0, rpc: 0, rpcName: null, rpcArgs: null,
@@ -115,8 +117,18 @@ function mockContext({
   };
   const supabaseAdmin = {
     from(table: string) {
+      if (table === "task_schedule") {
+        const query = {
+          select() { return query; },
+          eq() { return query; },
+          in() { return query; },
+          order() { return query; },
+          async limit() { return { data: taskSchedules, error: null }; },
+        };
+        return query;
+      }
       if (table !== "protected_time_block_mutation_request") {
-        throw new Error("unexpected admin ledger table " + table);
+        throw new Error("unexpected admin table " + table);
       }
       return {
         select() {
@@ -200,7 +212,7 @@ Deno.test("one-off and weekly patches require matching authoritative IANA eviden
     authoritative: true,
   };
   const patch = buildProtectedTimeBlockPatch(draft, resolution);
-  assertEquals(Object.keys(patch).length, 20, "exact database patch field count");
+  assertEquals(Object.keys(patch).length, 22, "exact database patch field count");
   assertEquals(patch.starts_at, resolution.startsAt, "resolved start instant");
   assertEquals(patch.start_local, draft.startLocalDateTime, "original local start");
   assertEquals(patch.protection_mode, "hard", "hard protection persisted");
@@ -256,7 +268,7 @@ Deno.test("authenticated one-off create resolves IANA and calls only the owner-s
   assertEquals(args.p_mutation, "create", "create action");
   assertEquals(args.p_expected_updated_at, null, "create has no expected version");
   const patch = args.p_block_patch as Record<string, unknown>;
-  assertEquals(Object.keys(patch).length, 20, "exactly 20 editable fields");
+  assertEquals(Object.keys(patch).length, 22, "20 editable fields plus conflict evidence");
   assertEquals(patch.resolver_metadata && (patch.resolver_metadata as Record<string, unknown>).authoritative,
     true, "authoritative resolver metadata");
   assertEquals(patch.owner_user_id, undefined, "no caller-supplied owner field");
@@ -297,6 +309,57 @@ Deno.test("idempotent create replay reuses the recorded block id and skips timez
   assertEquals(response.status, 201, "replay status");
   assertEquals((await responseBody(response)).replayed, true, "replay marker");
   assertEquals(calls.rpc, 0, "no second write");
+});
+
+
+Deno.test("Protected Time requires version-bound consent for overlapping TaskSchedules", async () => {
+  const taskScheduleId = "019a0000-0000-7000-8000-000000000411";
+  const taskScheduleUpdatedAt = "2026-12-25T04:00:00.000Z";
+  const taskSchedules = [{
+    id: taskScheduleId,
+    updated_at: taskScheduleUpdatedAt,
+    starts_at: "2026-12-25T04:00:00.000Z",
+    ends_at: "2026-12-25T05:00:00.000Z",
+    time_zone: "America/Havana",
+    schedule_status: "confirmed",
+  }];
+  const { ctx, calls } = mockContext({ taskSchedules });
+  const missingDecision = await handleRequest(request({ action: "create", block: oneOff() }), ctx, {
+    now: () => "2026-11-22T18:10:00.000Z",
+    newBlockId: () => BLOCK_ID,
+  });
+  assertEquals(missingDecision.status, 409, "missing explicit overlap decision status");
+  const conflictBody = await responseBody(missingDecision);
+  assertEquals(conflictBody.error, "TASK_SCHEDULE_CONFLICTS", "missing decision error");
+  const conflicts = conflictBody.taskScheduleConflicts as Record<string, unknown>[];
+  assertEquals(conflicts.length, 1, "one overlapping TaskSchedule occurrence");
+  assertEquals(conflicts[0].taskScheduleId, taskScheduleId, "conflict schedule identity");
+  assertEquals(calls.rpc, 0, "no write before explicit consent");
+
+  const accepted = await handleRequest(request({
+    action: "create",
+    block: oneOff(),
+    taskScheduleDecisions: [{
+      taskScheduleId,
+      taskScheduleUpdatedAt,
+      occurrenceStartsAt: "2026-12-25T03:00:00.000Z",
+      decision: "keep_overlap",
+    }],
+  }), ctx, {
+    now: () => "2026-11-22T18:11:00.000Z",
+    newBlockId: () => BLOCK_ID,
+  });
+  assertEquals(accepted.status, 201, "explicitly accepted overlap status");
+  const args = calls.rpcArgs as Record<string, unknown>;
+  assertEquals(args.p_payload_version, "protected-time-mutation-v2", "consent is idempotency-hash versioned");
+  const patch = args.p_block_patch as Record<string, unknown>;
+  const decisions = patch.task_schedule_conflict_decisions as Record<string, unknown>[];
+  assertEquals(decisions.length, 1, "one stored consent record");
+  assertEquals(decisions[0].taskScheduleId, taskScheduleId, "consent binds TaskSchedule id");
+  assertEquals(decisions[0].taskScheduleUpdatedAt, taskScheduleUpdatedAt, "consent binds TaskSchedule version");
+  assertEquals(decisions[0].decision, "keep_overlap", "explicit keep-overlap decision");
+  assertEquals(patch.task_schedule_snapshot, [{ id: taskScheduleId, updated_at: taskScheduleUpdatedAt }],
+    "full active schedule snapshot sent to atomic RPC");
 });
 
 Deno.test("an inactive profile cannot write Protected Time", async () => {
