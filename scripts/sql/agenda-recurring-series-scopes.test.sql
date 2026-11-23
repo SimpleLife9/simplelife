@@ -4,6 +4,9 @@
 
 BEGIN;
 
+-- Initialize pg_temp before creating test-only SECURITY DEFINER audit probes.
+CREATE TEMP TABLE _series_test_temp_schema_init (id boolean) ON COMMIT DROP;
+
 INSERT INTO auth.users (
   id, instance_id, aud, role, email, encrypted_password,
   email_confirmed_at, raw_app_meta_data, raw_user_meta_data
