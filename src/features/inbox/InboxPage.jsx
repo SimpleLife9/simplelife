@@ -12,6 +12,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
     .is('deleted_at', null).order('captured_at', { ascending: false }).limit(50));
   const { rows: captureParts } = useRows('capture_part', profile, refreshKey, (query) => query.order('part_index'));
   const { rows: captureLinks } = useRows('capture_link', profile, refreshKey);
+  const { rows: processingRuns } = useRows('processing_run', profile, refreshKey, (query) => query.order('created_at', { ascending: false }).limit(100));
   const { rows: lists } = useRows('user_list', profile, refreshKey, (query) => query
     .is('deleted_at', null).is('archived_at', null).eq('status', 'active').order('name'));
   const { rows: listItems } = useRows('list_item', profile, refreshKey, (query) => query.order('position').order('created_at'));
@@ -19,6 +20,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
   const [captureSearch, setCaptureSearch] = useState('');
   const [attentionFilter, setAttentionFilter] = useState('needs_review');
   const [selectedCapture, setSelectedCapture] = useState(null);
+  const [selectedPart, setSelectedPart] = useState(null);
   const [destinationType, setDestinationType] = useState('task');
   const [taskTitle, setTaskTitle] = useState('');
   const [taskPriority, setTaskPriority] = useState('3');
@@ -30,10 +32,15 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
   const [listItemText, setListItemText] = useState('');
   const [operationIds, setOperationIds] = useState(null);
 
-  const getCapturePart = (captureId) => captureParts.find((part) => part.capture_id === captureId);
-  const getConfirmedLink = (captureId) => {
-    const part = getCapturePart(captureId);
+  const getCaptureParts = (captureId) => captureParts.filter((part) => part.capture_id === captureId).sort((a, b) => a.part_index - b.part_index);
+  const getCapturePart = (captureId) => getCaptureParts(captureId)[0];
+  const getConfirmedLink = (captureId, partId = null) => {
+    const part = partId ? getCaptureParts(captureId).find((item) => item.id === partId) : getCapturePart(captureId);
     return part ? captureLinks.find((link) => link.capture_part_id === part.id && link.link_status === 'confirmed') : null;
+  };
+  const captureIsOrganized = (captureId) => {
+    const parts = getCaptureParts(captureId);
+    return parts.length > 0 && parts.every((part) => Boolean(getConfirmedLink(captureId, part.id)));
   };
   const getLinkKind = (link) => {
     if (link?.task_id) return 'task';
@@ -43,14 +50,14 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
     if (link?.project_id) return 'project';
     return 'unknown';
   };
-  const organizedCount = rows.filter((capture) => Boolean(getConfirmedLink(capture.id))).length;
-  const pendingCount = rows.filter((capture) => capture.attention_status === 'needs_review' && !getConfirmedLink(capture.id)).length;
+  const organizedCount = rows.filter((capture) => captureIsOrganized(capture.id)).length;
+  const pendingCount = rows.filter((capture) => capture.attention_status === 'needs_review' && !captureIsOrganized(capture.id)).length;
 
   const visibleCaptures = useMemo(() => {
     const term = captureSearch.trim().toLocaleLowerCase('es');
     return rows.filter((capture) => {
-      const part = captureParts.find((item) => item.capture_id === capture.id);
-      const organized = Boolean(part && captureLinks.some((link) => link.capture_part_id === part.id && link.link_status === 'confirmed'));
+      const parts = captureParts.filter((item) => item.capture_id === capture.id);
+      const organized = parts.length > 0 && parts.every((part) => captureLinks.some((link) => link.capture_part_id === part.id && link.link_status === 'confirmed'));
       const statusMatches = attentionFilter === 'all'
         || (attentionFilter === 'needs_review' && capture.attention_status === 'needs_review' && !organized)
         || (attentionFilter === 'reviewed' && capture.attention_status === 'reviewed' && !organized)
@@ -75,33 +82,48 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
       ? 'Captura archivada.'
       : 'Captura devuelta a pendientes.');
 
-  const submit = async (contentOriginal) => runAction(async () => {
-    await persistTextCapture({
-      supabase,
-      ownerUserId: profile.id,
-      contentOriginal,
-      createId: uuidv7,
+  const queueAndProcess = async (captureId) => {
+    const queued = await supabase.functions.invoke('inbox-processing-queue', {
+      body: { captureId }, headers: { 'Idempotency-Key': uuidv7() },
     });
-  }, 'Captura guardada.');
+    if (queued.error) throw queued.error;
+    if (!queued.data?.runId) throw new Error('No se recibió el identificador del procesamiento.');
+    const processed = await supabase.functions.invoke('inbox-processing-process', { body: { runId: queued.data.runId } });
+    if (processed.error) throw processed.error;
+    if (processed.data?.status === 'not_claimable') throw new Error('El trabajo sigue en cola; vuelve a intentarlo.');
+  };
 
-  const openOrganizer = (capture) => {
-    const part = getCapturePart(capture.id);
+  const processCapture = (capture) => runAction(
+    () => queueAndProcess(capture.id),
+    'Propuestas preparadas. Revisa cada fragmento; no se creó ningún destino automáticamente.',
+  );
+
+  const submit = async (contentOriginal) => runAction(async () => {
+    const saved = await persistTextCapture({
+      supabase, ownerUserId: profile.id, contentOriginal, createId: uuidv7,
+    });
+    // A processing outage never invalidates a successfully saved capture.
+    try { await queueAndProcess(saved.captureId); } catch { /* retry remains available from the Inbox row */ }
+  }, 'Captura guardada.');
+  const openOrganizer = (capture, part = getCapturePart(capture.id)) => {
     setSelectedCapture(capture);
+    setSelectedPart(part || { id: uuidv7(), capture_id: capture.id, part_index: 0, original_fragment: capture.content_original });
     setDestinationType('task');
-    setTaskTitle(String(capture.content_original || '').slice(0, 240));
+    setTaskTitle(String(part?.original_fragment || capture.content_original || '').slice(0, 240));
     setTaskPriority('3');
     setTaskDueDate('');
     setNoteTitle('');
     setListMode('new');
     setSelectedListId(lists[0]?.id || '');
-    setNewListName(String(capture.content_original || '').slice(0, 200));
-    setListItemText(String(capture.content_original || '').slice(0, 500));
+    setNewListName(String(part?.original_fragment || capture.content_original || '').slice(0, 200));
+    setListItemText(String(part?.original_fragment || capture.content_original || '').slice(0, 500));
     setOperationIds({ partId: part?.id || uuidv7(), targetId: uuidv7(), itemId: uuidv7(), linkId: uuidv7() });
   };
 
   const closeOrganizer = () => {
     if (busy) return;
     setSelectedCapture(null);
+    setSelectedPart(null);
     setOperationIds(null);
   };
 
@@ -121,8 +143,8 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
 
   const saveOrganization = async (event) => {
     event.preventDefault();
-    if (!selectedCapture || !operationIds || getConfirmedLink(selectedCapture.id)) return;
-    const sourceText = String(selectedCapture.content_original || '');
+    if (!selectedCapture || !selectedPart || !operationIds || getConfirmedLink(selectedCapture.id, selectedPart.id)) return;
+    const sourceText = String(selectedPart.original_fragment || selectedCapture.content_original || '');
     if (!sourceText.trim()) return;
     if (destinationType === 'task' && !taskTitle.trim()) return;
     if (destinationType === 'list' && listMode === 'new' && !newListName.trim()) return;
@@ -143,8 +165,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
           : 'Captura añadida a una lista.';
 
     const saved = await runAction(async () => {
-      const existingPart = getCapturePart(selectedCapture.id);
-      const partId = existingPart?.id || ids.partId;
+      const partId = selectedPart?.id || ids.partId;
       await ensureRow('capture_part', {
         id: partId, capture_id: selectedCapture.id, part_index: 0, original_fragment: sourceText,
       });
@@ -192,8 +213,11 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
       if (partError) throw partError;
       if (!partUpdate?.length) throw new Error('El elemento fue creado, pero no se pudo confirmar su clasificación. Reintenta esta misma operación.');
 
+      const allParts = getCaptureParts(selectedCapture.id);
+      const allPartsConfirmed = allParts.length > 0 && allParts.every((part) => part.id === partId
+        || captureLinks.some((link) => link.capture_part_id === part.id && link.link_status === 'confirmed'));
       const { data: captureUpdate, error: captureError } = await supabase.from('capture')
-        .update({ attention_status: 'reviewed' })
+        .update({ attention_status: allPartsConfirmed ? 'reviewed' : 'needs_review' })
         .eq('id', selectedCapture.id).eq('owner_user_id', profile.id).select('id');
       if (captureError) throw captureError;
       if (!captureUpdate?.length) throw new Error('El elemento quedó creado, pero no se pudo actualizar el estado de su captura.');
@@ -230,8 +254,11 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
       </div>
       {loading ? <p className="muted">Cargando…</p> : localError ? <div className="form-error">{localError}</div> : rows.length ? visibleCaptures.length ? (
         <div className="capture-list">{visibleCaptures.map((capture) => {
-          const part = captureParts.find((item) => item.capture_id === capture.id);
-          const confirmedLink = part ? captureLinks.find((link) => link.capture_part_id === part.id && link.link_status === 'confirmed') : null;
+          const parts = getCaptureParts(capture.id);
+          const part = parts[0];
+          const confirmedLink = getConfirmedLink(capture.id);
+          const processingRun = processingRuns.find((run) => run.capture_id === capture.id);
+          const proposals = processingRun?.result?.proposals || [];
           const linkKind = getLinkKind(confirmedLink);
           const label = part?.category === 'task' ? 'Tarea'
             : part?.category === 'note_idea' ? 'Nota o idea'
@@ -242,10 +269,24 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
             <div className="capture-row-content">
               <p>{capture.content_original}</p>
               <small>{new Intl.DateTimeFormat('es', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Havana' }).format(new Date(capture.captured_at))}</small>
+              {parts.map((capturePart) => {
+                const proposal = proposals.find((item) => item.partIndex === capturePart.part_index) || proposals[capturePart.part_index];
+                const partLink = getConfirmedLink(capture.id, capturePart.id);
+                const categoryLabels = { task: 'Tarea', event: 'Evento', request: 'Solicitud', habit: 'Hábito', goal_subgoal: 'Meta', project: 'Proyecto', note_idea: 'Nota / idea', list: 'Lista' };
+                return <div className="capture-part-review" key={capturePart.id}>
+                  <div className="capture-part-heading"><strong>{categoryLabels[capturePart.category] || 'Fragmento'}</strong>
+                    {proposal && <span className="capture-part-confidence">Afinidad heurística: {Math.round(proposal.confidence * 100)}%{proposal.requiresClarification ? ' · necesita aclaración' : ''}</span>}
+                    {capturePart.review_status === 'accepted' || capturePart.review_status === 'edited' ? <span className="capture-part-confirmed">Confirmado</span> : null}
+                  </div>
+                  <p>{capturePart.original_fragment}</p>
+                  {partLink ? <span className="muted">Destino vinculado y trazable.</span> : <button type="button" className="capture-action-button" disabled={busy || capture.attention_status === 'archived'} onClick={() => openOrganizer(capture, capturePart)}>Revisar y confirmar destino</button>}
+                </div>;
+              })}
               <div className="capture-row-actions">
                 {confirmedLink
                   ? <span className="capture-status capture-status-organized">Organizada · {label}{capture.attention_status === 'archived' ? ' · Archivada' : ''}</span>
                   : <span className={'capture-status capture-status-' + capture.attention_status}>{attentionLabels[capture.attention_status] || 'Pendiente de revisión'}</span>}
+                {capture.processing_status !== 'processed' && capture.attention_status !== 'archived' ? <button type="button" className="capture-action-button" disabled={busy} onClick={() => processCapture(capture)}>{capture.processing_status === 'queued' || capture.processing_status === 'processing' ? 'Reintentar procesamiento' : 'Generar sugerencias'}</button> : null}
                 {confirmedLink ? (
                   <>
                     <button type="button" className="capture-action-button" onClick={() => openOrganizedTarget(confirmedLink)}>Abrir {linkKind === 'task' ? 'tareas' : linkKind === 'note_idea' ? 'notas e ideas' : 'listas'} →</button>
@@ -265,7 +306,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
       ) : <EmptyState title="No hay coincidencias" detail="Cambia la búsqueda o el filtro para encontrar otras capturas." icon="⌕" />
       : <EmptyState title="El Inbox está vacío" detail="Empieza escribiendo cualquier cosa que no quieras olvidar." /> }
     </div>
-    <div className="honest-note"><span>ⓘ</span><p>La organización es manual y requiere tu confirmación. SimpleLife conserva la captura original y registra su relación con la tarea, nota, idea o elemento de lista. La clasificación automática con IA todavía no está conectada.</p></div>
+    <div className="honest-note"><span>ⓘ</span><p>Las sugerencias actuales se generan con reglas locales deterministas (no con un modelo de IA) y son solo orientativas. Cada fragmento conserva el texto original; ningún destino se crea sin tu confirmación. Voz y sincronización offline privada permanecen desactivadas hasta aprobar y verificar su almacenamiento, proveedor, cifrado y recuperación.</p></div>
 
     {selectedCapture && (
       <div className="task-editor-overlay capture-organizer-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) closeOrganizer(); }}>

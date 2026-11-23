@@ -29,3 +29,7 @@ verify_jwt = true
 # Internal worker; @supabase/server validates the secret apikey header.
 [functions.inbox-processing-worker]
 verify_jwt = false
+
+# Owner-authenticated processing bridge; service credentials stay server-side.
+[functions.inbox-processing-process]
+verify_jwt = true

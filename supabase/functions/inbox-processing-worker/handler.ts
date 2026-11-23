@@ -1,3 +1,5 @@
+import { classifyInboxCapture, INBOX_RULE_PROCESSOR_VERSION } from "../_shared/inbox-rule-classifier.ts";
+
 export const MAX_REQUEST_BYTES = 64 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const JSON_HEADERS = {
@@ -45,8 +47,8 @@ async function readBoundedBody(request: Request): Promise<string | null> {
 
 /**
  * Server-to-server queue worker contract. The secret key is accepted only in
- * the apikey header by @supabase/server. No classifier/provider is bundled;
- * a trusted worker supplies results and must present its current lease token.
+ * the apikey header by @supabase/server. The process action uses local
+ * deterministic rules and never creates destinations or calls an external provider.
  */
 export async function handleRequest(
   request: Request,
@@ -67,6 +69,64 @@ export async function handleRequest(
   try { body = JSON.parse(raw); } catch { return json({ error: "VALID_JSON_REQUIRED" }, 400); }
   if (!isRecord(body) || typeof body.action !== "string") {
     return json({ error: "WORKER_ACTION_REQUIRED" }, 422);
+  }
+
+
+  if (body.action === "process") {
+    if (Object.keys(body).some((key) => !["action", "runId"].includes(key)) || !validUuid(body.runId)) {
+      return json({ error: "INVALID_PROCESS_PAYLOAD" }, 422);
+    }
+    const leaseToken = (dependencies.newLeaseToken ?? (() => crypto.randomUUID()))();
+    if (!validUuid(leaseToken)) return json({ error: "LEASE_TOKEN_INVALID" }, 500);
+    const claimed = await ctx.supabaseAdmin.rpc("claim_inbox_processing_run_by_id", {
+      p_run_id: body.runId, p_lease_token: leaseToken, p_lease_seconds: 120,
+    });
+    if (claimed.error) return json({ error: "PROCESSING_CLAIM_FAILED" }, 503);
+    const jobRow = Array.isArray(claimed.data) ? claimed.data[0] : claimed.data;
+    if (!jobRow || typeof jobRow !== "object") {
+      return json({ accepted: false, status: "not_claimable" }, 200);
+    }
+    const job = jobRow as Record<string, unknown>;
+    if (typeof job.run_id !== "string" || typeof job.content_original !== "string") {
+      await ctx.supabaseAdmin.rpc("fail_inbox_processing_run", {
+        p_run_id: body.runId, p_lease_token: leaseToken,
+        p_error_code: "INVALID_CLAIM_RESULT", p_retryable: false, p_retry_after_seconds: 0,
+      });
+      return json({ error: "PROCESSING_CLAIM_RESULT_INVALID" }, 503);
+    }
+    let proposals;
+    try {
+      proposals = classifyInboxCapture(job.content_original);
+    } catch {
+      await ctx.supabaseAdmin.rpc("fail_inbox_processing_run", {
+        p_run_id: body.runId, p_lease_token: leaseToken,
+        p_error_code: "CLASSIFIER_FAILED", p_retryable: true, p_retry_after_seconds: 60,
+      });
+      return json({ error: "INBOX_CLASSIFICATION_FAILED" }, 503);
+    }
+    const resultPayload = {
+      engine: "deterministic-rules",
+      processorVersion: INBOX_RULE_PROCESSOR_VERSION,
+      classification: "advisory-only",
+      confidenceMeaning: "heuristic-affinity-not-probability",
+      generatedAt: new Date().toISOString(),
+      proposals,
+    };
+    const completed = await ctx.supabaseAdmin.rpc("complete_inbox_processing_run_with_parts", {
+      p_run_id: body.runId, p_lease_token: leaseToken,
+      p_result: resultPayload, p_proposals: proposals,
+    });
+    if (completed.error) {
+      await ctx.supabaseAdmin.rpc("fail_inbox_processing_run", {
+        p_run_id: body.runId, p_lease_token: leaseToken,
+        p_error_code: "PROPOSAL_PERSIST_FAILED", p_retryable: true, p_retry_after_seconds: 60,
+      });
+      return json({ error: "INBOX_PROPOSAL_PERSIST_FAILED" }, 503);
+    }
+    return completed.data === true
+      ? json({ accepted: true, status: "succeeded", engine: "deterministic-rules",
+          processorVersion: INBOX_RULE_PROCESSOR_VERSION, proposalCount: proposals.length }, 200)
+      : json({ error: "PROCESSING_LEASE_STALE" }, 409);
   }
 
   if (body.action === "claim") {
