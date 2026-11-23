@@ -59,6 +59,32 @@ export function getCalendarWindow(view, value) {
   throw new RangeError('Calendar view must be day, week or month.');
 }
 
+/**
+ * Returns the date filter used to load materialized recurring occurrences.
+ * The visible month is the full six-week calendar grid, not only the named
+ * month. A bounded look-behind includes long events that begin before the
+ * visible window and continue into it.
+ */
+export function getRecurringOccurrenceQueryWindow(view, value, maxEndOffsetDays = 30) {
+  assert(Number.isInteger(maxEndOffsetDays)
+    && maxEndOffsetDays >= 0
+    && maxEndOffsetDays <= 30,
+  'Recurring occurrence overlap buffer must be from 0 to 30 calendar days.');
+  const visible = view === 'month'
+    ? (() => {
+      const days = monthGridDays(value);
+      return Object.freeze({
+        startDate: days[0],
+        endDateExclusive: addCalendarDays(days[days.length - 1], 1),
+      });
+    })()
+    : getCalendarWindow(view, value);
+  return Object.freeze({
+    startDate: addCalendarDays(visible.startDate, -maxEndOffsetDays),
+    endDateExclusive: visible.endDateExclusive,
+  });
+}
+
 export function shiftCalendarPeriod(view, value, direction) {
   assert(direction === -1 || direction === 1, 'Calendar direction must be -1 or 1.');
   if (view === 'day') return addCalendarDays(value, direction);
