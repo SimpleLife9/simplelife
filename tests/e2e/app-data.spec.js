@@ -4277,7 +4277,7 @@ test('Agenda creates a recurring all-day series and renders each persisted occur
   await composer.getByLabel('Nombre del evento').fill('Rutina diaria');
   await composer.getByLabel('Desde', { exact: true }).fill(today);
   await composer.getByLabel('Hasta (incluido)', { exact: true }).fill(today);
-  await composer.locator('select').selectOption('DAILY');
+  await composer.locator('label').filter({ hasText: 'Repetición' }).locator('select').selectOption('DAILY');
   await composer.getByLabel('Ocurrencias').fill('2');
   await composer.getByRole('button', { name: 'Crear serie recurrente' }).click();
 
