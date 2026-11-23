@@ -270,10 +270,10 @@ BEGIN
     'policyVersion', 'event-task-schedule-decision-v1',
     'taskScheduleId', '019a0000-0000-7000-8000-000000000101',
     'taskScheduleUpdatedAt', v_updated_at,
-    'startsAt', '2026-11-24T14:00:00.000Z',
-    'endsAt', '2026-11-24T15:00:00.000Z',
-    'overlapStartsAt', '2026-11-24T14:30:00.000Z',
-    'overlapEndsAt', '2026-11-24T15:00:00.000Z',
+    'startsAt', '2026-11-24T15:00:00.000Z',
+    'endsAt', '2026-11-24T16:00:00.000Z',
+    'overlapStartsAt', '2026-11-24T15:00:00.000Z',
+    'overlapEndsAt', '2026-11-24T15:30:00.000Z',
     'decision', 'keep_overlap',
     'consentedAt', v_event_now
   ));
