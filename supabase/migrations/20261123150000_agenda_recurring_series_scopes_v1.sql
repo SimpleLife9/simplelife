@@ -402,7 +402,7 @@ BEGIN
 
     -- Retain stable row ID/key/original slot for same-date future occurrences.
     UPDATE public.calendar_event_occurrence AS existing
-    SET actual_local_date = candidate.value->>'actual_local_date',
+    SET actual_local_date = nullif(candidate.value->>'actual_local_date', '')::date,
         actual_local_time = nullif(candidate.value->>'actual_local_time', '')::time,
         start_date = nullif(candidate.value->>'start_date', '')::date,
         end_date_exclusive = nullif(candidate.value->>'end_date_exclusive', '')::date,
