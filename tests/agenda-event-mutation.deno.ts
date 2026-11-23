@@ -304,10 +304,13 @@ Deno.test("authenticated edit invokes only the atomic owner-scoped mutation RPC 
   assertEquals(args.p_mutation, "edit", "mutation kind");
   assertEquals(args.p_idempotency_key, KEY, "UUIDv7 key");
   const patch = args.p_event_patch as Record<string, unknown>;
-  assertEquals(Object.keys(patch).length, 18, "editable Event fields plus decisions and transient snapshot");
+  assertEquals(Object.keys(patch).length, 21, "editable Event fields plus Protected Time and TaskSchedule evidence");
   assertEquals(patch.title, "Reunión actualizada", "title patch");
-  assertEquals(patch.protected_time_decisions, [], "no overlap decisions needed");
-  assertEquals(patch.protected_time_snapshot, [], "empty owner snapshot supplied");
+  assertEquals(patch.protected_time_decisions, [], "no Protected Time decisions needed");
+  assertEquals(patch.protected_time_snapshot, [], "empty Protected Time owner snapshot supplied");
+  assertEquals(patch.task_schedule_conflict_decisions, [], "no TaskSchedule decisions needed");
+  assertEquals(patch.task_schedule_snapshot, [], "empty TaskSchedule owner snapshot supplied");
+  assertEquals(Object.keys(patch.task_schedule_window as Record<string, unknown>).length, 2, "resolved TaskSchedule comparison window");
   assertEquals(patch.owner_user_id, undefined, "no owner identity in patch");
 });
 
