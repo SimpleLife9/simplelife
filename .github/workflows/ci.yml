@@ -160,6 +160,9 @@ jobs:
       - name: Verify recurring Event creation, idempotency and ownership in the actual local Edge Runtime
         run: node scripts/agenda-event-series-edge-smoke.mjs
 
+      - name: Verify recurring series split, inherited occurrence and replay in the actual local Edge Runtime
+        run: node scripts/agenda-event-series-mutate-edge-smoke.mjs
+
 
       - name: Stop local Supabase stack
         if: always()
