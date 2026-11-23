@@ -13,6 +13,7 @@ import {
 } from "../_shared/agenda-event-profile.ts";
 import { resolveLocalDateTimeRange, TzdbVersionError } from "../agenda-time-resolve/resolver.ts";
 import { assessOwnerProtectedTimeConflicts } from "../_shared/protected-time-conflicts.ts";
+import { assessOwnerEventTaskScheduleConflicts } from "../_shared/event-task-schedule-conflicts.ts";
 
 export const MAX_REQUEST_BYTES = 32 * 1024;
 const JSON_HEADERS = {
@@ -37,6 +38,7 @@ const EDIT_FIELDS = [
   "start_gap_strategy",
   "end_gap_strategy",
   "protected_time_decisions",
+  "task_schedule_decisions",
 ] as const;
 
 type RpcClient = {
@@ -88,6 +90,7 @@ function toEventPatch(record: Record<string, unknown>): Record<string, unknown> 
   const patch: Record<string, unknown> = {};
   for (const field of EDIT_FIELDS) patch[field] = record[field];
   patch.protected_time_snapshot = record.protected_time_snapshot;
+  patch.task_schedule_snapshot = record.task_schedule_snapshot;
   return patch;
 }
 
@@ -176,7 +179,7 @@ export async function handleRequest(
     ? ["action", "event", "eventId", "expectedUpdatedAt"]
     : ["action", "eventId", "expectedUpdatedAt"];
   const allowedKeys = input.action === "edit"
-    ? [...requiredKeys, "protectedTimeDecisions"]
+    ? [...requiredKeys, "protectedTimeDecisions", "taskScheduleDecisions"]
     : requiredKeys;
   if (requiredKeys.some((key) => !(key in input))
     || Object.keys(input).some((key) => !allowedKeys.includes(key))) {
@@ -186,6 +189,10 @@ export async function handleRequest(
   const requestedProtectedTimeDecisions = input.protectedTimeDecisions ?? [];
   if (!Array.isArray(requestedProtectedTimeDecisions)) {
     return json({ error: "PROTECTED_TIME_DECISIONS_MUST_BE_AN_ARRAY" }, 422);
+  }
+  const requestedTaskScheduleDecisions = input.taskScheduleDecisions ?? [];
+  if (!Array.isArray(requestedTaskScheduleDecisions)) {
+    return json({ error: "TASK_SCHEDULE_DECISIONS_MUST_BE_AN_ARRAY" }, 422);
   }
 
   try {
@@ -197,6 +204,7 @@ export async function handleRequest(
         ? createEventDraft(input.event)
         : null,
       protectedTimeDecisions: requestedProtectedTimeDecisions as Record<string, unknown>[],
+      taskScheduleDecisions: requestedTaskScheduleDecisions as Record<string, unknown>[],
     });
     const intent = await hashEventMutationIntent(mutation);
 
@@ -242,7 +250,7 @@ export async function handleRequest(
       }
       const currentResult = await ctx.supabaseAdmin
         .from("calendar_event")
-        .select("temporal_kind,start_date,end_date_exclusive,starts_at,ends_at,protected_time_decisions")
+        .select("temporal_kind,start_date,end_date_exclusive,starts_at,ends_at,protected_time_decisions,task_schedule_decisions")
         .eq("owner_user_id", profile.profileId)
         .eq("id", mutation.eventId)
         .maybeSingle();
@@ -315,6 +323,60 @@ export async function handleRequest(
           return previous ? [previous] : [];
         })
         : conflictAssessment.assessment.decisions;
+      const taskScheduleDecisionRecords = Array.isArray(currentResult.data.task_schedule_decisions)
+        ? currentResult.data.task_schedule_decisions as Record<string, unknown>[]
+        : [];
+      const taskScheduleDecisionMap = new Map(taskScheduleDecisionRecords
+        .filter((item) => typeof item.taskScheduleId === "string")
+        .map((item) => [String(item.taskScheduleId), item]));
+      const priorTaskScheduleInputs = taskScheduleDecisionRecords.map((item) => ({
+        taskScheduleId: item.taskScheduleId,
+        taskScheduleUpdatedAt: item.taskScheduleUpdatedAt,
+        decision: item.decision,
+      }));
+      const retainTaskScheduleConsent = input.taskScheduleDecisions === undefined && sameWindow;
+      let taskScheduleDecisionInputs = input.taskScheduleDecisions !== undefined
+        ? requestedTaskScheduleDecisions
+        : retainTaskScheduleConsent ? priorTaskScheduleInputs : [];
+      let taskScheduleAssessment = await assessOwnerEventTaskScheduleConflicts({
+        supabaseAdmin: ctx.supabaseAdmin,
+        ownerProfileId: profile.profileId,
+        event: candidateRecord,
+        suppliedDecisions: taskScheduleDecisionInputs,
+        now,
+      });
+      if (!taskScheduleAssessment.ok && retainTaskScheduleConsent) {
+        const reusable = taskScheduleAssessment.conflicts.flatMap((conflict) => {
+          const previous = taskScheduleDecisionMap.get(String(conflict.taskScheduleId));
+          if (!previous || previous.taskScheduleUpdatedAt !== conflict.taskScheduleUpdatedAt
+            || previous.decision !== conflict.requiredDecision) return [];
+          return [{
+            taskScheduleId: conflict.taskScheduleId,
+            taskScheduleUpdatedAt: conflict.taskScheduleUpdatedAt,
+            decision: conflict.requiredDecision,
+          }];
+        });
+        taskScheduleDecisionInputs = reusable;
+        taskScheduleAssessment = await assessOwnerEventTaskScheduleConflicts({
+          supabaseAdmin: ctx.supabaseAdmin,
+          ownerProfileId: profile.profileId,
+          event: candidateRecord,
+          suppliedDecisions: taskScheduleDecisionInputs,
+          now,
+        });
+      }
+      if (!taskScheduleAssessment.ok) {
+        return json({
+          error: taskScheduleAssessment.code,
+          conflicts: taskScheduleAssessment.conflicts,
+        }, 409);
+      }
+      const taskScheduleDecisionsToPersist = retainTaskScheduleConsent
+        ? taskScheduleAssessment.assessment.conflicts.flatMap((conflict) => {
+          const previous = taskScheduleDecisionMap.get(String(conflict.taskScheduleId));
+          return previous ? [previous] : [];
+        })
+        : taskScheduleAssessment.assessment.decisions;
       const record = buildEventInsertRecord({
         eventDraft: readyDraft,
         eventId: mutation.eventId,
@@ -322,6 +384,8 @@ export async function handleRequest(
         now,
         protectedTimeDecisions: [...decisionsToPersist],
         protectedTimeSnapshot: [...conflictAssessment.assessment.snapshot],
+        taskScheduleDecisions: [...taskScheduleDecisionsToPersist],
+        taskScheduleSnapshot: [...taskScheduleAssessment.assessment.snapshot],
       });
       eventPatch = toEventPatch(record as unknown as Record<string, unknown>);
     }
@@ -356,7 +420,8 @@ export async function handleRequest(
       return json({ error: error.message }, 422);
     }
     if (error instanceof Error && (error.message === "AGENDA_TIME_ZONE_LOOKUP_FAILED"
-      || error.message === "PROTECTED_TIME_CONFLICT_LOOKUP_FAILED")) {
+      || error.message === "PROTECTED_TIME_CONFLICT_LOOKUP_FAILED"
+      || error.message === "TASK_SCHEDULE_CONFLICT_LOOKUP_FAILED")) {
       return json({ error: error.message }, 503);
     }
     return json({ error: "EVENT_MUTATION_FAILED" }, 500);
