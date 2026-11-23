@@ -313,9 +313,37 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
     // A processing outage never invalidates a successfully saved capture.
     try { await queueAndProcess(saved.captureId); } catch { /* retry remains available from the Inbox row */ }
   }, 'Captura guardada.');
-  const openOrganizer = (capture, part = getCapturePart(capture.id)) => {
+  const openOrganizer = async (capture, part = getCapturePart(capture.id)) => {
+    try {
+      if (!part) {
+        if (capture.processing_status === 'processed') {
+          throw new Error('Esta captura ya fue procesada, pero faltan sus fragmentos. No se reconstruirá una propuesta procesada sin recuperar primero su historial.');
+        }
+        const candidate = {
+          id: uuidv7(),
+          capture_id: capture.id,
+          part_index: 0,
+          original_fragment: capture.content_original,
+        };
+        // A previous capture may have been saved before its initial part insert failed.
+        // Recreate that first part from the immutable source, then read the row back under RLS.
+        await supabase.from('capture_part').insert(candidate);
+        const { data: recoveredParts, error: recoveryError } = await supabase.from('capture_part')
+          .select('*')
+          .eq('capture_id', capture.id)
+          .order('part_index')
+          .limit(1);
+        if (recoveryError) throw recoveryError;
+        part = Array.isArray(recoveredParts) ? recoveredParts[0] : recoveredParts;
+        if (!part) throw new Error('No se pudo recuperar el fragmento inicial de esta captura.');
+      }
+    } catch (error) {
+      setLocalError(error?.message || 'No se pudo recuperar la captura original.');
+      return;
+    }
+    setLocalError('');
     setSelectedCapture(capture);
-    setSelectedPart(part || { id: uuidv7(), capture_id: capture.id, part_index: 0, original_fragment: capture.content_original });
+    setSelectedPart(part);
     const source = String(part?.original_fragment || capture.content_original || '');
     const suggestedDestination = getSuggestedDestinationType(part?.category);
     const requestToken = ++proposalMetadataRequestRef.current;
