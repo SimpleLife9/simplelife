@@ -114,8 +114,16 @@ async function startFunction(name, readyHeaders, readyStatus) {
   if (!ready) fail(name + " Edge Runtime did not become ready.\n" + logs);
   return { server, url, logs: () => logs };
 }
-function stopServer(server) {
-  server.kill("SIGTERM");
+async function stopServer(server) {
+  if (server.exitCode !== null || server.signalCode !== null) return;
+  await new Promise((resolve) => {
+    const forceKill = setTimeout(() => server.kill("SIGKILL"), 5000);
+    server.once("exit", () => {
+      clearTimeout(forceKill);
+      resolve();
+    });
+    server.kill("SIGTERM");
+  });
 }
 
 let queueServer;
@@ -167,7 +175,7 @@ try {
   const foreignRuns = await responseJson(foreignRunRead, "foreign run read");
   equal(foreignRuns.length, 0, "other owner cannot read processing run");
 
-  stopServer(queueServer.server);
+  await stopServer(queueServer.server);
   queueServer = null;
 
   workerServer = await startFunction("inbox-processing-worker", { apikey: secret }, 405);
@@ -206,7 +214,7 @@ try {
   );
   equal(savedStatus, "succeeded:processed", "atomic run/capture completion");
 
-  stopServer(workerServer.server);
+  await stopServer(workerServer.server);
   workerServer = null;
   queueServer = await startFunction("inbox-processing-queue", { apikey: publishable }, 401);
 
@@ -214,7 +222,7 @@ try {
   equal(secondQueue.status, 202, "retry fixture enqueue");
   const secondBody = await responseJson(secondQueue, "retry fixture queue");
 
-  stopServer(queueServer.server);
+  await stopServer(queueServer.server);
   queueServer = null;
   workerServer = await startFunction("inbox-processing-worker", { apikey: secret }, 405);
 
@@ -250,6 +258,6 @@ try {
   console.log("PASS: retryable failure reclaims the same run with an incremented attempt number.");
   console.log("PASS: no AI API, provider credential, or hosted Supabase write is used.");
 } finally {
-  if (queueServer) stopServer(queueServer.server);
-  if (workerServer) stopServer(workerServer.server);
+  if (queueServer) await stopServer(queueServer.server);
+  if (workerServer) await stopServer(workerServer.server);
 }
