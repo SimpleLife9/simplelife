@@ -33,9 +33,10 @@ function resolveSecretApiKey(env: (name: string) => string | undefined): string 
   return legacy && legacy.length > 20 ? legacy : null;
 }
 
-async function readBoundedJson(request: Request): Promise<boolean> {
-  if (!request.body) return true;
+async function readBoundedBody(request: Request): Promise<string | null> {
+  if (!request.body) return "";
   const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
   let total = 0;
   try {
     while (true) {
@@ -44,13 +45,20 @@ async function readBoundedJson(request: Request): Promise<boolean> {
       total += value?.byteLength || 0;
       if (total > MAX_BODY_BYTES) {
         try { await reader.cancel(); } catch { /* best effort */ }
-        return false;
+        return null;
       }
+      if (value) chunks.push(value);
     }
-    return true;
   } finally {
     reader.releaseLock();
   }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
 }
 
 /** Vault-token gate for pg_cron. The function itself is not JWT-authenticated. */
@@ -62,9 +70,11 @@ export async function handleRequest(
   if (request.headers.get("content-type")?.split(";")[0].trim().toLowerCase() !== "application/json") {
     return json({ error: "CONTENT_TYPE_MUST_BE_JSON" }, 415);
   }
-  const hasBoundedBody = await readBoundedJson(request).catch(() => false);
-  if (!hasBoundedBody) return json({ error: "REQUEST_BODY_TOO_LARGE_OR_INVALID" }, 413);
-  const raw = await request.clone().text().catch(() => "");
+  let raw: string | null;
+  try { raw = await readBoundedBody(request); } catch {
+    return json({ error: "REQUEST_BODY_MUST_BE_VALID_UTF8" }, 400);
+  }
+  if (raw === null) return json({ error: "REQUEST_BODY_TOO_LARGE" }, 413);
   if (raw.trim() && raw.trim() !== "{}") return json({ error: "EMPTY_JSON_OBJECT_REQUIRED" }, 422);
 
   const env = dependencies.env ?? ((name: string) => Deno.env.get(name));
@@ -72,8 +82,12 @@ export async function handleRequest(
   const supabaseUrl = env("SUPABASE_URL")?.replace(/\/+$/, "");
   const schedulerToken = request.headers.get("x-inbox-scheduler-token") || "";
   const secretApiKey = resolveSecretApiKey(env);
+  let parsedUrl: URL | null = null;
+  try { parsedUrl = supabaseUrl ? new URL(supabaseUrl) : null; } catch { parsedUrl = null; }
+  const localHttp = parsedUrl?.protocol === "http:"
+    && ["127.0.0.1", "localhost", "kong"].includes(parsedUrl.hostname);
 
-  if (!supabaseUrl || !/^https:\/\//i.test(supabaseUrl) || !secretApiKey) {
+  if (!parsedUrl || (parsedUrl.protocol !== "https:" && !localHttp) || !secretApiKey) {
     return json({ error: "SCHEDULER_CONFIGURATION_UNAVAILABLE" }, 503);
   }
   if (schedulerToken.length < 32 || schedulerToken.length > 256) {
