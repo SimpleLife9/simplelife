@@ -1412,7 +1412,7 @@ test('Inbox refuses to invent fragments for an already processed capture', async
     captured_at: '2026-11-23T12:00:00.000Z',
     deleted_at: null,
   };
-  const { captures, insertedCaptureParts } = await mockSupabaseSession(page, {
+  const { captures, captureParts, insertedCaptureParts } = await mockSupabaseSession(page, {
     captures: [capture],
     captureParts: [],
   });
@@ -1664,8 +1664,9 @@ test('Inbox searches and paginates the complete capture archive beyond the first
   await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
   await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
 
-  await expect(page.getByText('Historical capture 257')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Cargar más capturas' }).click();
+  await expect(page.getByText('Historical capture 1', { exact: true })).toBeVisible();
+  await expect(page.getByText('Historical capture 257', { exact: true })).toHaveCount(0);
+  // Initial page is 0–99; two more pages cover rows 100–256.
   await page.getByRole('button', { name: 'Cargar más capturas' }).click();
   await page.getByRole('button', { name: 'Cargar más capturas' }).click();
   await expect(page.getByText('ARCHIVE_TAIL_UNIQUE_TERM')).toBeVisible();
@@ -1700,7 +1701,7 @@ test('Inbox ignores a delayed pagination response after the archive search chang
   await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
   await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
 
-  await expect(page.getByText('Historical capture 1')).toBeVisible();
+  await expect(page.getByText('Historical capture 1', { exact: true })).toBeVisible();
   const delayedPageRequest = page.waitForRequest((request) =>
     request.url().includes('/rest/v1/capture') && request.headers()['range'] === '100-199'
   );
@@ -1775,7 +1776,9 @@ test('Inbox can link captures to existing Goals and Subgoals without duplicating
   await page.getByLabel('Filtrar capturas por revisión').selectOption('organized');
   await expect(page.getByRole('button', { name: 'Abrir metas' })).toBeVisible();
 
-  await page.getByLabel('Filtrar capturas por revisión').selectOption('needs_review');
+  // This fixture starts as reviewed; the first capture is now organized and
+  // excluded from this filter, so the second capture remains independently reviewable.
+  await page.getByLabel('Filtrar capturas por revisión').selectOption('reviewed');
   await page.getByRole('button', { name: 'Organizar captura: Idea para mejorar el negocio' }).click();
   organizer = page.getByRole('dialog', { name: 'Organizar captura' });
   await organizer.getByLabel('Tipo de destino').selectOption('subgoal');
