@@ -8,8 +8,14 @@ const AUDIO = new TextEncoder().encode("private voice fixture bytes");
 const HEX = (bytes: ArrayBuffer) => [...new Uint8Array(bytes)]
   .map((value) => value.toString(16).padStart(2, "0")).join("");
 
+function copyToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+  return buffer;
+}
+
 async function digest(bytes: Uint8Array): Promise<string> {
-  return HEX(await crypto.subtle.digest("SHA-256", bytes));
+  return HEX(await crypto.subtle.digest("SHA-256", copyToArrayBuffer(bytes)));
 }
 
 function request(payload: unknown = { assetId: ASSET_ID }, headers: Record<string, string> = {}) {
@@ -78,7 +84,7 @@ function context({
           async download(path: string) {
             calls.downloadPaths.push(path);
             return {
-              data: downloaded === null ? null : new Blob([downloaded]),
+              data: downloaded === null ? null : new Blob([copyToArrayBuffer(downloaded)]),
               error: downloadError,
             };
           },
