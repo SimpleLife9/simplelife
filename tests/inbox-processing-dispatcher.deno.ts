@@ -128,7 +128,7 @@ Deno.test("dispatcher removes expired private voice objects before deleting meta
         calls.push(name);
         if (name === "claim_inbox_processing_run") return { data: [], error: null };
         if (name === "list_expired_inbox_audio_assets") return {
-          data: [{ asset_id: AUDIO_ASSET, bucket_id: "inbox-voice-private", object_path: objectPath }],
+          data: [{ asset_id: AUDIO_ASSET, owner_user_id: OWNER, bucket_id: "inbox-voice-private", object_path: objectPath }],
           error: null,
         };
         if (name === "complete_inbox_audio_asset_purge") {
