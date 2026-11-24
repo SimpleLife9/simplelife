@@ -473,8 +473,26 @@ try {
 
   await stopServer(voiceFinalizeServer.server);
   voiceFinalizeServer = null;
+
+  // Supabase protects storage.objects from direct SQL deletion. Use the Storage
+  // API with the local service key, then remove only the disposable metadata.
+  const voiceCleanup = await fetch(base + "/storage/v1/object/inbox-voice-private", {
+    method: "DELETE",
+    headers: {
+      apikey: secret,
+      authorization: "Bearer " + secret,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ prefixes: [voicePath, corruptPath] }),
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!voiceCleanup.ok) {
+    fail("Could not remove disposable private voice fixtures through Storage API: " + await voiceCleanup.text());
+  }
+  equal(sqlScalar(
+    "SELECT count(*) FROM storage.objects WHERE bucket_id='inbox-voice-private' AND name IN ('" + voicePath + "','" + corruptPath + "')",
+  ), "0", "Storage API removed both disposable voice objects");
   sqlExec(
-    "DELETE FROM storage.objects WHERE bucket_id='inbox-voice-private' AND name IN ('" + voicePath + "','" + corruptPath + "'); " +
     "DELETE FROM public.capture_audio_asset WHERE id IN ('" + voiceAssetId + "'::uuid,'" + corruptAssetId + "'::uuid);",
   );
 
