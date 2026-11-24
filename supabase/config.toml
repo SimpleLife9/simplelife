@@ -37,3 +37,7 @@ verify_jwt = true
 # Scheduled internal queue dispatcher; @supabase/server validates the secret apikey header.
 [functions.inbox-processing-dispatcher]
 verify_jwt = false
+
+# Cron entrypoint validates a separate Vault token before internal service calls.
+[functions.inbox-processing-scheduled]
+verify_jwt = false
