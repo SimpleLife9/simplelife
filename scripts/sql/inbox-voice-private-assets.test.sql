@@ -179,12 +179,12 @@ BEGIN
      OR has_table_privilege('service_role','public.audit_event','INSERT') THEN
     RAISE EXCEPTION 'Audio purge must not grant direct audit_event privileges';
   END IF;
+  IF cardinality(v_assets) <> 1 THEN
+    RAISE EXCEPTION 'Expected exactly one unattached expired audio fixture, found %', cardinality(v_assets);
+  END IF;
   SELECT public.complete_inbox_audio_asset_purge(
     v_assets,
-    ARRAY[
-      '019b7200-0000-7000-8000-000000000201'::uuid,
-      '019b7200-0000-7000-8000-000000000202'::uuid
-    ][1:cardinality(v_assets)]
+    ARRAY['019b7200-0000-7000-8000-000000000201'::uuid]
   ) INTO v_deleted;
   IF v_deleted <> cardinality(v_assets) THEN
     RAISE EXCEPTION 'Audio metadata purge count did not match the expired assets';
