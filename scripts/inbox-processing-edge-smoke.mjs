@@ -137,6 +137,8 @@ let workerServer;
 let processServer;
 let dispatcherServer;
 let voiceFinalizeServer;
+let purgeFixtureAssetId = null;
+let purgeFixturePath = null;
 try {
   queueServer = await startFunction("inbox-processing-queue", { apikey: publishable }, 401);
   const queue = async (token, captureId, idempotencyKey) => await fetch(queueServer.url, {
@@ -197,8 +199,7 @@ try {
   const publishableWorker = await worker(publishable, { action: "claim" });
   equal(publishableWorker.status, 401, "publishable key cannot call worker");
 
-  const claimResponse = await worker(secret, { action: "claim", leaseSeconds: 90 });
-  equal(claimResponse.status, 200, "worker claim status");
+  const claimResponse = await worker(secret, { action: "claim", leaseSeconds: 90 });  equal(claimResponse.status, 200, "worker claim status");
   const claim = await responseJson(claimResponse, "worker claim");
   assertUuid(claim.job.run_id, UUID_V7, "claimed run id");
   equal(claim.job.run_id, firstBody.runId, "claimed original run");
@@ -397,8 +398,7 @@ try {
       "content-type": "application/json",
     },
     body: JSON.stringify({ assetId: id }),
-    signal: AbortSignal.timeout(20000),
-  });
+    signal: AbortSignal.timeout(20000),  });
   const finalizedVoice = await finalizeVoice(ownerA.accessToken, voiceAssetId);
   equal(finalizedVoice.status, 200, "server-verified voice finalization");
   const finalizedVoiceBody = await responseJson(finalizedVoice, "server-verified voice finalization");
@@ -496,6 +496,84 @@ try {
     "DELETE FROM public.capture_audio_asset WHERE id IN ('" + voiceAssetId + "'::uuid,'" + corruptAssetId + "'::uuid);",
   );
 
+  // Verify actual expired private Storage purge through the local Edge Runtime.
+  purgeFixtureAssetId = sqlScalar("SELECT private.uuidv7()");
+  purgeFixturePath = profileA + "/" + purgeFixtureAssetId + "/source.webm";
+  const expiredAudioBytes = Buffer.from("SimpleLife expired private voice purge fixture.");
+  const expiredAudioSha = createHash("sha256").update(expiredAudioBytes).digest("hex");
+  const expiredAudioMetadata = await fetch(base + "/rest/v1/capture_audio_asset", {
+    method: "POST",
+    headers: {
+      apikey: publishable,
+      authorization: "Bearer " + ownerA.accessToken,
+      "content-type": "application/json",
+      prefer: "return=minimal",
+    },
+    body: JSON.stringify([{
+      id: purgeFixtureAssetId,
+      owner_user_id: profileA,
+      created_by_user_id: profileA,
+      bucket_id: "inbox-voice-private",
+      object_path: purgeFixturePath,
+      mime_type: "audio/webm",
+      file_size_bytes: expiredAudioBytes.byteLength,
+      sha256_hex: expiredAudioSha,
+      status: "uploading",
+    }]),
+    signal: AbortSignal.timeout(10000),
+  });
+  if (expiredAudioMetadata.status !== 201 && expiredAudioMetadata.status !== 204) {
+    fail("Could not create owner-scoped expired voice metadata: " + await expiredAudioMetadata.text());
+  }
+  const expiredAudioUpload = await fetch(
+    base + "/storage/v1/object/inbox-voice-private/" + purgeFixturePath.split("/").map(encodeURIComponent).join("/"),
+    {
+      method: "POST",
+      headers: {
+        apikey: publishable,
+        authorization: "Bearer " + ownerA.accessToken,
+        "content-type": "audio/webm",
+        "x-upsert": "false",
+      },
+      body: expiredAudioBytes,
+      signal: AbortSignal.timeout(10000),
+    },
+  );
+  if (expiredAudioUpload.status !== 200 && expiredAudioUpload.status !== 201) {
+    fail("Could not upload expired private voice fixture: " + await expiredAudioUpload.text());
+  }
+  equal(sqlScalar(
+    "SELECT count(*) FROM storage.objects WHERE bucket_id='inbox-voice-private' AND name='" + purgeFixturePath + "'",
+  ), "1", "expired voice fixture exists in private Storage before purge");
+  sqlExec(
+    "UPDATE public.capture_audio_asset SET retention_until=clock_timestamp()-interval '1 minute' " +
+    "WHERE id='" + purgeFixtureAssetId + "'::uuid;",
+  );
+
+  dispatcherServer = await startFunction("inbox-processing-dispatcher", { apikey: secret }, 405);
+  const expiredAudioPurgeResponse = await dispatchCall(secret, { maxJobs: 1 });
+  equal(expiredAudioPurgeResponse.status, 200, "expired private voice purge dispatcher status");
+  const expiredAudioPurgeResult = await responseJson(expiredAudioPurgeResponse, "expired private voice purge");
+  equal(expiredAudioPurgeResult.audioPurgedCount, 1, "dispatcher purged exactly one expired private voice asset");
+  equal(expiredAudioPurgeResult.audioPurgeFailed, false, "expired private voice object removal succeeded");
+  equal(expiredAudioPurgeResult.purgeFailed, false, "dispatcher retention purge completed without errors");
+  equal(sqlScalar(
+    "SELECT count(*) FROM storage.objects WHERE bucket_id='inbox-voice-private' AND name='" + purgeFixturePath + "'",
+  ), "0", "physical expired voice object was removed from Storage");
+  equal(sqlScalar(
+    "SELECT count(*) FROM public.capture_audio_asset WHERE id='" + purgeFixtureAssetId + "'::uuid",
+  ), "0", "expired voice metadata was removed only after Storage deletion");
+  equal(sqlScalar(
+    "SELECT count(*) FROM public.audit_event WHERE action='capture.audio_purged' " +
+    "AND entity_id='" + purgeFixtureAssetId + "'::uuid AND source='system' " +
+    "AND details->>'object_removed'='true' AND details->>'content_removed'='true'",
+  ), "1", "expired voice purge append-only audit receipt");
+  await stopServer(dispatcherServer.server);
+  dispatcherServer = null;
+  purgeFixtureAssetId = null;
+  purgeFixturePath = null;
+
+  console.log("PASS: expired private voice purge removes the real Storage object before metadata and writes its append-only audit receipt.");
   console.log("PASS: user JWT and active profile are required to enqueue Inbox processing.");
   console.log("PASS: capture ownership is enforced before the privileged server-side queue call.");
   console.log("PASS: same-key enqueue replays one run; users cannot read another owner's processing run.");
@@ -512,4 +590,24 @@ try {
   if (processServer) await stopServer(processServer.server);
   if (dispatcherServer) await stopServer(dispatcherServer.server);
   if (voiceFinalizeServer) await stopServer(voiceFinalizeServer.server);
+  if (purgeFixturePath) {
+    try {
+      const cleanup = await fetch(base + "/storage/v1/object/inbox-voice-private", {
+        method: "DELETE",
+        headers: {
+          apikey: secret,
+          authorization: "Bearer " + secret,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ prefixes: [purgeFixturePath] }),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!cleanup.ok) console.error("Could not clean expired voice fixture from local Storage:", await cleanup.text());
+      if (purgeFixtureAssetId) {
+        sqlExec("DELETE FROM public.capture_audio_asset WHERE id='" + purgeFixtureAssetId + "'::uuid;");
+      }
+    } catch (error) {
+      console.error("Expired voice fixture cleanup failed:", error);
+    }
+  }
 }
