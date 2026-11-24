@@ -46,7 +46,7 @@ BEGIN
     AND aa.owner_user_id=p_owner_profile_id
     AND aa.bucket_id='inbox-voice-private'
     AND aa.capture_id IS NULL
-    AND aa.status='uploading'
+    AND aa.status IN ('uploading','uploaded')
     AND aa.retention_until > statement_timestamp()
   FOR UPDATE OF aa;
 
@@ -63,12 +63,12 @@ BEGIN
   SET status='uploaded',
       file_size_bytes=p_file_size_bytes,
       sha256_hex=p_sha256_hex,
-      uploaded_at=clock_timestamp(),
+      uploaded_at=COALESCE(aa.uploaded_at,clock_timestamp()),
       updated_at=clock_timestamp()
   WHERE aa.id=p_asset_id
     AND aa.owner_user_id=p_owner_profile_id
     AND aa.capture_id IS NULL
-    AND aa.status='uploading'
+    AND aa.status IN ('uploading','uploaded')
     AND aa.retention_until > statement_timestamp();
   GET DIAGNOSTICS v_rows = ROW_COUNT;
   IF v_rows <> 1 THEN
