@@ -1,12 +1,6 @@
 -- Purge expired Inbox captures after their 30-day recovery window.
 -- Server-only, bounded, audited, and safe against live worker leases / restore races.
 
-GRANT SELECT, DELETE ON TABLE public.processing_run TO service_role;
-GRANT SELECT, DELETE ON TABLE public.capture_part TO service_role;
-GRANT SELECT, DELETE ON TABLE public.capture_link TO service_role;
-GRANT SELECT, DELETE ON TABLE public.capture TO service_role;
-GRANT INSERT ON TABLE public.audit_event TO service_role;
-
 -- Keep trash content readable/restorable, but do not allow new parts or provenance
 -- links to be attached to a trashed capture.
 DROP POLICY capture_part_self ON public.capture_part;
@@ -54,7 +48,7 @@ CREATE OR REPLACE FUNCTION public.purge_expired_inbox_captures(
   p_audit_ids uuid[]
 )
 RETURNS TABLE(purged_count integer, purged_capture_ids uuid[])
-LANGUAGE plpgsql VOLATILE SECURITY INVOKER
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $function$
 DECLARE
@@ -65,9 +59,7 @@ DECLARE
   v_rows integer;
   v_purged_ids uuid[] := ARRAY[]::uuid[];
 BEGIN
-  IF current_user <> 'service_role' THEN
-    RAISE EXCEPTION 'Inbox retention purge requires service_role' USING ERRCODE = '42501';
-  END IF;
+  -- EXECUTE is granted only to service_role below; the definer owns table access.
   IF p_batch_size IS NULL OR p_batch_size NOT BETWEEN 1 AND 100
      OR p_audit_ids IS NULL OR cardinality(p_audit_ids) < p_batch_size THEN
     RAISE EXCEPTION 'A purge batch between 1 and 100 and matching audit IDs are required'
