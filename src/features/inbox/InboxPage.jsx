@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase.js';
 import { uuidv7 } from '../../lib/uuidv7.js';
 import { SectionTitle } from '../../shared/components/SectionTitle.jsx';
 import { EmptyState } from '../../shared/components/EmptyState.jsx';
+import { useRows } from '../../shared/hooks/useRows.js';
 import { CaptureComposer } from './components/CaptureComposer.jsx';
 import { persistTextCapture } from './data/capture-repository.js';
 import { getSuggestedDestinationType, isInboxDestinationReady } from './domain/capture-pipeline.js';
