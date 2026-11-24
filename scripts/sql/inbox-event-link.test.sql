@@ -24,7 +24,8 @@ INSERT INTO public.calendar_event(
  start_date,end_date_exclusive
 ) VALUES
  ('019b3000-0000-7000-8000-000000000101','019b3000-0000-7000-8000-000000000001','019b3000-0000-7000-8000-000000000001','019b3000-0000-7000-8000-000000000001','Event A','confirmed','all_day','2026-11-27','2026-11-28'),
- ('019b3000-0000-7000-8000-000000000102','019b3000-0000-7000-8000-000000000002','019b3000-0000-7000-8000-000000000002','019b3000-0000-7000-8000-000000000002','Event B','confirmed','all_day','2026-11-27','2026-11-28');
+ ('019b3000-0000-7000-8000-000000000102','019b3000-0000-7000-8000-000000000002','019b3000-0000-7000-8000-000000000002','019b3000-0000-7000-8000-000000000002','Event B','confirmed','all_day','2026-11-27','2026-11-28'),
+ ('019b3000-0000-7000-8000-000000000103','019b3000-0000-7000-8000-000000000001','019b3000-0000-7000-8000-000000000001','019b3000-0000-7000-8000-000000000001','Alternative Event A','confirmed','all_day','2026-11-28','2026-11-29');
 RESET ROLE;
 
 SET LOCAL ROLE authenticated;
@@ -48,6 +49,26 @@ BEGIN
    WHERE id='019b3000-0000-7000-8000-000000000401'
      AND calendar_event_id='019b3000-0000-7000-8000-000000000101'
  ) THEN RAISE EXCEPTION 'Owner could not link own Inbox part to own Event'; END IF;
+
+ -- Non-confirmed alternatives may be retained, but one fragment cannot
+ -- acquire a second confirmed destination even under a concurrent client.
+ INSERT INTO public.capture_link(id,capture_part_id,calendar_event_id,link_status)
+ VALUES('019b3000-0000-7000-8000-000000000402',
+        '019b3000-0000-7000-8000-000000000301',
+        '019b3000-0000-7000-8000-000000000103','suggested');
+ IF NOT EXISTS (
+   SELECT 1 FROM public.capture_link
+   WHERE id='019b3000-0000-7000-8000-000000000402' AND link_status='suggested'
+ ) THEN RAISE EXCEPTION 'Suggested alternate link should remain allowed'; END IF;
+ BEGIN
+   INSERT INTO public.capture_link(id,capture_part_id,calendar_event_id,link_status)
+   VALUES('019b3000-0000-7000-8000-000000000403',
+          '019b3000-0000-7000-8000-000000000301',
+          '019b3000-0000-7000-8000-000000000103','confirmed');
+   RAISE EXCEPTION 'A single Inbox fragment acquired two confirmed destinations';
+ EXCEPTION WHEN unique_violation THEN
+   NULL;
+ END;
 END;
 $test$;
 
