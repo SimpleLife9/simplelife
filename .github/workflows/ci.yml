@@ -124,6 +124,9 @@ jobs:
       - name: Test Inbox encrypted offline sync and owner isolation in ephemeral local Postgres
         run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/inbox-offline-sync.test.sql
 
+      - name: Test Inbox private voice asset ownership and retention in ephemeral local Postgres
+        run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/inbox-voice-private-assets.test.sql
+
       - name: Test Event persistence and append-only audit invariants in ephemeral local Postgres
         run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/agenda-event-persistence.test.sql
 
