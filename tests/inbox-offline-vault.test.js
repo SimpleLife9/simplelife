@@ -39,13 +39,13 @@ test('offline vault encrypts the local capture and never stores original text in
   assert.ok(persisted.ciphertext);
   assert.ok(persisted.iv);
   assert.equal(JSON.stringify(persisted).includes(source), false);
-  assert.deepEqual(await vault.listQueuedCaptures(), [{
-    captureId: ids[0] || '019b7000-0000-7000-8000-000000000103',
-    partId: ids[1] || '019b7000-0000-7000-8000-000000000104',
-    contentOriginal: source,
-    capturedAt: persisted ? (await vault.listQueuedCaptures())[0].capturedAt : null,
-    inputType: 'text',
-  }]);
+  const queued = await vault.listQueuedCaptures();
+  assert.equal(queued.length, 1);
+  assert.equal(queued[0].captureId, saved.captureId);
+  assert.equal(queued[0].partId, saved.partId);
+  assert.equal(queued[0].contentOriginal, source);
+  assert.equal(queued[0].inputType, 'text');
+  assert.ok(Number.isFinite(Date.parse(queued[0].capturedAt)));
 });
 
 test('offline vault rejects wrong passphrases and stays locked until the correct one is supplied', async () => {
