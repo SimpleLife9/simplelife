@@ -107,7 +107,7 @@ WITH CHECK (
   )
   AND EXISTS (
     SELECT 1 FROM public.capture_audio_asset aa
-    WHERE aa.object_path=name AND aa.bucket_id=bucket_id
+    WHERE aa.object_path=name AND aa.bucket_id='inbox-voice-private'
       AND aa.status='uploading'
       AND aa.owner_user_id IN (
         SELECT up.id FROM public.user_profile up
@@ -310,7 +310,7 @@ BEGIN
     FROM public.capture_audio_asset aa
     WHERE aa.retention_until IS NOT NULL
       AND aa.retention_until <= clock_timestamp()
-      AND aa.status IN ('uploading','uploaded','failed','deletion_pending')
+      AND aa.status IN ('uploading','uploaded','transcribed','failed','deletion_pending')
     ORDER BY aa.retention_until, aa.id
     FOR UPDATE SKIP LOCKED
     LIMIT p_batch_size
