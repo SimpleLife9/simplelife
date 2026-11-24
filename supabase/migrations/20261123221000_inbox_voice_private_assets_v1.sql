@@ -50,7 +50,7 @@ CREATE TABLE public.capture_audio_asset (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CHECK ((get_byte(uuid_send(id),6) >> 4)=7 AND (get_byte(uuid_send(id),8) & 192)=128),
-  CHECK (object_path LIKE owner_user_id::text || '/%'),
+  CHECK (left(object_path,length(owner_user_id::text)+1)=owner_user_id::text || '/'),
   CHECK (
     (status <> 'transcribed')
     OR (
@@ -298,9 +298,6 @@ LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $function$
 BEGIN
-  IF current_user <> 'service_role' THEN
-    RAISE EXCEPTION 'Audio retention listing requires service_role' USING ERRCODE='42501';
-  END IF;
   IF p_batch_size IS NULL OR p_batch_size NOT BETWEEN 1 AND 100 THEN
     RAISE EXCEPTION 'Audio retention batch must be between 1 and 100' USING ERRCODE='22023';
   END IF;
@@ -312,8 +309,8 @@ BEGIN
       AND aa.retention_until <= clock_timestamp()
       AND aa.status IN ('uploading','uploaded','transcribed','failed','deletion_pending')
     ORDER BY aa.retention_until, aa.id
-    FOR UPDATE SKIP LOCKED
     LIMIT p_batch_size
+    FOR UPDATE SKIP LOCKED
   )
   UPDATE public.capture_audio_asset aa
   SET status='deletion_pending', updated_at=clock_timestamp()
@@ -341,9 +338,6 @@ DECLARE
   v_index integer := 0;
   v_deleted integer := 0;
 BEGIN
-  IF current_user <> 'service_role' THEN
-    RAISE EXCEPTION 'Audio retention completion requires service_role' USING ERRCODE='42501';
-  END IF;
   IF p_asset_ids IS NULL OR cardinality(p_asset_ids) > 100
      OR p_audit_ids IS NULL OR cardinality(p_asset_ids) <> cardinality(p_audit_ids) THEN
     RAISE EXCEPTION 'Audio purge asset and audit ID batches must match and stay within 100'
