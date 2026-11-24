@@ -66,9 +66,6 @@ export async function handleRequest(
   const profile = await resolveActiveEventProfile(ctx as unknown as EventAuthenticatedContext);
   if (!profile.ok) return json({ error: profile.code }, profile.status);
 
-  const idempotencyKey = request.headers.get("idempotency-key")?.trim() || "";
-  if (!UUID_V7.test(idempotencyKey)) return json({ error: "IDEMPOTENCY_KEY_MUST_BE_UUIDV7" }, 422);
-
   let raw: string | null;
   try { raw = await readBoundedBody(request); } catch {
     return json({ error: "REQUEST_BODY_MUST_BE_VALID_UTF8" }, 400);
@@ -77,12 +74,17 @@ export async function handleRequest(
   let body: unknown;
   try { body = JSON.parse(raw); } catch { return json({ error: "VALID_JSON_REQUIRED" }, 400); }
   if (!body || typeof body !== "object" || Array.isArray(body)
-    || Object.keys(body).length !== 1 || !("captureId" in body)) {
-    return json({ error: "BODY_MUST_CONTAIN_ONLY_CAPTURE_ID" }, 422);
+    || Object.keys(body).length !== 2 || !("captureId" in body) || !("idempotencyKey" in body)) {
+    return json({ error: "BODY_MUST_CONTAIN_CAPTURE_ID_AND_IDEMPOTENCY_KEY" }, 422);
   }
-  const captureId = (body as { captureId: unknown }).captureId;
+  const payload = body as { captureId: unknown; idempotencyKey: unknown };
+  const captureId = payload.captureId;
+  const idempotencyKey = payload.idempotencyKey;
   if (typeof captureId !== "string" || !UUID_V7.test(captureId)) {
     return json({ error: "CAPTURE_ID_MUST_BE_UUIDV7" }, 422);
+  }
+  if (typeof idempotencyKey !== "string" || !UUID_V7.test(idempotencyKey)) {
+    return json({ error: "IDEMPOTENCY_KEY_MUST_BE_UUIDV7" }, 422);
   }
 
   let capture: { data: unknown; error: unknown };
