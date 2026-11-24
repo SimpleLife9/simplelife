@@ -6,6 +6,8 @@ const SETTINGS_STORE = 'settings';
 const CAPTURES_STORE = 'captures';
 const CHECK_TEXT = 'SimpleLife private offline vault v1';
 const PBKDF2_ITERATIONS = 310000;
+const PASSPHRASE_AAD = 'simplelife-offline-data-key-passphrase-v1';
+const RECOVERY_AAD = 'simplelife-offline-data-key-recovery-v1';
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -27,8 +29,19 @@ function fromBase64(value) {
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
-function bytesFrom(value) {
-  return value instanceof Uint8Array ? value : new Uint8Array(value);
+function toHex(bytes) {
+  return [...bytes].map((value) => value.toString(16).padStart(2, '0')).join('');
+}
+
+function fromHex(value) {
+  if (typeof value !== 'string' || !/^[0-9a-f]{64}$/i.test(value)) {
+    throw new Error('PRIVATE_OFFLINE_RECOVERY_KEY_INVALID');
+  }
+  const bytes = new Uint8Array(32);
+  for (let index = 0; index < bytes.length; index += 1) {
+    bytes[index] = Number.parseInt(value.slice(index * 2, index * 2 + 2), 16);
+  }
+  return bytes;
 }
 
 function makeRequestPromise(request) {
@@ -100,9 +113,8 @@ export function createOfflineCaptureVault({
   assert(cryptoProvider?.subtle && cryptoProvider?.getRandomValues, 'WEB_CRYPTO_UNAVAILABLE');
 
   let unlockedKey = null;
-  let settingsCache = null;
 
-  async function deriveKey(passphrase, salt) {
+  async function derivePassphraseKey(passphrase, salt) {
     assert(typeof passphrase === 'string' && passphrase.length >= 14,
       'PASSPHRASE_MUST_HAVE_AT_LEAST_14_CHARACTERS');
     const material = await cryptoProvider.subtle.importKey(
@@ -117,17 +129,23 @@ export function createOfflineCaptureVault({
     );
   }
 
-  async function encryptText(key, text, additionalData) {
+  async function importAesKey(rawKey, usages = ['encrypt', 'decrypt']) {
+    return await cryptoProvider.subtle.importKey(
+      'raw', rawKey, { name: 'AES-GCM' }, false, usages,
+    );
+  }
+
+  async function encryptBytes(key, bytes, additionalData) {
     const iv = cryptoProvider.getRandomValues(new Uint8Array(12));
     const ciphertext = await cryptoProvider.subtle.encrypt(
       { name: 'AES-GCM', iv, additionalData: encoder.encode(additionalData) },
       key,
-      encoder.encode(text),
+      bytes,
     );
     return { iv: toBase64(iv), ciphertext: toBase64(new Uint8Array(ciphertext)) };
   }
 
-  async function decryptText(key, record, additionalData) {
+  async function decryptBytes(key, record, additionalData) {
     const plaintext = await cryptoProvider.subtle.decrypt(
       {
         name: 'AES-GCM',
@@ -137,72 +155,144 @@ export function createOfflineCaptureVault({
       key,
       fromBase64(record.ciphertext),
     );
-    return decoder.decode(plaintext);
+    return new Uint8Array(plaintext);
+  }
+
+  async function encryptText(key, text, additionalData) {
+    return await encryptBytes(key, encoder.encode(text), additionalData);
+  }
+
+  async function decryptText(key, record, additionalData) {
+    return decoder.decode(await decryptBytes(key, record, additionalData));
+  }
+
+  async function verifyDataKey(key, settings) {
+    try {
+      const check = await decryptText(key, settings.verifier, 'simplelife-offline-vault-check-v1');
+      return check === CHECK_TEXT;
+    } catch {
+      return false;
+    }
   }
 
   async function getRecords() {
     return await storage.listCaptures();
   }
 
+  async function unwrapWithPassphrase(passphrase, settings) {
+    const wrappingKey = await derivePassphraseKey(passphrase, fromBase64(settings.salt));
+    const rawDataKey = await decryptBytes(wrappingKey, settings.passphraseWrap, PASSPHRASE_AAD);
+    const dataKey = await importAesKey(rawDataKey);
+    if (!await verifyDataKey(dataKey, settings)) {
+      throw new Error('PRIVATE_OFFLINE_PASSPHRASE_INVALID');
+    }
+    return { wrappingKey, rawDataKey, dataKey };
+  }
+
+  async function unwrapWithRecoveryKey(recoveryKey, settings) {
+    const recoveryRaw = fromHex(recoveryKey);
+    const recoveryWrappingKey = await importAesKey(recoveryRaw);
+    const rawDataKey = await decryptBytes(recoveryWrappingKey, settings.recoveryWrap, RECOVERY_AAD);
+    const dataKey = await importAesKey(rawDataKey);
+    if (!await verifyDataKey(dataKey, settings)) {
+      throw new Error('PRIVATE_OFFLINE_RECOVERY_KEY_INVALID');
+    }
+    return { recoveryRaw, recoveryWrappingKey, rawDataKey, dataKey };
+  }
+
+  async function getStatus() {
+    const settings = await storage.getSettings();
+    const records = await getRecords();
+    return Object.freeze({
+      configured: Boolean(settings),
+      unlocked: Boolean(unlockedKey),
+      queuedCount: records.filter((record) => record.state === 'queued').length,
+      recoveryConfigured: Boolean(settings?.recoveryWrap),
+    });
+  }
+
   return Object.freeze({
     async getStatus() {
-      const settings = await storage.getSettings();
-      const records = await getRecords();
-      settingsCache = settings || null;
-      return Object.freeze({
-        configured: Boolean(settings),
-        unlocked: Boolean(unlockedKey),
-        queuedCount: records.filter((record) => record.state === 'queued').length,
-      });
+      return await getStatus();
     },
 
     async create(passphrase) {
-      const existing = await storage.getSettings();
-      if (existing) throw new Error('PRIVATE_OFFLINE_VAULT_ALREADY_EXISTS');
+      if (await storage.getSettings()) throw new Error('PRIVATE_OFFLINE_VAULT_ALREADY_EXISTS');
       assert(typeof passphrase === 'string' && passphrase.length >= 14,
         'PASSPHRASE_MUST_HAVE_AT_LEAST_14_CHARACTERS');
+
       const salt = cryptoProvider.getRandomValues(new Uint8Array(16));
-      const key = await deriveKey(passphrase, salt);
-      const verifier = await encryptText(key, CHECK_TEXT, 'simplelife-offline-vault-check-v1');
+      const rawDataKey = cryptoProvider.getRandomValues(new Uint8Array(32));
+      const dataKey = await importAesKey(rawDataKey);
+      const passphraseKey = await derivePassphraseKey(passphrase, salt);
+      const recoveryRaw = cryptoProvider.getRandomValues(new Uint8Array(32));
+      const recoveryWrappingKey = await importAesKey(recoveryRaw);
+
       const settings = {
         id: 'primary',
-        version: 1,
+        version: 2,
         kdf: 'PBKDF2-SHA-256',
         iterations: PBKDF2_ITERATIONS,
         cipher: 'AES-256-GCM',
         salt: toBase64(salt),
-        verifier,
+        passphraseWrap: await encryptBytes(passphraseKey, rawDataKey, PASSPHRASE_AAD),
+        recoveryWrap: await encryptBytes(recoveryWrappingKey, rawDataKey, RECOVERY_AAD),
+        verifier: await encryptText(dataKey, CHECK_TEXT, 'simplelife-offline-vault-check-v1'),
         createdAt: now(),
       };
       await storage.putSettings(settings);
-      settingsCache = settings;
-      unlockedKey = key;
-      return await this.getStatus();
+      unlockedKey = dataKey;
+      const status = await getStatus();
+      return Object.freeze({ ...status, recoveryKey: toHex(recoveryRaw) });
     },
 
     async unlock(passphrase) {
       const settings = await storage.getSettings();
       if (!settings) throw new Error('PRIVATE_OFFLINE_VAULT_NOT_CONFIGURED');
-      if (settings.version !== 1 || settings.cipher !== 'AES-256-GCM'
-        || settings.kdf !== 'PBKDF2-SHA-256' || settings.iterations !== PBKDF2_ITERATIONS) {
+      if (settings.version !== 2 || settings.cipher !== 'AES-256-GCM'
+        || settings.kdf !== 'PBKDF2-SHA-256' || settings.iterations !== PBKDF2_ITERATIONS
+        || !settings.passphraseWrap || !settings.recoveryWrap) {
         throw new Error('PRIVATE_OFFLINE_VAULT_VERSION_UNSUPPORTED');
       }
-      const key = await deriveKey(passphrase, fromBase64(settings.salt));
-      let check;
       try {
-        check = await decryptText(key, settings.verifier, 'simplelife-offline-vault-check-v1');
+        const { dataKey } = await unwrapWithPassphrase(passphrase, settings);
+        unlockedKey = dataKey;
       } catch {
         throw new Error('PRIVATE_OFFLINE_PASSPHRASE_INVALID');
       }
-      if (check !== CHECK_TEXT) throw new Error('PRIVATE_OFFLINE_PASSPHRASE_INVALID');
-      settingsCache = settings;
-      unlockedKey = key;
-      return await this.getStatus();
+      return await getStatus();
+    },
+
+    async recoverWithRecoveryKey(recoveryKey, newPassphrase) {
+      const settings = await storage.getSettings();
+      if (!settings) throw new Error('PRIVATE_OFFLINE_VAULT_NOT_CONFIGURED');
+      if (settings.version !== 2 || !settings.recoveryWrap) {
+        throw new Error('PRIVATE_OFFLINE_VAULT_VERSION_UNSUPPORTED');
+      }
+      assert(typeof newPassphrase === 'string' && newPassphrase.length >= 14,
+        'PASSPHRASE_MUST_HAVE_AT_LEAST_14_CHARACTERS');
+
+      let recovered;
+      try {
+        recovered = await unwrapWithRecoveryKey(recoveryKey, settings);
+      } catch {
+        throw new Error('PRIVATE_OFFLINE_RECOVERY_KEY_INVALID');
+      }
+      const newSalt = cryptoProvider.getRandomValues(new Uint8Array(16));
+      const newWrappingKey = await derivePassphraseKey(newPassphrase, newSalt);
+      const updated = {
+        ...settings,
+        salt: toBase64(newSalt),
+        passphraseWrap: await encryptBytes(newWrappingKey, recovered.rawDataKey, PASSPHRASE_AAD),
+        updatedAt: now(),
+      };
+      await storage.putSettings(updated);
+      unlockedKey = recovered.dataKey;
+      return await getStatus();
     },
 
     lock() {
       unlockedKey = null;
-      settingsCache = null;
     },
 
     async saveTextCapture({ contentOriginal, captureId = createId(), partId = createId(), capturedAt = now() } = {}) {
@@ -255,11 +345,11 @@ export function createOfflineCaptureVault({
           if (response !== true && response?.synced !== true) {
             throw new Error('OFFLINE_SYNC_NOT_CONFIRMED');
           }
-          // The server RPC is idempotent. Remove local ciphertext only after its
-          // success/replay acknowledgement, so a lost response can be retried.
+          // Stable server IDs make retries idempotent after a lost response.
+          // Delete local ciphertext only after a success/replay acknowledgement.
           await storage.deleteCapture(record.captureId);
           result.synced += 1;
-        } catch (error) {
+        } catch {
           result.failed += 1;
         }
       }
