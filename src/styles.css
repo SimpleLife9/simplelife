@@ -447,3 +447,8 @@
 .voice-asset-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding-top:6px;border-top:1px solid #edf1eb;color:#687b6d;font-size:.63rem}
 .voice-asset-row small{color:#9aa49d;font-size:.58rem}
 @media(max-width:600px){.voice-capture-panel{grid-template-columns:1fr}.voice-capture-actions{justify-content:flex-start}.voice-asset-row{align-items:flex-start;flex-direction:column;gap:3px}}
+
+.offline-vault-recovery{display:grid;gap:7px;padding:11px 12px;border:1px solid #e6d8a9;border-radius:9px;background:#fffaf0}
+.offline-vault-recovery strong{color:#80652b;font-size:.7rem}
+.offline-vault-recovery p{margin:0;color:#87764e;font-size:.62rem;line-height:1.45}
+.offline-vault-recovery code{display:block;overflow-wrap:anywhere;padding:9px;border:1px dashed #dfc982;border-radius:7px;background:#fff;color:#695426;font-size:.68rem;user-select:all}
