@@ -168,15 +168,19 @@ BEGIN
     RAISE EXCEPTION 'Audio upload metadata is invalid' USING ERRCODE='22023';
   END IF;
 
-  SELECT aa.owner_user_id, (o.metadata->>'size')::bigint, true
-  INTO v_owner_profile_id, v_storage_size, v_object_found
+  SELECT (o.metadata->>'size')::bigint, true
+  INTO v_storage_size, v_object_found
   FROM public.capture_audio_asset aa
   JOIN storage.objects o
     ON o.bucket_id='inbox-voice-private' AND o.name=aa.object_path
   WHERE aa.id=p_asset_id
     AND aa.owner_user_id=v_owner_profile_id
     AND aa.status='uploading';
-  IF NOT FOUND OR NOT v_object_found OR v_storage_size IS DISTINCT FROM p_file_size_bytes THEN
+  IF NOT FOUND OR NOT v_object_found THEN
+    RAISE EXCEPTION 'Private audio asset is unavailable to this owner'
+      USING ERRCODE='42501';
+  END IF;
+  IF v_storage_size IS DISTINCT FROM p_file_size_bytes THEN
     RAISE EXCEPTION 'Uploaded private audio size does not match its registered metadata'
       USING ERRCODE='22023';
   END IF;
