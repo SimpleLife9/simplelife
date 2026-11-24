@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 
 const base = "http://127.0.0.1:54321";
@@ -136,6 +136,7 @@ let queueServer;
 let workerServer;
 let processServer;
 let dispatcherServer;
+let voiceFinalizeServer;
 try {
   queueServer = await startFunction("inbox-processing-queue", { apikey: publishable }, 401);
   const queue = async (token, captureId, idempotencyKey) => await fetch(queueServer.url, {
@@ -336,6 +337,143 @@ try {
   await stopServer(dispatcherServer.server);
   dispatcherServer = null;
 
+  // Verify private voice integrity through the actual local Edge Runtime and Storage.
+  const voiceAssetId = sqlScalar("SELECT private.uuidv7()");
+  const voicePath = profileA + "/" + voiceAssetId + "/source.webm";
+  const voiceBytes = Buffer.from("SimpleLife private voice server digest fixture.");
+  const voiceSha256 = createHash("sha256").update(voiceBytes).digest("hex");
+  const metadataResponse = await fetch(base + "/rest/v1/capture_audio_asset", {
+    method: "POST",
+    headers: {
+      apikey: publishable,
+      authorization: "Bearer " + ownerA.accessToken,
+      "content-type": "application/json",
+      prefer: "return=minimal",
+    },
+    body: JSON.stringify([{
+      id: voiceAssetId,
+      owner_user_id: profileA,
+      created_by_user_id: profileA,
+      bucket_id: "inbox-voice-private",
+      object_path: voicePath,
+      mime_type: "audio/webm",
+      file_size_bytes: voiceBytes.byteLength,
+      sha256_hex: voiceSha256,
+      status: "uploading",
+    }]),
+    signal: AbortSignal.timeout(10000),
+  });
+  if (metadataResponse.status !== 201 && metadataResponse.status !== 204) {
+    fail("Could not create owner-scoped disposable voice metadata: " + await metadataResponse.text());
+  }
+  const storageResponse = await fetch(
+    base + "/storage/v1/object/inbox-voice-private/" + voicePath.split("/").map(encodeURIComponent).join("/"),
+    {
+      method: "POST",
+      headers: {
+        apikey: publishable,
+        authorization: "Bearer " + ownerA.accessToken,
+        "content-type": "audio/webm",
+        "x-upsert": "false",
+      },
+      body: voiceBytes,
+      signal: AbortSignal.timeout(10000),
+    },
+  );
+  if (storageResponse.status !== 200 && storageResponse.status !== 201) {
+    fail("Could not upload disposable private voice fixture: " + await storageResponse.text());
+  }
+
+  voiceFinalizeServer = await startFunction(
+    "inbox-voice-finalize",
+    { apikey: publishable, authorization: "Bearer " + ownerA.accessToken },
+    405,
+  );
+  const finalizeVoice = (token, id) => fetch(voiceFinalizeServer.url, {
+    method: "POST",
+    headers: {
+      apikey: publishable,
+      authorization: "Bearer " + token,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ assetId: id }),
+    signal: AbortSignal.timeout(20000),
+  });
+  const finalizedVoice = await finalizeVoice(ownerA.accessToken, voiceAssetId);
+  equal(finalizedVoice.status, 200, "server-verified voice finalization");
+  const finalizedVoiceBody = await responseJson(finalizedVoice, "server-verified voice finalization");
+  equal(finalizedVoiceBody.verified, true, "server digest verification receipt");
+  equal(finalizedVoiceBody.assetId, voiceAssetId, "server digest asset identity");
+  equal(sqlScalar(
+    "SELECT status || ':' || sha256_hex FROM public.capture_audio_asset WHERE id='" + voiceAssetId + "'::uuid",
+  ), "uploaded:" + voiceSha256, "server-computed digest persisted");
+
+  const foreignVoice = await finalizeVoice(ownerB.accessToken, voiceAssetId);
+  equal(foreignVoice.status, 404, "another owner cannot finalize private voice asset");
+
+  // Same-size corruption must fail the digest check and never reach the privileged RPC.
+  const corruptAssetId = sqlScalar("SELECT private.uuidv7()");
+  const corruptPath = profileA + "/" + corruptAssetId + "/source.webm";
+  const expectedBytes = Buffer.from("expected private voice hash fixture");
+  const corruptBytes = Buffer.from("corrupt private voice hash fixture");
+  if (expectedBytes.byteLength !== corruptBytes.byteLength) fail("Digest corruption fixture must have equal byte length.");
+  const expectedSha = createHash("sha256").update(expectedBytes).digest("hex");
+  const corruptMetadata = await fetch(base + "/rest/v1/capture_audio_asset", {
+    method: "POST",
+    headers: {
+      apikey: publishable,
+      authorization: "Bearer " + ownerA.accessToken,
+      "content-type": "application/json",
+      prefer: "return=minimal",
+    },
+    body: JSON.stringify([{
+      id: corruptAssetId,
+      owner_user_id: profileA,
+      created_by_user_id: profileA,
+      bucket_id: "inbox-voice-private",
+      object_path: corruptPath,
+      mime_type: "audio/webm",
+      file_size_bytes: expectedBytes.byteLength,
+      sha256_hex: expectedSha,
+      status: "uploading",
+    }]),
+    signal: AbortSignal.timeout(10000),
+  });
+  if (corruptMetadata.status !== 201 && corruptMetadata.status !== 204) {
+    fail("Could not create same-size digest mismatch fixture: " + await corruptMetadata.text());
+  }
+  const corruptUpload = await fetch(
+    base + "/storage/v1/object/inbox-voice-private/" + corruptPath.split("/").map(encodeURIComponent).join("/"),
+    {
+      method: "POST",
+      headers: {
+        apikey: publishable,
+        authorization: "Bearer " + ownerA.accessToken,
+        "content-type": "audio/webm",
+        "x-upsert": "false",
+      },
+      body: corruptBytes,
+      signal: AbortSignal.timeout(10000),
+    },
+  );
+  if (corruptUpload.status !== 200 && corruptUpload.status !== 201) {
+    fail("Could not upload same-size digest mismatch fixture: " + await corruptUpload.text());
+  }
+  const rejectedCorruptVoice = await finalizeVoice(ownerA.accessToken, corruptAssetId);
+  equal(rejectedCorruptVoice.status, 422, "same-size corrupted voice digest is rejected");
+  const corruptResult = await responseJson(rejectedCorruptVoice, "corrupted voice finalization");
+  equal(corruptResult.error, "VOICE_UPLOAD_INTEGRITY_CHECK_FAILED", "corrupted voice integrity error");
+  equal(sqlScalar(
+    "SELECT status FROM public.capture_audio_asset WHERE id='" + corruptAssetId + "'::uuid",
+  ), "uploading", "corrupted voice remains unfinalized");
+
+  await stopServer(voiceFinalizeServer.server);
+  voiceFinalizeServer = null;
+  sqlExec(
+    "DELETE FROM storage.objects WHERE bucket_id='inbox-voice-private' AND name IN ('" + voicePath + "','" + corruptPath + "'); " +
+    "DELETE FROM public.capture_audio_asset WHERE id IN ('" + voiceAssetId + "'::uuid,'" + corruptAssetId + "'::uuid);",
+  );
+
   console.log("PASS: user JWT and active profile are required to enqueue Inbox processing.");
   console.log("PASS: capture ownership is enforced before the privileged server-side queue call.");
   console.log("PASS: same-key enqueue replays one run; users cannot read another owner's processing run.");
@@ -344,10 +482,12 @@ try {
   console.log("PASS: successful completion updates processing_run and capture atomically.");
   console.log("PASS: retryable failure reclaims the same run with an incremented attempt number.");
   console.log("PASS: authenticated process endpoint rejects another owner's run and persists unreviewed proposals through actual Edge Runtime.");
+  console.log("PASS: voice finalizer downloads private Storage bytes, verifies the actual SHA-256, persists only a server-computed digest, and rejects same-size corruption.");
   console.log("PASS: no AI API, provider credential, or hosted Supabase write is used.");
 } finally {
   if (queueServer) await stopServer(queueServer.server);
   if (workerServer) await stopServer(workerServer.server);
   if (processServer) await stopServer(processServer.server);
   if (dispatcherServer) await stopServer(dispatcherServer.server);
+  if (voiceFinalizeServer) await stopServer(voiceFinalizeServer.server);
 }
