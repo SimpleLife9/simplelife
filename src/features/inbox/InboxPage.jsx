@@ -5,7 +5,7 @@ import { SectionTitle } from '../../shared/components/SectionTitle.jsx';
 import { EmptyState } from '../../shared/components/EmptyState.jsx';
 import { useRows } from '../../shared/hooks/useRows.js';
 import { CaptureComposer } from './components/CaptureComposer.jsx';
-import { persistTextCapture } from './data/capture-repository.js';
+import { CapturePartPersistenceError, persistTextCapture } from './data/capture-repository.js';
 import { getSuggestedDestinationType, isInboxDestinationReady } from './domain/capture-pipeline.js';
 
 function normalizeCaptureForDuplicate(value) {
@@ -309,11 +309,32 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
   );
 
   const submit = async (contentOriginal) => runAction(async () => {
-    const saved = await persistTextCapture({
-      supabase, ownerUserId: profile.id, contentOriginal, createId: uuidv7,
-    });
-    // A processing outage never invalidates a successfully saved capture.
-    try { await queueAndProcess(saved.captureId); } catch { /* retry remains available from the Inbox row */ }
+    let captureId;
+    let initialPartFailed = false;
+    setCaptureRecoveryError('');
+    try {
+      const saved = await persistTextCapture({
+        supabase, ownerUserId: profile.id, contentOriginal, createId: uuidv7,
+      });
+      captureId = saved.captureId;
+    } catch (error) {
+      if (!(error instanceof CapturePartPersistenceError)) throw error;
+      // The source capture is already durable. Treat it as saved so the composer
+      // clears and a second submit cannot create a duplicate capture.
+      captureId = error.captureId;
+      initialPartFailed = true;
+    }
+
+    // A processing outage never invalidates a successfully saved source capture.
+    let processingSucceeded = false;
+    try {
+      await queueAndProcess(captureId);
+      processingSucceeded = true;
+    } catch { /* retry remains available from the Inbox row */ }
+
+    if (initialPartFailed && !processingSucceeded) {
+      setCaptureRecoveryError('El texto ya está guardado. Falló la preparación inicial del fragmento y tampoco se pudo procesar automáticamente. No lo vuelvas a enviar: recupera esta misma captura con “Organizar” o “Generar sugerencias”.');
+    }
   }, 'Captura guardada.');
   const openOrganizer = async (capture, part = getCapturePart(capture.id)) => {
     try {
