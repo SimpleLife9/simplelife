@@ -1,5 +1,5 @@
 import { classifyInboxCapture, INBOX_RULE_PROCESSOR_VERSION } from "../_shared/inbox-rule-classifier.ts";
-import { uuidv7 } from "../../../src/lib/uuidv7.js";
+import { uuidv7 } from "../_shared/uuidv7.ts";
 
 export const MAX_REQUEST_BYTES = 2 * 1024;
 export const MAX_DISPATCH_JOBS = 10;
