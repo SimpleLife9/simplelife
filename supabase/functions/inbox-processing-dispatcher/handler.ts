@@ -9,6 +9,11 @@ const JSON_HEADERS = {
 };
 type AdminClient = {
   rpc(name: string, args: Record<string, unknown>): Promise<{ data: unknown; error: any }>;
+  storage?: {
+    from(bucket: string): {
+      remove(paths: string[]): Promise<{ data: unknown; error: any }>;
+    };
+  };
 };
 type Context = { authMode: string; supabaseAdmin: AdminClient };
 type Dependencies = {
@@ -76,6 +81,56 @@ async function failClaim(
     p_retry_after_seconds: retryable ? 60 : 0,
   });
   return failed.error == null && failed.data === true;
+}
+
+async function purgeExpiredAudioAssets(
+  admin: AdminClient,
+): Promise<{ purgedCount: number; failed: boolean }> {
+  let listing: { data: unknown; error: unknown };
+  try {
+    listing = await admin.rpc('list_expired_inbox_audio_assets', { p_batch_size: 10 });
+  } catch {
+    return { purgedCount: 0, failed: true };
+  }
+  if (listing.error) return { purgedCount: 0, failed: true };
+  const candidates = Array.isArray(listing.data) ? listing.data : [];
+  if (candidates.length === 0) return { purgedCount: 0, failed: false };
+
+  const assetIds: string[] = [];
+  const objectPaths: string[] = [];
+  for (const candidate of candidates) {
+    if (!isRecord(candidate)
+      || !validUuid(candidate.asset_id)
+      || candidate.bucket_id !== 'inbox-voice-private'
+      || typeof candidate.object_path !== 'string'
+      || !candidate.object_path.startsWith('')) {
+      return { purgedCount: 0, failed: true };
+    }
+    assetIds.push(candidate.asset_id);
+    objectPaths.push(candidate.object_path);
+  }
+  if (!admin.storage?.from) return { purgedCount: 0, failed: true };
+
+  try {
+    const removed = await admin.storage.from('inbox-voice-private').remove(objectPaths);
+    if (removed.error) return { purgedCount: 0, failed: true };
+  } catch {
+    return { purgedCount: 0, failed: true };
+  }
+
+  let completion: { data: unknown; error: unknown };
+  try {
+    completion = await admin.rpc('complete_inbox_audio_asset_purge', {
+      p_asset_ids: assetIds,
+      p_audit_ids: assetIds.map(() => uuidv7()),
+    });
+  } catch {
+    return { purgedCount: 0, failed: true };
+  }
+  if (completion.error || typeof completion.data !== 'number') {
+    return { purgedCount: 0, failed: true };
+  }
+  return { purgedCount: completion.data, failed: completion.data !== assetIds.length };
 }
 
 /** Secret-only bounded queue dispatcher. Schedule this endpoint externally; it never self-schedules. */
@@ -183,6 +238,7 @@ export async function handleRequest(
     }
   }
 
+  const audioPurge = await purgeExpiredAudioAssets(ctx.supabaseAdmin);
   let purgedCount = 0;
   let purgeFailed = false;
   const purgeAuditIds = Array.from({ length: 10 }, () => uuidv7());
@@ -210,7 +266,9 @@ export async function handleRequest(
     status: stats.claimed === 0 ? "queue_empty" : "completed",
     ...stats,
     purgedCount,
-    purgeFailed,
+    audioPurgedCount: audioPurge.purgedCount,
+    audioPurgeFailed: audioPurge.failed,
+    purgeFailed: purgeFailed || audioPurge.failed,
     maxJobs,
     queueEmpty: stats.claimed < maxJobs,
   }, 200);
