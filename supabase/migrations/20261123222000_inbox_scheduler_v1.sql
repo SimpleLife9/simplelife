@@ -11,13 +11,6 @@ BEGIN
     );
   END IF;
 
-  IF NOT EXISTS (SELECT 1 FROM vault.secrets WHERE name='inbox_project_url') THEN
-    PERFORM vault.create_secret(
-      'https://iybnjrnysiikbtokyshg.supabase.co',
-      'inbox_project_url',
-      'SimpleLife DEV project URL for the Inbox scheduler'
-    );
-  END IF;
 END;
 $vault$;
 
@@ -57,7 +50,7 @@ GRANT EXECUTE ON FUNCTION public.validate_inbox_scheduler_token(text)
 DO $check$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM vault.secrets WHERE name='inbox_scheduler_token')
-     OR NOT EXISTS (SELECT 1 FROM vault.secrets WHERE name='inbox_project_url') THEN
+ THEN
     RAISE EXCEPTION 'Inbox scheduler Vault secrets were not created';
   END IF;
   IF has_function_privilege('authenticated','public.validate_inbox_scheduler_token(text)','EXECUTE')
