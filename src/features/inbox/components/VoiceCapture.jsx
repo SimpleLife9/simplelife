@@ -95,13 +95,13 @@ export function VoiceCapture({ profile, busy = false, runAction }) {
       .upload(objectPath, blob, { contentType: mimeType, upsert: false, cacheControl: '0' });
     if (uploadError) throw uploadError;
 
-    const { data, error: finalizeError } = await supabase.rpc('finalize_inbox_audio_upload', {
-      p_asset_id: assetId,
-      p_file_size_bytes: blob.size,
-      p_sha256_hex: sha256Hex,
+    const { data, error: finalizeError } = await supabase.functions.invoke('inbox-voice-finalize', {
+      body: { assetId },
     });
     if (finalizeError) throw finalizeError;
-    if (data !== true) throw new Error('VOICE_UPLOAD_FINALIZATION_NOT_CONFIRMED');
+    if (data?.verified !== true || data?.assetId !== assetId) {
+      throw new Error('VOICE_UPLOAD_FINALIZATION_NOT_CONFIRMED');
+    }
     return assetId;
   };
 
