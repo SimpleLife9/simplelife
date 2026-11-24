@@ -144,14 +144,8 @@ DECLARE
   v_expired_asset uuid := '019b7200-0000-7000-8000-000000000102';
   v_count integer;
 BEGIN
-  -- Upload finalization was already checked above; transcription writes are backend-only.
-
-  IF NOT public.finalize_inbox_audio_upload_verified(
-    '019b7200-0000-7000-8000-000000000001',
-    '019b7200-0000-7000-8000-000000000101',
-    4096,
-    repeat('a',64)
-  ) THEN RAISE EXCEPTION 'Server could not finalize private audio upload after verified digest'; END IF;
+  -- The user may upload the private object and create staging metadata;
+  -- only the trusted backend may finalize it after computing the real digest.
 
   -- An abandoned in-progress upload expires after its seven-day staging window.
   INSERT INTO public.capture_audio_asset (
@@ -174,6 +168,13 @@ DECLARE
   v_capture uuid;
   v_part uuid;
 BEGIN
+  IF NOT public.finalize_inbox_audio_upload_verified(
+    '019b7200-0000-7000-8000-000000000001',
+    '019b7200-0000-7000-8000-000000000101',
+    4096,
+    repeat('a',64)
+  ) THEN RAISE EXCEPTION 'Service role could not finalize private audio upload after verified digest'; END IF;
+
   SELECT capture_id, part_id INTO v_capture, v_part
   FROM public.record_inbox_voice_transcription(
     '019b7200-0000-7000-8000-000000000001',
