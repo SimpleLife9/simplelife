@@ -46,7 +46,7 @@ Deployment order: apply the ordered Inbox migrations, deploy the queue/worker/pr
 - [x] Confirm wrong scheduler tokens return 401 and do not dispatch or claim work.
 - [x] Confirm a request with no `x-inbox-scheduler-token` returns 401 in the deployed DEV endpoint. Hosted DEV request 569 returned `401 SCHEDULER_TOKEN_REQUIRED`; the dispatcher was not reached.
 - [ ] Enqueue one disposable owner-owned DEV capture. Confirm the scheduled run processes it, persists one unreviewed proposal batch and records the expected terminal state.
-- [ ] Confirm expired private voice objects are removed before their metadata/audit receipt is deleted.
+- [x] Confirm expired private voice objects are removed before their metadata/audit receipt is deleted. **Hosted DEV PASS — 24 Nov 2026:** synthetic fixture uploaded to `inbox-voice-private`; scheduled Edge endpoint invoked through `net.http_post` request 864 returned HTTP 200 with `audioPurgedCount=1`, `audioPurgeFailed=false`, `purgeFailed=false`; queue claimed zero jobs. Read-back confirmed 0 Storage objects, 0 metadata rows and exactly 1 `capture.audio_purged` receipt (`object_removed=true`, `content_removed=true`, retention_days=7). Fixture bytes and metadata were removed; append-only receipt retained as evidence.
 - [ ] Confirm scheduler failures are visible in cron/net/Edge logs without printing secrets or source audio.
 
 **DEV evidence read back — 24 November 2026:**
@@ -82,6 +82,10 @@ Deployment order: apply the ordered Inbox migrations, deploy the queue/worker/pr
 The voice upload path now calls the authenticated `inbox-voice-finalize` Edge Function after Storage upload. The browser submits only the asset ID. The function resolves the active owner from the verified JWT, loads the owner-scoped staging record, downloads the object from the private bucket using server credentials, checks the actual byte count, and computes SHA-256 over the downloaded bytes. It calls the privileged finalization RPC only when that digest matches the registered expected digest.
 
 The former authenticated `finalize_inbox_audio_upload(uuid,integer,text)` RPC is revoked. The replacement `finalize_inbox_audio_upload_verified` RPC is executable only by `service_role`. An equal-size object with different bytes must remain in `uploading` and must not reach the finalization RPC.
+
+**Hosted DEV deployment record — 24 November 2026:** project `Simplelife_dev` / `iybnjrnysiikbtokyshg` is ACTIVE_HEALTHY. Migration source `20261124170000_inbox_voice_server_digest_v1.sql` is applied and recorded by Supabase as migration `20261124165302`; ACL read-back confirms the retired RPC is not executable by anon/authenticated/service_role and the new verified RPC is executable only by service_role. `inbox-voice-finalize` is ACTIVE v1 with `verify_jwt=true`; `inbox-processing-dispatcher` is ACTIVE v2 with secret authentication in handler and platform JWT verification disabled as required. The real scheduled endpoint completed the hosted purge E2E described in Section 3.
+
+**Frontend limitation:** the repository README still describes SimpleLife as a local development app and there is no checked-in deploy workflow for a public DEV PWA. No desktop/Android preview URL or frontend deployment SHA is currently available. Do not start the physical acceptance checklist until a private HTTPS preview from the validated PR SHA is available; local HTTP over LAN is not an equivalent microphone/PWA acceptance environment.
 
 **Acceptance boundary:** CI and the local Edge Runtime smoke test validate the code path with disposable local fixtures. They do not prove that the new migration or function has been deployed to hosted DEV. Apply/deploy to DEV only in a separately authorized DEV operation, then repeat with an owner-owned private object. Production remains out of scope.
 
