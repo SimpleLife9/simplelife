@@ -63,6 +63,41 @@ test('offline vault rejects wrong passphrases and stays locked until the correct
   assert.equal(status.unlocked, true);
 });
 
+test('offline recovery key restores the data key and rotates a lost passphrase without re-encrypting captures', async () => {
+  const storage = createMemoryStorage();
+  const vault = createVault(storage);
+  const created = await vault.create('first-private-passphrase-2026');
+  const recoveryKey = created.recoveryKey;
+
+  assert.match(recoveryKey, /^[0-9a-f]{64}$/);
+  assert.equal(JSON.stringify(await storage.getSettings()).includes(recoveryKey), false);
+
+  const saved = await vault.saveTextCapture({
+    contentOriginal: 'Recuperar el acceso sin perder esta captura.',
+    captureId: '019b7000-0000-7000-8000-000000000301',
+    partId: '019b7000-0000-7000-8000-000000000302',
+  });
+  vault.lock();
+
+  await assert.rejects(
+    vault.recoverWithRecoveryKey('0'.repeat(64), 'second-private-passphrase-2026'),
+    /RECOVERY_KEY_INVALID/,
+  );
+  const recovered = await vault.recoverWithRecoveryKey(
+    recoveryKey,
+    'second-private-passphrase-2026',
+  );
+  assert.equal(recovered.unlocked, true);
+  assert.equal((await vault.listQueuedCaptures())[0].captureId, saved.captureId);
+
+  vault.lock();
+  await assert.rejects(vault.unlock('first-private-passphrase-2026'), /PASSPHRASE_INVALID/);
+  const unlocked = await vault.unlock('second-private-passphrase-2026');
+  assert.equal(unlocked.unlocked, true);
+  const [capture] = await vault.listQueuedCaptures();
+  assert.equal(capture.contentOriginal, 'Recuperar el acceso sin perder esta captura.');
+});
+
 test('offline sync keeps ciphertext after failure and removes it only after an idempotent acknowledgement', async () => {
   const storage = createMemoryStorage();
   const vault = createVault(storage);
