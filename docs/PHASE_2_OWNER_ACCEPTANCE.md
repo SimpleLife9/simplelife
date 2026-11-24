@@ -44,7 +44,7 @@ Deployment order: apply the ordered Inbox migrations, deploy the queue/worker/pr
 - [x] Confirm the named `simplelife-inbox-dispatcher` cron job is active at one-minute cadence.
 - [x] Confirm the Vault token name exists without reading/decrypting it in the owner-facing evidence.
 - [x] Confirm wrong scheduler tokens return 401 and do not dispatch or claim work.
-- [ ] Confirm a request with no `x-inbox-scheduler-token` returns 401 in the deployed DEV endpoint (automated Deno regression added; hosted probe still to run).
+- [x] Confirm a request with no `x-inbox-scheduler-token` returns 401 in the deployed DEV endpoint. Hosted DEV request 569 returned `401 SCHEDULER_TOKEN_REQUIRED`; the dispatcher was not reached.
 - [ ] Enqueue one disposable owner-owned DEV capture. Confirm the scheduled run processes it, persists one unreviewed proposal batch and records the expected terminal state.
 - [ ] Confirm expired private voice objects are removed before their metadata/audit receipt is deleted.
 - [ ] Confirm scheduler failures are visible in cron/net/Edge logs without printing secrets or source audio.
