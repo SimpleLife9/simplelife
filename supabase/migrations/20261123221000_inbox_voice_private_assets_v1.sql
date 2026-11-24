@@ -176,7 +176,7 @@ BEGIN
   WHERE aa.id=p_asset_id
     AND aa.owner_user_id=v_owner_profile_id
     AND aa.status='uploading';
-  IF NOT FOUND OR NOT v_object_found OR v_storage_size <> p_file_size_bytes THEN
+  IF NOT FOUND OR NOT v_object_found OR v_storage_size IS DISTINCT FROM p_file_size_bytes THEN
     RAISE EXCEPTION 'Uploaded private audio size does not match its registered metadata'
       USING ERRCODE='22023';
   END IF;
