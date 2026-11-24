@@ -172,3 +172,129 @@ Deno.test("dispatcher removes expired private voice objects before deleting meta
     throw new Error("Audio metadata was deleted before its private Storage object.");
   }
 });
+
+
+Deno.test("dispatcher retains voice metadata when private Storage removal fails", async () => {
+  const AUDIO_ASSET = "019b5000-0000-7000-8000-000000000081";
+  const OWNER = "019b5000-0000-7000-8000-000000000082";
+  const objectPath = OWNER + "/" + AUDIO_ASSET + "/source.webm";
+  const calls: string[] = [];
+  const ctx = {
+    authMode: "secret",
+    supabaseAdmin: {
+      async rpc(name: string) {
+        calls.push(name);
+        if (name === "claim_inbox_processing_run") return { data: [], error: null };
+        if (name === "list_expired_inbox_audio_assets") return {
+          data: [{ asset_id: AUDIO_ASSET, owner_user_id: OWNER, bucket_id: "inbox-voice-private", object_path: objectPath }],
+          error: null,
+        };
+        if (name === "complete_inbox_audio_asset_purge") {
+          throw new Error("Metadata must remain until Storage confirms removal.");
+        }
+        if (name === "purge_expired_inbox_captures") return { data: [{ purged_count: 0 }], error: null };
+        throw new Error("Unexpected RPC " + name);
+      },
+      storage: {
+        from(bucket: string) {
+          if (bucket !== "inbox-voice-private") throw new Error("Unexpected Storage bucket.");
+          return { async remove(paths: string[]) {
+            if (paths.length !== 1 || paths[0] !== objectPath) throw new Error("Unexpected object path.");
+            return { data: null, error: { message: "Storage temporarily unavailable" } };
+          } };
+        },
+      },
+    },
+  };
+  const response = await handleRequest(request({ maxJobs: 1 }), ctx as never);
+  const result = await body(response);
+  if (response.status !== 200 || result.audioPurgedCount !== 0
+    || result.audioPurgeFailed !== true || result.purgeFailed !== true) {
+    throw new Error("Storage failure was not surfaced as a failed audio purge.");
+  }
+  if (calls.includes("complete_inbox_audio_asset_purge")) {
+    throw new Error("Audio metadata was deleted despite a Storage failure.");
+  }
+});
+
+Deno.test("dispatcher refuses malformed Storage responses before deleting voice metadata", async () => {
+  const AUDIO_ASSET = "019b5000-0000-7000-8000-000000000091";
+  const OWNER = "019b5000-0000-7000-8000-000000000092";
+  const objectPath = OWNER + "/" + AUDIO_ASSET + "/source.webm";
+  const calls: string[] = [];
+  const ctx = {
+    authMode: "secret",
+    supabaseAdmin: {
+      async rpc(name: string) {
+        calls.push(name);
+        if (name === "claim_inbox_processing_run") return { data: [], error: null };
+        if (name === "list_expired_inbox_audio_assets") return {
+          data: [{ asset_id: AUDIO_ASSET, owner_user_id: OWNER, bucket_id: "inbox-voice-private", object_path: objectPath }],
+          error: null,
+        };
+        if (name === "complete_inbox_audio_asset_purge") return { data: 1, error: null };
+        if (name === "purge_expired_inbox_captures") return { data: [{ purged_count: 0 }], error: null };
+        throw new Error("Unexpected RPC " + name);
+      },
+      storage: {
+        from(bucket: string) {
+          if (bucket !== "inbox-voice-private") throw new Error("Unexpected Storage bucket.");
+          return { async remove() { return { data: null, error: null }; } };
+        },
+      },
+    },
+  };
+  const response = await handleRequest(request({ maxJobs: 1 }), ctx as never);
+  const result = await body(response);
+  if (result.audioPurgedCount !== 0 || result.audioPurgeFailed !== true
+    || calls.includes("complete_inbox_audio_asset_purge")) {
+    throw new Error("Malformed Storage response was treated as a deletion receipt.");
+  }
+});
+
+Deno.test("dispatcher retries voice metadata completion after Storage deletion without skipping Storage", async () => {
+  const AUDIO_ASSET = "019b5000-0000-7000-8000-0000000000a1";
+  const OWNER = "019b5000-0000-7000-8000-0000000000a2";
+  const objectPath = OWNER + "/" + AUDIO_ASSET + "/source.webm";
+  let completionAttempts = 0;
+  let storageAttempts = 0;
+  const ctx = {
+    authMode: "secret",
+    supabaseAdmin: {
+      async rpc(name: string) {
+        if (name === "claim_inbox_processing_run") return { data: [], error: null };
+        if (name === "list_expired_inbox_audio_assets") return {
+          data: [{ asset_id: AUDIO_ASSET, owner_user_id: OWNER, bucket_id: "inbox-voice-private", object_path: objectPath }],
+          error: null,
+        };
+        if (name === "complete_inbox_audio_asset_purge") {
+          completionAttempts += 1;
+          return completionAttempts === 1
+            ? { data: null, error: { message: "temporary database failure" } }
+            : { data: 1, error: null };
+        }
+        if (name === "purge_expired_inbox_captures") return { data: [{ purged_count: 0 }], error: null };
+        throw new Error("Unexpected RPC " + name);
+      },
+      storage: {
+        from(bucket: string) {
+          if (bucket !== "inbox-voice-private") throw new Error("Unexpected Storage bucket.");
+          return { async remove(paths: string[]) {
+            storageAttempts += 1;
+            if (paths.length !== 1 || paths[0] !== objectPath) throw new Error("Unexpected object path.");
+            // Storage remove() returns an array; [] is valid when a prior
+            // invocation already removed the object and metadata completion failed.
+            return { data: [], error: null };
+          } };
+        },
+      },
+    },
+  };
+  const first = await body(await handleRequest(request({ maxJobs: 1 }), ctx as never));
+  const second = await body(await handleRequest(request({ maxJobs: 1 }), ctx as never));
+  if (first.audioPurgeFailed !== true || first.audioPurgedCount !== 0
+    || second.audioPurgeFailed !== false || second.audioPurgedCount !== 1
+    || completionAttempts !== 2 || storageAttempts !== 2) {
+    throw new Error("Voice purge did not safely retry the Storage-then-metadata sequence.");
+  }
+});
