@@ -434,3 +434,16 @@
 .offline-vault-privacy{color:#8a968d;font-size:.58rem;line-height:1.45}
 .composer-capture-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap;justify-content:flex-end}
 @media(max-width:600px){.offline-vault-panel{padding:12px}.offline-vault-heading{flex-wrap:wrap}.offline-vault-actions{align-items:stretch}.offline-vault-actions>span{width:100%}.composer-capture-actions{width:100%}.composer-capture-actions button{flex:1}}
+
+/* Private voice capture; no public playback URL is created. */
+.voice-capture-panel{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:9px;margin:0 0 12px;padding:13px 15px;border:1px solid #e3e9e2;border-radius:12px;background:#fff}
+.voice-capture-copy strong{font-size:.75rem;color:#3e5f4b}
+.voice-capture-copy p{margin:4px 0 0;max-width:620px;color:#829087;font-size:.65rem;line-height:1.45}
+.voice-capture-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px}
+.voice-recording-indicator{font-size:.62rem;font-weight:750;color:#a35d4f}
+.voice-capture-panel>small{grid-column:1/-1;color:#94a097;font-size:.58rem}
+.voice-asset-list{display:grid;gap:7px;margin:0 0 13px;padding:12px 14px;border:1px solid #e8eee7;border-radius:11px;background:#fbfcfa}
+.voice-asset-list>strong{font-size:.7rem;color:#526b59}
+.voice-asset-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding-top:6px;border-top:1px solid #edf1eb;color:#687b6d;font-size:.63rem}
+.voice-asset-row small{color:#9aa49d;font-size:.58rem}
+@media(max-width:600px){.voice-capture-panel{grid-template-columns:1fr}.voice-capture-actions{justify-content:flex-start}.voice-asset-row{align-items:flex-start;flex-direction:column;gap:3px}}
