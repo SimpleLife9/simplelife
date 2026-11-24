@@ -317,7 +317,7 @@ AFTER UPDATE OF deleted_at, purge_after ON public.capture
 FOR EACH ROW EXECUTE FUNCTION private.sync_capture_audio_retention();
 
 CREATE OR REPLACE FUNCTION public.list_expired_inbox_audio_assets(p_batch_size integer)
-RETURNS TABLE(asset_id uuid, bucket_id text, object_path text)
+RETURNS TABLE(asset_id uuid, owner_user_id uuid, bucket_id text, object_path text)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $function$
@@ -340,7 +340,7 @@ BEGIN
   SET status='deletion_pending', updated_at=clock_timestamp()
   FROM due
   WHERE aa.id=due.id
-  RETURNING aa.id, aa.bucket_id, aa.object_path;
+  RETURNING aa.id, aa.owner_user_id, aa.bucket_id, aa.object_path;
 END;
 $function$;
 ALTER FUNCTION public.list_expired_inbox_audio_assets(integer) OWNER TO postgres;
