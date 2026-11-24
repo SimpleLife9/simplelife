@@ -75,3 +75,12 @@ Deployment order: apply the ordered Inbox migrations, deploy the queue/worker/pr
 | Recovery key safely stored | YES / NO |
 | Scheduler DEV run verified | YES / NO |
 | Owner/date | |
+
+
+## 6. Private voice integrity — implementation and verification boundary
+
+The voice upload path now calls the authenticated `inbox-voice-finalize` Edge Function after Storage upload. The browser submits only the asset ID. The function resolves the active owner from the verified JWT, loads the owner-scoped staging record, downloads the object from the private bucket using server credentials, checks the actual byte count, and computes SHA-256 over the downloaded bytes. It calls the privileged finalization RPC only when that digest matches the registered expected digest.
+
+The former authenticated `finalize_inbox_audio_upload(uuid,integer,text)` RPC is revoked. The replacement `finalize_inbox_audio_upload_verified` RPC is executable only by `service_role`. An equal-size object with different bytes must remain in `uploading` and must not reach the finalization RPC.
+
+**Acceptance boundary:** CI and the local Edge Runtime smoke test validate the code path with disposable local fixtures. They do not prove that the new migration or function has been deployed to hosted DEV. Apply/deploy to DEV only in a separately authorized DEV operation, then repeat with an owner-owned private object. Production remains out of scope.
