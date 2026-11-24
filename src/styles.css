@@ -413,3 +413,24 @@
 .capture-history-entry small,.capture-history-entry span{font-size:.64rem;color:#87958b}
 .capture-history-entry strong{font-size:.7rem;color:#486651}
 .capture-history-entry p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:.7rem;color:#58695e}
+
+/* Private encrypted offline capture vault */
+.offline-vault-panel{display:grid;gap:10px;margin:0 0 14px;padding:14px 15px;border:1px solid #dfe9df;border-radius:13px;background:linear-gradient(145deg,#fbfdfb,#f4f8f3)}
+.offline-vault-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.offline-vault-heading strong{display:block;font-size:.78rem;color:#365744}
+.offline-vault-heading p{margin:4px 0 0;font-size:.67rem;line-height:1.45;color:#7a8b80}
+.offline-vault-state{flex-shrink:0;border:1px solid #e5e9e4;border-radius:30px;padding:5px 9px;background:#fff;color:#77857b;font-size:.58rem;font-weight:750}
+.offline-vault-state.is-unlocked{border-color:#cde4d0;background:#eef8ef;color:#39734a}
+.offline-vault-access{display:flex;align-items:flex-end;gap:9px;flex-wrap:wrap}
+.offline-vault-passphrase{display:grid;gap:5px;flex:1;min-width:min(100%,220px)}
+.offline-vault-passphrase span{font-size:.62rem;font-weight:700;color:#64766a}
+.offline-vault-passphrase input{min-width:0;height:37px;border:1px solid #dfe7df;border-radius:8px;padding:8px 10px;background:#fff;color:#34483f;font-size:.72rem}
+.offline-vault-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.offline-vault-actions>span{margin-right:auto;color:#607567;font-size:.66rem;font-weight:650}
+.offline-vault-queue{display:grid;gap:5px;max-height:120px;overflow:auto;padding:9px 10px;border:1px solid #e4ebe2;border-radius:8px;background:#fff}
+.offline-vault-queue p{margin:0;padding:4px 0;border-bottom:1px solid #f0f3ef;color:#5d6e62;font-size:.65rem;white-space:pre-wrap;overflow-wrap:anywhere}
+.offline-vault-queue p:last-child{border-bottom:0}
+.offline-vault-notice{margin:0;color:#3d7650;font-size:.65rem}
+.offline-vault-privacy{color:#8a968d;font-size:.58rem;line-height:1.45}
+.composer-capture-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap;justify-content:flex-end}
+@media(max-width:600px){.offline-vault-panel{padding:12px}.offline-vault-heading{flex-wrap:wrap}.offline-vault-actions{align-items:stretch}.offline-vault-actions>span{width:100%}.composer-capture-actions{width:100%}.composer-capture-actions button{flex:1}}
