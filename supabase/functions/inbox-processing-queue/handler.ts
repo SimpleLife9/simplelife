@@ -1,4 +1,4 @@
-import { uuidv7 } from "../../../src/lib/uuidv7.js";
+import { uuidv7 } from "../_shared/uuidv7.ts";
 import {
   resolveActiveEventProfile,
   type EventAuthenticatedContext,
