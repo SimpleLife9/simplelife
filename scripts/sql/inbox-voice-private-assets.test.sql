@@ -86,9 +86,7 @@ DECLARE
   v_expired_asset uuid := '019b7200-0000-7000-8000-000000000102';
   v_count integer;
 BEGIN
-  IF NOT public.finalize_inbox_audio_upload(
-    '019b7200-0000-7000-8000-000000000101',4096,repeat('a',64)
-  ) THEN RAISE EXCEPTION 'Owner A could not finalize private audio upload'; END IF;
+  -- Upload finalization was already checked above; transcription writes are backend-only.
 
   IF NOT public.finalize_inbox_audio_upload(
     '019b7200-0000-7000-8000-000000000101',4096,repeat('a',64)
