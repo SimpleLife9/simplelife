@@ -42,11 +42,13 @@ BEGIN
   END IF;
   IF NOT has_function_privilege('authenticated',
        'public.finalize_inbox_audio_upload(uuid,integer,text)','EXECUTE')
-     OR NOT has_function_privilege('authenticated',
-       'public.record_inbox_voice_transcription(uuid,uuid,uuid,text,text,text,text)','EXECUTE')
+     OR has_function_privilege('authenticated',
+       'public.record_inbox_voice_transcription(uuid,uuid,uuid,uuid,text,text,text,text)','EXECUTE')
      OR has_function_privilege('anon',
-       'public.record_inbox_voice_transcription(uuid,uuid,uuid,text,text,text,text)','EXECUTE') THEN
-    RAISE EXCEPTION 'Voice upload/transcription RPC permissions are incorrect';
+       'public.record_inbox_voice_transcription(uuid,uuid,uuid,uuid,text,text,text,text)','EXECUTE')
+     OR NOT has_function_privilege('service_role',
+       'public.record_inbox_voice_transcription(uuid,uuid,uuid,uuid,text,text,text,text)','EXECUTE') THEN
+    RAISE EXCEPTION 'Voice transcription must be callable by trusted service_role only';
   END IF;
   IF has_table_privilege('service_role','public.audit_event','INSERT') THEN
     RAISE EXCEPTION 'Audio retention must not grant direct audit_event INSERT';
@@ -68,6 +70,14 @@ INSERT INTO public.capture_audio_asset (
   'audio/webm', 4096, repeat('a',64)
 );
 
+INSERT INTO storage.objects (bucket_id, name, owner_id, metadata)
+VALUES (
+  'inbox-voice-private',
+  '019b7200-0000-7000-8000-000000000001/019b7200-0000-7000-8000-000000000101/source.webm',
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  jsonb_build_object('size','4096','mimetype','audio/webm')
+);
+
 DO $test$
 DECLARE
   v_capture uuid;
@@ -80,49 +90,9 @@ BEGIN
     '019b7200-0000-7000-8000-000000000101',4096,repeat('a',64)
   ) THEN RAISE EXCEPTION 'Owner A could not finalize private audio upload'; END IF;
 
-  SELECT capture_id, part_id INTO v_capture, v_part
-  FROM public.record_inbox_voice_transcription(
-    '019b7200-0000-7000-8000-000000000101',
-    '019b7200-0000-7000-8000-000000000103',
-    '019b7200-0000-7000-8000-000000000104',
-    'Comprar café para mañana.',
-    'cloudflare-whisper','@cf/openai/whisper','us'
-  );
-  IF v_capture <> '019b7200-0000-7000-8000-000000000103'
-     OR v_part <> '019b7200-0000-7000-8000-000000000104' THEN
-    RAISE EXCEPTION 'Voice transcription did not produce its capture/part';
-  END IF;
-  IF NOT EXISTS (
-    SELECT 1 FROM public.capture
-    WHERE id=v_capture AND input_type='voice'
-      AND content_original='Comprar café para mañana.'
-  ) OR NOT EXISTS (
-    SELECT 1 FROM public.capture_part
-    WHERE capture_id=v_capture AND part_index=0
-      AND original_fragment='Comprar café para mañana.'
-  ) THEN
-    RAISE EXCEPTION 'Voice transcript was not persisted as the derived searchable source text';
-  END IF;
-  IF NOT EXISTS (
-    SELECT 1 FROM public.capture_audio_asset
-    WHERE id='019b7200-0000-7000-8000-000000000101'
-      AND capture_id=v_capture AND status='transcribed'
-      AND transcript_text='Comprar café para mañana.'
-      AND retention_until IS NULL
-  ) THEN
-    RAISE EXCEPTION 'Original private audio was not linked to the transcript capture';
-  END IF;
-
-  IF NOT public.trash_inbox_capture(
-    v_capture,'019b7200-0000-7000-8000-000000000105'
-  ) THEN RAISE EXCEPTION 'Voice capture could not enter the normal 30-day trash lifecycle'; END IF;
-  SELECT aa.retention_until INTO v_retention
-  FROM public.capture_audio_asset aa WHERE aa.id='019b7200-0000-7000-8000-000000000101';
-  IF v_retention IS NULL OR v_retention <> (
-    SELECT c.purge_after FROM public.capture c WHERE c.id=v_capture
-  ) THEN
-    RAISE EXCEPTION 'Audio retention is not synchronized with the capture recovery window';
-  END IF;
+  IF NOT public.finalize_inbox_audio_upload(
+    '019b7200-0000-7000-8000-000000000101',4096,repeat('a',64)
+  ) THEN RAISE EXCEPTION 'Owner A could not finalize private audio upload'; END IF;
 
   -- An unattached upload expires after its seven-day staging window.
   INSERT INTO public.capture_audio_asset (
@@ -134,6 +104,72 @@ BEGIN
     '019b7200-0000-7000-8000-000000000001/019b7200-0000-7000-8000-000000000102/source.webm',
     'audio/webm',1024,repeat('b',64),now()-interval '1 second','uploaded'
   );
+END;
+$test$;
+RESET ROLE;
+
+-- Only the trusted backend may attach a provider-attributed transcript.
+SET LOCAL ROLE service_role;
+DO $test$
+DECLARE
+  v_capture uuid;
+  v_part uuid;
+BEGIN
+  SELECT capture_id, part_id INTO v_capture, v_part
+  FROM public.record_inbox_voice_transcription(
+    '019b7200-0000-7000-8000-000000000001',
+    '019b7200-0000-7000-8000-000000000101',
+    '019b7200-0000-7000-8000-000000000103',
+    '019b7200-0000-7000-8000-000000000104',
+    'Texto transcrito de prueba.',
+    'test-provider','fixture-model','us-west-2'
+  );
+  IF v_capture <> '019b7200-0000-7000-8000-000000000103'
+     OR v_part <> '019b7200-0000-7000-8000-000000000104' THEN
+    RAISE EXCEPTION 'Trusted voice transcription did not produce its capture/part';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.capture
+    WHERE id=v_capture AND input_type='voice'
+      AND content_original='Texto transcrito de prueba.'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM public.capture_part
+    WHERE capture_id=v_capture AND part_index=0
+      AND original_fragment='Texto transcrito de prueba.'
+  ) THEN
+    RAISE EXCEPTION 'Voice transcript was not persisted as derived searchable text';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.capture_audio_asset
+    WHERE id='019b7200-0000-7000-8000-000000000101'
+      AND capture_id=v_capture AND status='transcribed'
+      AND transcription_provider='test-provider'
+      AND transcription_model='fixture-model'
+      AND transcription_region='us-west-2'
+      AND retention_until IS NULL
+  ) THEN
+    RAISE EXCEPTION 'Original audio was not linked to its server-attributed transcript';
+  END IF;
+END;
+$test$;
+RESET ROLE;
+
+SET LOCAL ROLE authenticated;
+SET LOCAL request.jwt.claim.sub='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+DO $test$
+BEGIN
+  IF NOT public.trash_inbox_capture(
+    '019b7200-0000-7000-8000-000000000103',
+    '019b7200-0000-7000-8000-000000000105'
+  ) THEN RAISE EXCEPTION 'Voice capture could not enter the normal 30-day trash lifecycle'; END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.capture_audio_asset aa
+    JOIN public.capture c ON c.id=aa.capture_id
+    WHERE aa.id='019b7200-0000-7000-8000-000000000101'
+      AND aa.retention_until=c.purge_after
+  ) THEN
+    RAISE EXCEPTION 'Audio retention is not synchronized with the capture recovery window';
+  END IF;
 END;
 $test$;
 RESET ROLE;
