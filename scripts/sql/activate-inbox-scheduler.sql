@@ -9,6 +9,13 @@ DO $cron$
 DECLARE
   v_job record;
 BEGIN
+  IF NOT EXISTS (SELECT 1 FROM vault.secrets WHERE name='inbox_publishable_key') THEN
+    RAISE EXCEPTION 'Store the DEV publishable key in Vault as inbox_publishable_key before scheduler activation';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM vault.secrets WHERE name='inbox_scheduler_token')
+     OR NOT EXISTS (SELECT 1 FROM vault.secrets WHERE name='inbox_project_url') THEN
+    RAISE EXCEPTION 'Scheduler Vault credentials are missing';
+  END IF;
   FOR v_job IN
     SELECT jobid FROM cron.job WHERE jobname='simplelife-inbox-dispatcher'
   LOOP
@@ -27,6 +34,11 @@ BEGIN
         ) || '/functions/v1/inbox-processing-scheduled',
         headers := jsonb_build_object(
           'Content-Type','application/json',
+          'apikey',(
+            SELECT decrypted_secret
+            FROM vault.decrypted_secrets
+            WHERE name='inbox_publishable_key'
+          ),
           'x-inbox-scheduler-token',(
             SELECT decrypted_secret
             FROM vault.decrypted_secrets
