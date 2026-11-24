@@ -40,15 +40,25 @@ BEGIN
   IF has_table_privilege('authenticated','public.capture_audio_asset','DELETE') THEN
     RAISE EXCEPTION 'Authenticated users must not physically delete voice asset metadata';
   END IF;
-  IF NOT has_function_privilege('authenticated',
+  IF has_function_privilege('authenticated',
        'public.finalize_inbox_audio_upload(uuid,integer,text)','EXECUTE')
+     OR has_function_privilege('anon',
+       'public.finalize_inbox_audio_upload(uuid,integer,text)','EXECUTE')
+     OR has_function_privilege('service_role',
+       'public.finalize_inbox_audio_upload(uuid,integer,text)','EXECUTE')
+     OR NOT has_function_privilege('service_role',
+       'public.finalize_inbox_audio_upload_verified(uuid,uuid,integer,text)','EXECUTE')
+     OR has_function_privilege('authenticated',
+       'public.finalize_inbox_audio_upload_verified(uuid,uuid,integer,text)','EXECUTE')
+     OR has_function_privilege('anon',
+       'public.finalize_inbox_audio_upload_verified(uuid,uuid,integer,text)','EXECUTE')
      OR has_function_privilege('authenticated',
        'public.record_inbox_voice_transcription(uuid,uuid,uuid,uuid,text,text,text,text)','EXECUTE')
      OR has_function_privilege('anon',
        'public.record_inbox_voice_transcription(uuid,uuid,uuid,uuid,text,text,text,text)','EXECUTE')
      OR NOT has_function_privilege('service_role',
        'public.record_inbox_voice_transcription(uuid,uuid,uuid,uuid,text,text,text,text)','EXECUTE') THEN
-    RAISE EXCEPTION 'Voice transcription must be callable by trusted service_role only';
+    RAISE EXCEPTION 'Voice finalization and transcription must be callable by trusted service_role only';
   END IF;
   IF has_table_privilege('service_role','public.audit_event','INSERT') THEN
     RAISE EXCEPTION 'Audio retention must not grant direct audit_event INSERT';
@@ -136,9 +146,12 @@ DECLARE
 BEGIN
   -- Upload finalization was already checked above; transcription writes are backend-only.
 
-  IF NOT public.finalize_inbox_audio_upload(
-    '019b7200-0000-7000-8000-000000000101',4096,repeat('a',64)
-  ) THEN RAISE EXCEPTION 'Owner A could not finalize private audio upload'; END IF;
+  IF NOT public.finalize_inbox_audio_upload_verified(
+    '019b7200-0000-7000-8000-000000000001',
+    '019b7200-0000-7000-8000-000000000101',
+    4096,
+    repeat('a',64)
+  ) THEN RAISE EXCEPTION 'Server could not finalize private audio upload after verified digest'; END IF;
 
   -- An abandoned in-progress upload expires after its seven-day staging window.
   INSERT INTO public.capture_audio_asset (
@@ -229,8 +242,11 @@ BEGIN
   SELECT count(*) INTO v_count FROM public.capture_audio_asset;
   IF v_count <> 0 THEN RAISE EXCEPTION 'Owner B can read Owner A private voice assets'; END IF;
   BEGIN
-    PERFORM public.finalize_inbox_audio_upload(
-      '019b7200-0000-7000-8000-000000000101',4096,repeat('a',64)
+    PERFORM public.finalize_inbox_audio_upload_verified(
+      '019b7200-0000-7000-8000-000000000001',
+      '019b7200-0000-7000-8000-000000000101',
+      4096,
+      repeat('a',64)
     );
   EXCEPTION WHEN insufficient_privilege THEN v_denied := true;
   END;
