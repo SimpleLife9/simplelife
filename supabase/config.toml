@@ -41,3 +41,7 @@ verify_jwt = false
 # Cron entrypoint validates a separate Vault token before internal service calls.
 [functions.inbox-processing-scheduled]
 verify_jwt = false
+
+# Owner-authenticated voice finalizer recomputes SHA-256 from private Storage bytes.
+[functions.inbox-voice-finalize]
+verify_jwt = true
