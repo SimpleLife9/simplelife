@@ -137,7 +137,15 @@ export function VoiceCapture({ profile, busy = false, runAction }) {
           setNotice('Audio original guardado en almacenamiento privado. La transcripción permanece pendiente hasta configurar un proveedor aprobado.');
           return assetId;
         };
-        void (runAction ? runAction(operation, 'Audio guardado de forma privada.') : operation())
+        const save = async () => {
+          if (runAction) {
+            const succeeded = await runAction(operation, 'Audio guardado de forma privada.');
+            if (!succeeded) setError('No se pudo guardar el audio privado. El registro permanece en estado temporal y expirará automáticamente.');
+            return;
+          }
+          await operation();
+        };
+        void save()
           .catch((uploadFailure) => setError(uploadFailure?.message || 'No se pudo guardar el audio privado.'))
           .finally(() => setUploading(false));
       };
