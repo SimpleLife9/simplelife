@@ -961,7 +961,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
       </div>}
       {duplicateCheckError && <p className="form-error" role="status">{duplicateCheckError}</p>}
     </div>
-    <div className="honest-note"><span>ⓘ</span><p>Las sugerencias actuales se generan con reglas locales deterministas (no con un modelo de IA) y son solo orientativas. Cada fragmento conserva el texto original; ningún destino se crea sin tu confirmación. Voz y sincronización offline privada permanecen desactivadas hasta aprobar y verificar su almacenamiento, proveedor, cifrado y recuperación.</p></div>
+    <div className="honest-note"><span>ⓘ</span><p>Las sugerencias actuales se generan con reglas locales deterministas (no con un modelo de IA) y son orientativas. Cada fragmento conserva el texto original; ningún destino se crea sin tu confirmación. Las grabaciones de voz se guardan en almacenamiento privado asociado a tu cuenta, pero todavía no se transcriben ni se envían a un modelo. El modo sin conexión cifra las capturas en este dispositivo; guarda tu clave de recuperación fuera del dispositivo y desbloquea la bóveda para consultar o sincronizar la cola al reconectar.</p></div>
 
     {selectedCapture && (
       <div className="task-editor-overlay capture-organizer-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) closeOrganizer(); }}>
