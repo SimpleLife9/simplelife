@@ -21,6 +21,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
   const [loading, setLoading] = useState(true);
   const [localError, setLocalError] = useState('');
   const [captureRecoveryError, setCaptureRecoveryError] = useState('');
+  const [processingErrorsByCapture, setProcessingErrorsByCapture] = useState({});
   const activeOwnerId = profile?.id || null;
   const offlineVaultRef = useRef({ ownerId: null, vault: null });
   if (offlineVaultRef.current.ownerId !== activeOwnerId) {
@@ -504,7 +505,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
 
   const queueAndProcess = async (captureId) => {
     const queued = await supabase.functions.invoke('inbox-processing-queue', {
-      body: { captureId }, headers: { 'Idempotency-Key': uuidv7() },
+      body: { captureId, idempotencyKey: uuidv7() },
     });
     if (queued.error) throw queued.error;
     if (!queued.data?.runId) throw new Error('No se recibió el identificador del procesamiento.');
@@ -513,10 +514,26 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
     if (processed.data?.status === 'not_claimable') throw new Error('El trabajo sigue en cola; vuelve a intentarlo.');
   };
 
-  const processCapture = (capture) => runAction(
-    () => queueAndProcess(capture.id),
-    'Propuestas preparadas. Revisa cada fragmento; no se creó ningún destino automáticamente.',
-  );
+  const processCapture = (capture) => {
+    setProcessingErrorsByCapture((current) => {
+      const next = { ...current };
+      delete next[capture.id];
+      return next;
+    });
+    return runAction(
+      () => queueAndProcess(capture.id),
+      'Propuestas preparadas. Revisa cada fragmento; no se creó ningún destino automáticamente.',
+      {
+        onError: (error) => {
+          const message = String(error?.message || '');
+          const userMessage = /Failed to send a request to the Edge Function|Failed to fetch|NetworkError|Load failed/i.test(message)
+            ? 'No se pudo conectar con el servicio de procesamiento. Comprueba la conexión y vuelve a intentarlo.'
+            : (message || 'Ocurrió un error inesperado al preparar las sugerencias.');
+          setProcessingErrorsByCapture((current) => ({ ...current, [capture.id]: userMessage }));
+        },
+      },
+    );
+  };
 
   const submit = async (contentOriginal) => runAction(async () => {
     let captureId;
@@ -947,6 +964,11 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
                 <button type="button" className="capture-action-button capture-archive-button" disabled={busy} onClick={() => trashCapture(capture)}>Enviar a papelera</button>
                 </>}
               </div>
+              {processingErrorsByCapture[capture.id] && (
+                <div className="form-error capture-processing-error" role="alert" aria-live="assertive">
+                  No se pudieron generar las sugerencias. {processingErrorsByCapture[capture.id]} Tu captura original sigue guardada.
+                </div>
+              )}
             </div>
           </div>;
         })}</div>
