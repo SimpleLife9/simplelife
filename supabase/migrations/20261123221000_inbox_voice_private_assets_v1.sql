@@ -154,12 +154,9 @@ BEGIN
   IF auth.uid() IS NULL THEN
     RAISE EXCEPTION 'A signed-in user is required' USING ERRCODE='42501';
   END IF;
-  IF p_owner_profile_id IS NULL THEN
-    RAISE EXCEPTION 'A verified owner profile is required' USING ERRCODE='42501';
-  END IF;
   SELECT up.id INTO v_owner_profile_id
   FROM public.user_profile up
-  WHERE up.id=p_owner_profile_id AND up.account_status='active';
+  WHERE up.auth_user_id=auth.uid() AND up.account_status='active';
   IF v_owner_profile_id IS NULL THEN
     RAISE EXCEPTION 'An active SimpleLife profile is required' USING ERRCODE='42501';
   END IF;
@@ -223,12 +220,14 @@ DECLARE
   v_owner_profile_id uuid;
   v_asset public.capture_audio_asset%ROWTYPE;
 BEGIN
-  IF auth.uid() IS NULL THEN
-    RAISE EXCEPTION 'A signed-in user is required' USING ERRCODE='42501';
+  -- This SECURITY DEFINER routine is EXECUTE-granted only to service_role.
+  -- The backend passes the owner profile resolved from the verified user JWT.
+  IF p_owner_profile_id IS NULL THEN
+    RAISE EXCEPTION 'A verified owner profile is required' USING ERRCODE='42501';
   END IF;
   SELECT up.id INTO v_owner_profile_id
   FROM public.user_profile up
-  WHERE up.auth_user_id=auth.uid() AND up.account_status='active';
+  WHERE up.id=p_owner_profile_id AND up.account_status='active';
   IF v_owner_profile_id IS NULL THEN
     RAISE EXCEPTION 'An active SimpleLife profile is required' USING ERRCODE='42501';
   END IF;
