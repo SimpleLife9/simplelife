@@ -415,7 +415,7 @@ try {
   const corruptAssetId = sqlScalar("SELECT private.uuidv7()");
   const corruptPath = profileA + "/" + corruptAssetId + "/source.webm";
   const expectedBytes = Buffer.from("expected private voice hash fixture");
-  const corruptBytes = Buffer.from("corrupt private voice hash fixture");
+  const corruptBytes = Buffer.from("corrupt private voice hash fixtures");
   if (expectedBytes.byteLength !== corruptBytes.byteLength) fail("Digest corruption fixture must have equal byte length.");
   const expectedSha = createHash("sha256").update(expectedBytes).digest("hex");
   const corruptMetadata = await fetch(base + "/rest/v1/capture_audio_asset", {
