@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { supabase } from '../../../lib/supabase.js';
 import { uuidv7 } from '../../../lib/uuidv7.js';
 
-const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
+import { canAppendAudioChunk, MAX_AUDIO_BYTES } from '../domain/voice-capture-policy.js';
 const MIME_CANDIDATES = [
   'audio/webm;codecs=opus',
   'audio/webm',
@@ -31,6 +31,9 @@ export function VoiceCapture({ profile, busy = false, runAction }) {
   const recorderRef = useRef(null);
   const streamRef = useRef(null);
   const chunksRef = useRef([]);
+  const recordedBytesRef = useRef(0);
+  const audioLimitExceededRef = useRef(false);
+  const recordingFailedRef = useRef(false);
 
   const supported = Boolean(
     globalThis.navigator?.mediaDevices?.getUserMedia
@@ -40,12 +43,22 @@ export function VoiceCapture({ profile, busy = false, runAction }) {
   );
 
   useEffect(() => () => {
-    try {
-      if (recorderRef.current?.state && recorderRef.current.state !== 'inactive') {
-        recorderRef.current.stop();
-      }
-    } catch { /* release microphone tracks below */ }
+    const recorder = recorderRef.current;
+    if (recorder) {
+      // Leaving the Inbox cancels the unfinished recording; it must not trigger
+      // an unexpected upload from the recorder's asynchronous stop event.
+      recorder.ondataavailable = null;
+      recorder.onstop = null;
+      recorder.onerror = null;
+      try {
+        if (recorder.state && recorder.state !== 'inactive') recorder.stop();
+      } catch { /* release microphone tracks below */ }
+    }
+    recorderRef.current = null;
+    chunksRef.current = [];
+    recordedBytesRef.current = 0;
     streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
   }, []);
 
   const savePrivateAudio = async (blob) => {
@@ -113,20 +126,56 @@ export function VoiceCapture({ profile, busy = false, runAction }) {
       const mimeType = MIME_CANDIDATES.find((candidate) => MediaRecorder.isTypeSupported(candidate));
       const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
       chunksRef.current = [];
+      recordedBytesRef.current = 0;
+      audioLimitExceededRef.current = false;
+      recordingFailedRef.current = false;
       recorder.ondataavailable = (event) => {
-        if (event.data?.size) chunksRef.current.push(event.data);
+        if (!event.data?.size || audioLimitExceededRef.current || recordingFailedRef.current) return;
+        if (!canAppendAudioChunk(recordedBytesRef.current, event.data.size)) {
+          audioLimitExceededRef.current = true;
+          chunksRef.current = [];
+          recordedBytesRef.current = 0;
+          setError('La grabación superó el límite de 25 MiB y se descartó. Inicia una nueva grabación.');
+          setRecording(false);
+          try {
+            if (recorder.state !== 'inactive') recorder.stop();
+          } catch { /* best effort */ }
+          return;
+        }
+        recordedBytesRef.current += event.data.size;
+        chunksRef.current.push(event.data);
       };
       recorder.onerror = () => {
-        setError('La grabación se interrumpió. El audio no se ha marcado como guardado.');
+        recordingFailedRef.current = true;
+        chunksRef.current = [];
+        recordedBytesRef.current = 0;
+        setError('La grabación se interrumpió. El audio parcial se descartó.');
         setRecording(false);
+        try {
+          if (recorder.state !== 'inactive') recorder.stop();
+        } catch { /* best effort */ }
       };
       recorder.onstop = () => {
-        const audioType = recorder.mimeType || chunksRef.current[0]?.type || mimeType || 'audio/webm';
-        const blob = new Blob(chunksRef.current, { type: audioType });
+        const limitExceeded = audioLimitExceededRef.current;
+        const recordingFailed = recordingFailedRef.current;
+        audioLimitExceededRef.current = false;
+        recordingFailedRef.current = false;
+        const recordedChunks = chunksRef.current;
         chunksRef.current = [];
+        recordedBytesRef.current = 0;
+        const audioType = recorder.mimeType || recordedChunks[0]?.type || mimeType || 'audio/webm';
+        const blob = new Blob(recordedChunks, { type: audioType });
         stream.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
         recorderRef.current = null;
+        if (limitExceeded) {
+          setError('La grabación superó el límite de 25 MiB y se descartó. Inicia una nueva grabación.');
+          return;
+        }
+        if (recordingFailed) {
+          setError('La grabación se interrumpió. El audio parcial se descartó.');
+          return;
+        }
         if (!blob.size) {
           setError('La grabación quedó vacía; vuelve a intentarlo.');
           return;
