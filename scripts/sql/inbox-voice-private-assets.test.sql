@@ -92,7 +92,7 @@ BEGIN
     '019b7200-0000-7000-8000-000000000101',4096,repeat('a',64)
   ) THEN RAISE EXCEPTION 'Owner A could not finalize private audio upload'; END IF;
 
-  -- An unattached upload expires after its seven-day staging window.
+  -- An abandoned in-progress upload expires after its seven-day staging window.
   INSERT INTO public.capture_audio_asset (
     id,owner_user_id,created_by_user_id,bucket_id,object_path,mime_type,
     file_size_bytes,sha256_hex,retention_until,status
@@ -100,7 +100,7 @@ BEGIN
     v_expired_asset,'019b7200-0000-7000-8000-000000000001',
     '019b7200-0000-7000-8000-000000000001','inbox-voice-private',
     '019b7200-0000-7000-8000-000000000001/019b7200-0000-7000-8000-000000000102/source.webm',
-    'audio/webm',1024,repeat('b',64),now()-interval '1 second','uploaded'
+    'audio/webm',1024,repeat('b',64),now()-interval '1 second','uploading'
   );
 END;
 $test$;
