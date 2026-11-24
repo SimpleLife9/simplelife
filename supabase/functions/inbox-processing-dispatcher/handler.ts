@@ -102,8 +102,13 @@ async function purgeExpiredAudioAssets(
     if (!isRecord(candidate)
       || !validUuid(candidate.asset_id)
       || candidate.bucket_id !== 'inbox-voice-private'
-      || typeof candidate.object_path !== 'string'
-      || !candidate.object_path.startsWith('')) {
+      || typeof candidate.object_path !== 'string') {
+      return { purgedCount: 0, failed: true };
+    }
+    const pathParts = candidate.object_path.split('/');
+    if (pathParts.length !== 3 || !validUuid(pathParts[0])
+      || pathParts[1] !== candidate.asset_id
+      || !/^source\\.(webm|ogg|m4a|wav|mp3)$/i.test(pathParts[2])) {
       return { purgedCount: 0, failed: true };
     }
     assetIds.push(candidate.asset_id);
