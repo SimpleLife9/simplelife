@@ -572,10 +572,18 @@ async function mockSupabaseSession(page, initialData = {}) {
     }
 
     if (url.pathname === '/rest/v1/capture' && method === 'GET') {
+      // supabase-js uses offset/limit query parameters for range pagination.
+      // Keep Range-header support for callers that explicitly send it.
       const rangeHeader = request.headers()['range'] || '0-99';
       const [rangeStart, rangeEnd] = rangeHeader.split('-').map(Number);
-      const start = Number.isFinite(rangeStart) ? rangeStart : 0;
-      const end = Number.isFinite(rangeEnd) ? rangeEnd : start + 99;
+      const requestedOffset = Number(url.searchParams.get('offset'));
+      const requestedLimit = Number(url.searchParams.get('limit'));
+      const start = Number.isSafeInteger(requestedOffset) && requestedOffset >= 0
+        ? requestedOffset
+        : Number.isFinite(rangeStart) ? rangeStart : 0;
+      const end = Number.isSafeInteger(requestedLimit) && requestedLimit > 0
+        ? start + requestedLimit - 1
+        : Number.isFinite(rangeEnd) ? rangeEnd : start + 99;
       if (initialData.capturePageDelayStart === start) {
         await new Promise((resolve) => setTimeout(resolve, initialData.capturePageDelayMs ?? 800));
       }
@@ -1705,7 +1713,9 @@ test('Inbox ignores a delayed pagination response after the archive search chang
 
   await expect(page.getByText('Historical capture 1', { exact: true })).toBeVisible();
   const delayedPageRequest = page.waitForRequest((request) =>
-    request.url().includes('/rest/v1/capture') && request.headers()['range'] === '100-199'
+    request.url().includes('/rest/v1/capture')
+      && new URL(request.url()).searchParams.get('offset') === '100'
+      && new URL(request.url()).searchParams.get('limit') === '100'
   );
   await page.getByRole('button', { name: 'Cargar más capturas' }).click();
   await delayedPageRequest;
