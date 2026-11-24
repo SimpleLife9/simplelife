@@ -2,6 +2,12 @@ export function OfflineVaultPanel({
   status,
   passphrase,
   setPassphrase,
+  recoveryMode,
+  setRecoveryMode,
+  recoveryKey,
+  setRecoveryKey,
+  recoveryCode,
+  onDismissRecoveryCode,
   busy,
   error,
   notice,
@@ -14,6 +20,11 @@ export function OfflineVaultPanel({
   const configured = status?.configured === true;
   const unlocked = status?.unlocked === true;
   const available = status?.available !== false;
+
+  const copyRecoveryKey = async () => {
+    if (!recoveryCode || !globalThis.navigator?.clipboard?.writeText) return;
+    await globalThis.navigator.clipboard.writeText(recoveryCode);
+  };
 
   return (
     <section className="offline-vault-panel" aria-label="Bóveda offline privada">
@@ -29,12 +40,41 @@ export function OfflineVaultPanel({
 
       {!available && <p className="form-error" role="alert">Este navegador no ofrece IndexedDB y WebCrypto; no se guardarán datos offline.</p>}
 
+      {recoveryCode && (
+        <div className="offline-vault-recovery" role="alert">
+          <strong>Guarda ahora tu clave de recuperación</strong>
+          <p>Es la única forma de recuperar esta bóveda si pierdes la frase de desbloqueo. Solo se muestra una vez y no se almacena en el servidor.</p>
+          <code>{recoveryCode}</code>
+          <div className="offline-vault-actions">
+            <button type="button" className="capture-action-button" onClick={copyRecoveryKey}>Copiar clave</button>
+            <button type="button" className="capture-action-button" onClick={onDismissRecoveryCode}>Ya la guardé</button>
+          </div>
+        </div>
+      )}
+
       {available && !unlocked && (
         <form className="offline-vault-access" onSubmit={onCreateOrUnlock}>
+          {configured && recoveryMode && (
+            <label className="offline-vault-passphrase">
+              <span>Clave de recuperación (64 caracteres)</span>
+              <input
+                aria-label="Clave de recuperación offline"
+                type="password"
+                minLength={64}
+                maxLength={64}
+                autoComplete="off"
+                value={recoveryKey}
+                onChange={(event) => setRecoveryKey(event.target.value)}
+                required
+                disabled={busy}
+                placeholder="Pega la clave que guardaste"
+              />
+            </label>
+          )}
           <label className="offline-vault-passphrase">
-            <span>{configured ? 'Frase de recuperación' : 'Crea una frase de recuperación'}</span>
+            <span>{!configured ? 'Crea una frase de desbloqueo' : recoveryMode ? 'Nueva frase de desbloqueo' : 'Frase de desbloqueo'}</span>
             <input
-              aria-label={configured ? 'Frase de recuperación offline' : 'Nueva frase de recuperación offline'}
+              aria-label={!configured ? 'Nueva frase de desbloqueo offline' : recoveryMode ? 'Nueva frase offline' : 'Frase de desbloqueo offline'}
               type="password"
               minLength={14}
               autoComplete="off"
@@ -45,9 +85,23 @@ export function OfflineVaultPanel({
               placeholder="Mínimo 14 caracteres"
             />
           </label>
-          <button type="submit" className="capture-action-button" disabled={busy || passphrase.length < 14}>
-            {busy ? 'Preparando…' : configured ? 'Desbloquear bóveda' : 'Crear bóveda privada'}
+          <button type="submit" className="capture-action-button" disabled={busy || passphrase.length < 14 || (recoveryMode && recoveryKey.length !== 64)}>
+            {busy ? 'Preparando…' : !configured ? 'Crear bóveda privada' : recoveryMode ? 'Recuperar y cambiar frase' : 'Desbloquear bóveda'}
           </button>
+          {configured && (
+            <button
+              type="button"
+              className="capture-action-button"
+              disabled={busy}
+              onClick={() => {
+                setRecoveryMode(!recoveryMode);
+                setRecoveryKey('');
+                setPassphrase('');
+              }}
+            >
+              {recoveryMode ? 'Volver al desbloqueo normal' : 'Perdí mi frase de desbloqueo'}
+            </button>
+          )}
         </form>
       )}
 
@@ -72,7 +126,7 @@ export function OfflineVaultPanel({
       {error && <p className="form-error" role="alert">{error}</p>}
       {notice && <p className="offline-vault-notice" role="status">{notice}</p>}
       <small className="offline-vault-privacy">
-        La frase nunca se guarda. Sin ella, el contenido pendiente no se puede recuperar. Las capturas solo se eliminan del dispositivo después de que el servidor confirme la sincronización.
+        La frase y la clave de recuperación no se guardan en el servidor. Sin ninguna de las dos, las capturas locales no se pueden descifrar. Se eliminan del dispositivo solo después de confirmar la sincronización.
       </small>
     </section>
   );
