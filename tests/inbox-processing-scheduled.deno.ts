@@ -18,10 +18,13 @@ function request(token = TOKEN, body = "{}"): Request {
 Deno.test("scheduled endpoint validates the Vault token before invoking the dispatcher", async () => {
   const calls: Array<{url:string;headers:Headers;body:string}> = [];
   const response = await handleRequest(request(), {
-    env: (name) => ({
-      SUPABASE_URL: URL,
-      SUPABASE_SECRET_KEYS: JSON.stringify({ default: SECRET }),
-    })[name],
+    env: (name) => {
+      const values: Record<string, string> = {
+        SUPABASE_URL: URL,
+        SUPABASE_SECRET_KEYS: JSON.stringify({ default: SECRET }),
+      };
+      return values[name];
+    },
     fetcher: async (input, init) => {
       const headers = new Headers(init?.headers);
       calls.push({ url: String(input), headers, body: String(init?.body || "") });
@@ -54,10 +57,13 @@ Deno.test("scheduled endpoint validates the Vault token before invoking the disp
 Deno.test("scheduled endpoint refuses invalid tokens without dispatching", async () => {
   let calls = 0;
   const response = await handleRequest(request("x".repeat(64)), {
-    env: (name) => ({
-      SUPABASE_URL: URL,
-      SUPABASE_SECRET_KEYS: JSON.stringify({ default: SECRET }),
-    })[name],
+    env: (name) => {
+      const values: Record<string, string> = {
+        SUPABASE_URL: URL,
+        SUPABASE_SECRET_KEYS: JSON.stringify({ default: SECRET }),
+      };
+      return values[name];
+    },
     fetcher: async () => {
       calls += 1;
       return new Response("false", { status: 200 });
@@ -76,10 +82,13 @@ Deno.test("scheduled endpoint fails closed for missing secret configuration and 
   if (missing.status !== 503) throw new Error("Missing scheduler config did not fail closed.");
 
   const oversized = await handleRequest(request(TOKEN, "x".repeat(2048)), {
-    env: (name) => ({
-      SUPABASE_URL: URL,
-      SUPABASE_SECRET_KEYS: JSON.stringify({ default: SECRET }),
-    })[name],
+    env: (name) => {
+      const values: Record<string, string> = {
+        SUPABASE_URL: URL,
+        SUPABASE_SECRET_KEYS: JSON.stringify({ default: SECRET }),
+      };
+      return values[name];
+    },
     fetcher: async () => { throw new Error("must not run"); },
   });
   if (oversized.status !== 413) throw new Error("Oversized scheduler body was not rejected.");
