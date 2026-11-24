@@ -6,6 +6,7 @@ import { EmptyState } from '../../shared/components/EmptyState.jsx';
 import { useRows } from '../../shared/hooks/useRows.js';
 import { CaptureComposer } from './components/CaptureComposer.jsx';
 import { OfflineVaultPanel } from './components/OfflineVaultPanel.jsx';
+import { VoiceCapture } from './components/VoiceCapture.jsx';
 import { createIndexedDbOfflineStorage, createOfflineCaptureVault } from './offline/private-offline-vault.js';
 import { CapturePartPersistenceError, persistTextCapture } from './data/capture-repository.js';
 import { getSuggestedDestinationType, isInboxDestinationReady } from './domain/capture-pipeline.js';
@@ -185,6 +186,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
   const captureQueryGenerationRef = useRef(0);
   const duplicateRequestGenerationRef = useRef(0);
   const { rows: captureParts } = useRows('capture_part', profile, refreshKey, (query) => query.order('part_index'));
+  const { rows: voiceAssets } = useRows('capture_audio_asset', profile, refreshKey, (query) => query.order('created_at', { ascending: false }).limit(50));
   const { rows: captureLinks } = useRows('capture_link', profile, refreshKey);
   const { rows: processingRuns } = useRows('processing_run', profile, refreshKey, (query) => query.order('created_at', { ascending: false }).limit(100));
   const { rows: lists } = useRows('user_list', profile, refreshKey, (query) => query
@@ -778,6 +780,18 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
       onSaveOffline={offlineVaultStatus.unlocked ? saveOfflineCapture : undefined}
       onOfflineUnavailable={() => setOfflineVaultError('No hay conexión. Para guardar sin conexión, crea o desbloquea la bóveda privada primero.')}
     />
+    <VoiceCapture profile={profile} busy={busy || offlineVaultBusy} runAction={runAction} />
+    {voiceAssets.filter((asset) => !asset.capture_id).length > 0 && (
+      <section className="voice-asset-list" aria-label="Audios privados pendientes">
+        <strong>Audios privados pendientes</strong>
+        {voiceAssets.filter((asset) => !asset.capture_id).map((asset) => (
+          <div className="voice-asset-row" key={asset.id}>
+            <span>Audio original · {asset.status === 'uploaded' ? 'esperando transcripción' : asset.status === 'failed' ? 'falló la preparación' : 'preparándose'}</span>
+            {asset.retention_until && <small>Retención temporal hasta {new Intl.DateTimeFormat('es', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(asset.retention_until))}</small>}
+          </div>
+        ))}
+      </section>
+    )}
     <div className="inbox-list-wrap">
       <SectionTitle detail={visibleCaptures.length + ' visibles · ' + rows.length + ' cargadas de ' + totalCount + ' coincidencias en el archivo'}>Capturado recientemente</SectionTitle>
       {captureRecoveryError && <div className="form-error" role="alert">{captureRecoveryError}</div>}
