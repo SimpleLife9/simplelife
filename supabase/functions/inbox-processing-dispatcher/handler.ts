@@ -119,7 +119,12 @@ async function purgeExpiredAudioAssets(
 
   try {
     const removed = await admin.storage.from('inbox-voice-private').remove(objectPaths);
-    if (removed.error) return { purgedCount: 0, failed: true };
+    // Supabase Storage remove() has an array response contract. An empty array is
+    // a valid idempotent result when an earlier attempt already removed the object;
+    // a malformed/absent response is not proof that physical deletion completed.
+    if (removed.error || !Array.isArray(removed.data)) {
+      return { purgedCount: 0, failed: true };
+    }
   } catch {
     return { purgedCount: 0, failed: true };
   }
