@@ -1,4 +1,4 @@
-import { uuidv7 } from '../../../../lib/uuidv7.js';
+import { uuidv7 } from '../../../lib/uuidv7.js';
 
 const DB_NAME = 'simplelife-private-offline-v1';
 const DB_VERSION = 1;
