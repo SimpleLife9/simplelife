@@ -5,6 +5,8 @@ import { SectionTitle } from '../../shared/components/SectionTitle.jsx';
 import { EmptyState } from '../../shared/components/EmptyState.jsx';
 import { useRows } from '../../shared/hooks/useRows.js';
 import { CaptureComposer } from './components/CaptureComposer.jsx';
+import { OfflineVaultPanel } from './components/OfflineVaultPanel.jsx';
+import { createIndexedDbOfflineStorage, createOfflineCaptureVault } from './offline/private-offline-vault.js';
 import { CapturePartPersistenceError, persistTextCapture } from './data/capture-repository.js';
 import { getSuggestedDestinationType, isInboxDestinationReady } from './domain/capture-pipeline.js';
 
@@ -18,6 +20,162 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
   const [loading, setLoading] = useState(true);
   const [localError, setLocalError] = useState('');
   const [captureRecoveryError, setCaptureRecoveryError] = useState('');
+  const offlineVaultRef = useRef({ ownerId: null, vault: null });
+  if (profile?.id && offlineVaultRef.current.ownerId !== profile.id) {
+    let vault = null;
+    try {
+      vault = createOfflineCaptureVault({
+        storage: createIndexedDbOfflineStorage(
+          globalThis.indexedDB,
+          'simplelife-private-offline-v1-' + profile.id,
+        ),
+      });
+    } catch { /* private offline storage may be unavailable in this browser */ }
+    offlineVaultRef.current = { ownerId: profile.id, vault };
+  }
+  const offlineVault = offlineVaultRef.current.vault;
+  const [offlineVaultStatus, setOfflineVaultStatus] = useState({
+    configured: false, unlocked: false, queuedCount: 0, available: true, loading: true,
+  });
+  const [offlineQueuedCaptures, setOfflineQueuedCaptures] = useState([]);
+  const [offlinePassphrase, setOfflinePassphrase] = useState('');
+  const [offlineVaultBusy, setOfflineVaultBusy] = useState(false);
+  const [offlineVaultError, setOfflineVaultError] = useState('');
+  const [offlineVaultNotice, setOfflineVaultNotice] = useState('');
+  const [offlineOnline, setOfflineOnline] = useState(globalThis.navigator?.onLine !== false);
+
+  const refreshOfflineVaultState = async () => {
+    if (!offlineVault) {
+      setOfflineVaultStatus({
+        configured: false, unlocked: false, queuedCount: 0, available: false, loading: false,
+      });
+      setOfflineQueuedCaptures([]);
+      return;
+    }
+    try {
+      const status = await offlineVault.getStatus();
+      const queued = status.unlocked ? await offlineVault.listQueuedCaptures() : [];
+      setOfflineVaultStatus({ ...status, available: true, loading: false });
+      setOfflineQueuedCaptures(queued);
+    } catch {
+      setOfflineVaultStatus({
+        configured: false, unlocked: false, queuedCount: 0, available: false, loading: false,
+      });
+      setOfflineQueuedCaptures([]);
+    }
+  };
+
+  useEffect(() => {
+    let alive = true;
+    const refresh = async () => {
+      if (!offlineVault) {
+        if (alive) {
+          setOfflineVaultStatus({
+            configured: false, unlocked: false, queuedCount: 0, available: false, loading: false,
+          });
+        }
+        return;
+      }
+      try {
+        const status = await offlineVault.getStatus();
+        const queued = status.unlocked ? await offlineVault.listQueuedCaptures() : [];
+        if (alive) {
+          setOfflineVaultStatus({ ...status, available: true, loading: false });
+          setOfflineQueuedCaptures(queued);
+        }
+      } catch {
+        if (alive) {
+          setOfflineVaultStatus({
+            configured: false, unlocked: false, queuedCount: 0, available: false, loading: false,
+          });
+          setOfflineQueuedCaptures([]);
+        }
+      }
+    };
+    const onOnline = () => setOfflineOnline(true);
+    const onOffline = () => setOfflineOnline(false);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    void refresh();
+    return () => {
+      alive = false;
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
+  }, [profile?.id, offlineVault]);
+
+  const activateOfflineVault = async (event) => {
+    event.preventDefault();
+    if (!offlineVault || offlineVaultBusy) return;
+    setOfflineVaultBusy(true);
+    setOfflineVaultError('');
+    setOfflineVaultNotice('');
+    try {
+      if (offlineVaultStatus.configured) await offlineVault.unlock(offlinePassphrase);
+      else await offlineVault.create(offlinePassphrase);
+      setOfflinePassphrase('');
+      setOfflineVaultNotice('Bóveda privada desbloqueada en memoria. La frase no se almacena.');
+      await refreshOfflineVaultState();
+    } catch (error) {
+      setOfflineVaultError(error?.message || 'No se pudo desbloquear la bóveda privada.');
+    } finally {
+      setOfflineVaultBusy(false);
+    }
+  };
+
+  const lockOfflineVault = () => {
+    offlineVault?.lock();
+    setOfflinePassphrase('');
+    setOfflineQueuedCaptures([]);
+    setOfflineVaultError('');
+    setOfflineVaultNotice('Bóveda bloqueada. El contenido local permanece cifrado.');
+    void refreshOfflineVaultState();
+  };
+
+  const saveOfflineCapture = async (contentOriginal) => {
+    if (!offlineVault || !offlineVaultStatus.unlocked) {
+      setOfflineVaultError('Desbloquea primero la bóveda offline para guardar texto cifrado en este dispositivo.');
+      return false;
+    }
+    setOfflineVaultBusy(true);
+    setOfflineVaultError('');
+    try {
+      await offlineVault.saveTextCapture({ contentOriginal });
+      await refreshOfflineVaultState();
+      setOfflineVaultNotice('Captura cifrada guardada solo en este dispositivo. Se sincronizará cuando recuperes conexión.');
+      return true;
+    } catch (error) {
+      setOfflineVaultError(error?.message || 'No se pudo guardar la captura cifrada.');
+      return false;
+    } finally {
+      setOfflineVaultBusy(false);
+    }
+  };
+
+  const syncOfflineCaptures = () => runAction(async () => {
+    if (!offlineOnline) throw new Error('No hay conexión. Las capturas cifradas permanecen en el dispositivo.');
+    if (!offlineVault || !offlineVaultStatus.unlocked) throw new Error('Desbloquea la bóveda offline antes de sincronizar.');
+    const result = await offlineVault.syncPending(async (capture) => {
+      const { data, error } = await supabase.rpc('sync_inbox_offline_text_capture', {
+        p_capture_id: capture.captureId,
+        p_part_id: capture.partId,
+        p_content_original: capture.contentOriginal,
+        p_captured_at: capture.capturedAt,
+      });
+      if (error) throw error;
+      const row = Array.isArray(data) ? data[0] : data;
+      if (!row || row.capture_id !== capture.captureId || !row.part_id) {
+        throw new Error('OFFLINE_SYNC_RECEIPT_INVALID');
+      }
+      return { synced: true, replayed: row.replayed === true };
+    });
+    await refreshOfflineVaultState();
+    if (result.failed > 0) {
+      throw new Error(result.synced + ' captura(s) sincronizada(s); ' + result.failed + ' permanecen cifradas para reintentar.');
+    }
+    return result;
+  }, 'Capturas offline sincronizadas.');
+
   const [pageOffset, setPageOffset] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
   const [hasMore, setHasMore] = useState(false);
@@ -601,7 +759,25 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
   };
 
   return <div className="inbox-layout">
-    <CaptureComposer busy={busy} onSubmit={submit} />
+    <OfflineVaultPanel
+      status={{ ...offlineVaultStatus, available: offlineVaultStatus.available && Boolean(offlineVault), online: offlineOnline }}
+      passphrase={offlinePassphrase}
+      setPassphrase={setOfflinePassphrase}
+      busy={offlineVaultBusy}
+      error={offlineVaultError}
+      notice={offlineVaultNotice}
+      queuedCaptures={offlineQueuedCaptures}
+      online={offlineOnline}
+      onCreateOrUnlock={activateOfflineVault}
+      onLock={lockOfflineVault}
+      onSync={syncOfflineCaptures}
+    />
+    <CaptureComposer
+      busy={busy || offlineVaultBusy}
+      onSubmit={submit}
+      onSaveOffline={offlineVaultStatus.unlocked ? saveOfflineCapture : undefined}
+      onOfflineUnavailable={() => setOfflineVaultError('No hay conexión. Para guardar sin conexión, crea o desbloquea la bóveda privada primero.')}
+    />
     <div className="inbox-list-wrap">
       <SectionTitle detail={visibleCaptures.length + ' visibles · ' + rows.length + ' cargadas de ' + totalCount + ' coincidencias en el archivo'}>Capturado recientemente</SectionTitle>
       {captureRecoveryError && <div className="form-error" role="alert">{captureRecoveryError}</div>}
