@@ -1244,6 +1244,14 @@ test('Inbox supports search, review states, archiving, restore and original capt
   await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
   await expect(page.getByRole('heading', { name: 'Inbox', exact: true })).toBeVisible();
 
+  // The capability notice must match the implemented private voice/offline behavior.
+  const capabilityNotice = page.locator('.honest-note');
+  await expect(capabilityNotice).toContainText('reglas locales deterministas (no con un modelo de IA)');
+  await expect(capabilityNotice).toContainText('grabaciones de voz se guardan en almacenamiento privado');
+  await expect(capabilityNotice).toContainText('todavía no se transcriben ni se envían a un modelo');
+  await expect(capabilityNotice).toContainText('modo sin conexión cifra las capturas en este dispositivo');
+  await expect(capabilityNotice).toContainText('clave de recuperación fuera del dispositivo');
+
   // 1) Search the original capture text and show a clear no-match state.
   await expect(page.getByText('Llamar al proveedor antes del viernes')).toBeVisible();
   await expect(page.getByText('Idea para mejorar el negocio')).toHaveCount(0);
