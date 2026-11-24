@@ -1,6 +1,6 @@
 # Phase 2 — Owner Acceptance (Desktop + Physical Android)
 
-**Status:** Not yet owner-accepted. Automated Playwright viewport tests are not a substitute for these steps.
+**Status:** Technical DEV deployment partially verified on 24 November 2026; owner acceptance remains OPEN. Automated Playwright viewport tests are not a substitute for desktop/physical Android acceptance.
 **Target:** SimpleLife DEV deployment from the final exact PR #97 SHA.
 **Required evidence:** final deployed SHA, desktop browser/version, Android model + Android version + browser/PWA mode, date, and owner PASS/FAIL for each section.
 
@@ -41,17 +41,23 @@ Perform on the owner's actual Android phone, not a desktop emulator.
 Deployment order: apply the ordered Inbox migrations, deploy the queue/worker/process/dispatcher/scheduled Edge Functions, run `scripts/sql/bootstrap-inbox-scheduler-dev.sql` against `Simplelife_dev`, then run `scripts/sql/activate-inbox-scheduler.sql`. The bootstrap script stores only the public project URL/key in Vault; the migration generates the separate random scheduler token internally.
 
 - [ ] Confirm the DEV Edge Function `inbox-processing-scheduled` and dispatcher are deployed at the same SHA.
-- [ ] Confirm the named `simplelife-inbox-dispatcher` cron job is active at one-minute cadence.
-- [ ] Confirm the Vault token name exists without reading/decrypting it in the owner-facing evidence.
+- [x] Confirm the named `simplelife-inbox-dispatcher` cron job is active at one-minute cadence.
+- [x] Confirm the Vault token name exists without reading/decrypting it in the owner-facing evidence.
 - [ ] Confirm unauthenticated calls and wrong scheduler tokens return 401 and do not claim any work.
 - [ ] Enqueue one disposable owner-owned DEV capture. Confirm the scheduled run processes it, persists one unreviewed proposal batch and records the expected terminal state.
 - [ ] Confirm expired private voice objects are removed before their metadata/audit receipt is deleted.
 - [ ] Confirm scheduler failures are visible in cron/net/Edge logs without printing secrets or source audio.
 
+**DEV evidence read back — 24 November 2026:**
+- `simplelife-inbox-dispatcher` is active on `* * * * *` (one-minute cadence).
+- Vault metadata contains `inbox_scheduler_token`; the token value was not read or exposed. The private audio bucket `inbox-voice-private` is non-public.
+- Recent `pg_cron` executions report `succeeded`; the scheduled Edge endpoint has repeated `POST 200` responses in Edge logs.
+- This confirms scheduled endpoint invocation/authentication and dispatch response, not that an owner-owned capture was processed. A disposable capture E2E is still open; queue-empty responses are not proof of processing.
+
 ## 4. Explicit limitations requiring owner/provider approval
 
-- Actual AI classification remains unavailable until an allowed provider, model, region and credentials are approved.
-- Voice recording is private-storage-ready, but transcription remains disabled until a permitted provider/region/retention policy is approved.
+- **Model routing:** the owner authorized Cloudflare Workers AI as a fallback, but prefers to use ARIA's canonical Model Routing after its planned recovery on 26 November. Do not call either provider or send capture/audio content externally before that integration is reviewed and approved for the exact model, region, retention terms and free-only quota.
+- **Voice recording:** private audio capture/storage is implemented in DEV; transcription remains disabled until the provider route above is integrated and verified.
 - The offline vault recovers with its one-time 256-bit recovery key. If the owner loses both the passphrase and the recovery key, the locally encrypted queue is unrecoverable by design.
 - This DEV acceptance does not certify production deployment or production data migration.
 
