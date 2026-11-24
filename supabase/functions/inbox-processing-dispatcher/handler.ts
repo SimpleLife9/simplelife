@@ -108,7 +108,8 @@ async function purgeExpiredAudioAssets(
     const pathParts = candidate.object_path.split('/');
     if (pathParts.length !== 3 || !validUuid(pathParts[0])
       || pathParts[1] !== candidate.asset_id
-      || !/^source\\.(webm|ogg|m4a|wav|mp3)$/i.test(pathParts[2])) {
+      || pathParts[0] !== candidate.owner_user_id
+      || !/^source\.(webm|ogg|m4a|wav|mp3)$/i.test(pathParts[2])) {
       return { purgedCount: 0, failed: true };
     }
     assetIds.push(candidate.asset_id);
