@@ -159,6 +159,8 @@ async function mockSupabaseSession(page, initialData = {}) {
       'access-control-allow-origin': 'http://127.0.0.1:5173',
       'access-control-allow-methods': 'GET, POST, PATCH, DELETE, OPTIONS, HEAD',
       'access-control-allow-headers': 'apikey, authorization, content-type, x-client-info, x-supabase-api-version, prefer, idempotency-key',
+      // PostgREST count=exact is read from Content-Range by supabase-js; expose it to the browser.
+      'access-control-expose-headers': 'content-range',
       'access-control-max-age': '86400',
     };
 
