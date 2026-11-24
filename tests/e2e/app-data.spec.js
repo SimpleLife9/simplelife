@@ -431,6 +431,14 @@ async function mockSupabaseSession(page, initialData = {}) {
     if (url.pathname === '/rest/v1/capture_part' && method === 'POST') {
       const payload = request.postDataJSON();
       const rows = Array.isArray(payload) ? payload : [payload];
+      if (initialData.capturePartInitialInsertError
+        && rows.some((row) => !captureParts.some((existing) =>
+          existing.capture_id === row.capture_id && existing.part_index === row.part_index))) {
+        // The source capture was already committed; only its initial part failed.
+        initialData.capturePartInitialInsertError = false;
+        await json(500, { code: 'XX000', message: 'simulated initial capture_part insert failure' });
+        return;
+      }
       if (initialData.capturePartRecoveryConflict
         && rows.some((row) => !captureParts.some((existing) =>
           existing.capture_id === row.capture_id && existing.part_index === row.part_index))) {
@@ -1291,6 +1299,44 @@ test('Inbox supports search, review states, archiving, restore and original capt
   await expect(page.getByText(original)).toBeVisible();
 });
 
+
+test('Inbox clears the composer after a partial save so retry cannot duplicate the source capture', async ({ page }) => {
+  const { captures, insertedCaptures, captureParts, queueRequests, processingRequests } =
+    await mockSupabaseSession(page, {
+      captures: [],
+      captureParts: [],
+      capturePartInitialInsertError: true,
+    });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  const original = 'Comprar café para la semana';
+  const composer = page.getByPlaceholder('Escribe aquí lo que tienes en mente…');
+  await composer.fill(original);
+  await page.getByRole('button', { name: 'Guardar captura' }).click();
+
+  await expect(page.getByText('Captura guardada.')).toBeVisible();
+  await expect(composer).toHaveValue('');
+  await expect(page.getByRole('alert')).toContainText('No lo vuelvas a enviar');
+  expect(captures).toHaveLength(1);
+  expect(insertedCaptures).toHaveLength(1);
+  expect(insertedCaptures[0].content_original).toBe(original);
+  expect(captureParts).toHaveLength(0);
+  expect(queueRequests).toHaveLength(1);
+  expect(processingRequests).toHaveLength(1);
+
+  // The user can recover this same saved source instead of submitting it again.
+  await page.getByRole('button', { name: 'Organizar captura: ' + original }).click();
+  await expect(page.getByText('CAPTURA ORIGINAL · NO SE MODIFICA')).toBeVisible();
+  expect(captures).toHaveLength(1);
+  expect(insertedCaptures).toHaveLength(1);
+  expect(captureParts).toHaveLength(1);
+  expect(captureParts[0].original_fragment).toBe(original);
+});
 
 test('Inbox recovers and organizes a saved text capture whose first fragment insert previously failed', async ({ page }) => {
   const { captures, captureParts, insertedCaptureParts, captureLinks, insertedNoteIdeas, reviewRequests, updatedCaptures } =
