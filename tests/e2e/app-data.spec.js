@@ -431,6 +431,17 @@ async function mockSupabaseSession(page, initialData = {}) {
     if (url.pathname === '/rest/v1/capture_part' && method === 'POST') {
       const payload = request.postDataJSON();
       const rows = Array.isArray(payload) ? payload : [payload];
+      if (initialData.capturePartRecoveryConflict
+        && rows.some((row) => !captureParts.some((existing) =>
+          existing.capture_id === row.capture_id && existing.part_index === row.part_index))) {
+        // Simulate another tab winning the unique capture_id/part_index insert.
+        captureParts.push({
+          ...rows[0],
+          id: '00000000-0000-7000-8000-000000000210',
+        });
+        await json(409, { code: '23505', message: 'duplicate key value violates unique constraint capture_part_capture_id_part_index_key' });
+        return;
+      }
       captureParts.push(...rows);
       insertedCaptureParts.push(...rows);
       await json(201, rows, { 'content-range': '0-0/*' });
@@ -1308,6 +1319,37 @@ test('Inbox recovers and organizes a saved text capture whose first fragment ins
   expect(reviewRequests).toHaveLength(1);
   expect(reviewRequests[0].p_capture_part_id).toBe(insertedCaptureParts[0].id);
   expect(capture.attention_status).toBe('reviewed');
+  expect(updatedCaptures.some((row) => row.id === capture.id && row.attention_status === 'reviewed')).toBe(true);
+});
+
+test('Inbox reuses the exact initial part when another session wins the recovery insert race', async ({ page }) => {
+  const { captures, captureParts, insertedCaptureParts, captureLinks, insertedNoteIdeas, reviewRequests, updatedCaptures } =
+    await mockSupabaseSession(page, { captureParts: [], capturePartRecoveryConflict: true });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  const capture = captures[0];
+  await page.getByRole('button', { name: 'Organizar captura: ' + capture.content_original }).click();
+  await expect(page.getByText('CAPTURA ORIGINAL · NO SE MODIFICA')).toBeVisible();
+  expect(insertedCaptureParts).toHaveLength(0);
+  expect(captureParts).toHaveLength(1);
+  expect(captureParts[0]).toMatchObject({
+    id: '00000000-0000-7000-8000-000000000210',
+    capture_id: capture.id,
+    part_index: 0,
+    original_fragment: capture.content_original,
+  });
+
+  await page.getByRole('button', { name: 'Confirmar y organizar' }).click();
+  await expect(page.getByText('Captura guardada como nota.')).toBeVisible();
+  expect(insertedNoteIdeas).toHaveLength(1);
+  expect(captureLinks).toHaveLength(1);
+  expect(reviewRequests).toHaveLength(1);
+  expect(reviewRequests[0].p_capture_part_id).toBe(captureParts[0].id);
   expect(updatedCaptures.some((row) => row.id === capture.id && row.attention_status === 'reviewed')).toBe(true);
 });
 
