@@ -147,9 +147,8 @@ try {
       apikey: publishable,
       authorization: "Bearer " + token,
       "content-type": "application/json",
-      "idempotency-key": idempotencyKey,
     },
-    body: JSON.stringify({ captureId }),
+    body: JSON.stringify({ captureId, idempotencyKey }),
     signal: AbortSignal.timeout(15000),
   });
 
