@@ -46,6 +46,7 @@ Deno.test("dispatcher claims, processes and atomically completes a bounded due b
           return { data: job ? [{ ...job, attempt_number: 1 }] : [], error: null };
         }
         if (name === "complete_inbox_processing_run_with_parts") return { data: true, error: null };
+        if (name === "list_expired_inbox_audio_assets") return { data: [], error: null };
         if (name === "purge_expired_inbox_captures") return { data: [{ purged_count: 0, purged_capture_ids: [] }], error: null };
         throw new Error("Unexpected RPC " + name);
       },
@@ -98,6 +99,7 @@ Deno.test("dispatcher makes a persistence failure retryable and reports a lost l
         };
         if (name === "complete_inbox_processing_run_with_parts") return { data: false, error: { message: "db unavailable" } };
         if (name === "fail_inbox_processing_run") return { data: false, error: null };
+        if (name === "list_expired_inbox_audio_assets") return { data: [], error: null };
         if (name === "purge_expired_inbox_captures") return { data: [{ purged_count: 0, purged_capture_ids: [] }], error: null };
         return { data: false, error: null };
       },
@@ -112,4 +114,61 @@ Deno.test("dispatcher makes a persistence failure retryable and reports a lost l
   }
   if (!calls.includes("fail_inbox_processing_run")) throw new Error("A persistence failure did not attempt bounded retry state.");
   if (!calls.includes("purge_expired_inbox_captures")) throw new Error("Dispatcher did not invoke the retention purge.");
+});
+
+Deno.test("dispatcher removes expired private voice objects before deleting metadata and audit", async () => {
+  const AUDIO_ASSET = "019b5000-0000-7000-8000-000000000071";
+  const OWNER = "019b5000-0000-7000-8000-000000000072";
+  const objectPath = OWNER + "/" + AUDIO_ASSET + "/source.webm";
+  const calls: string[] = [];
+  const ctx = {
+    authMode: "secret",
+    supabaseAdmin: {
+      async rpc(name: string, args: Record<string, unknown>) {
+        calls.push(name);
+        if (name === "claim_inbox_processing_run") return { data: [], error: null };
+        if (name === "list_expired_inbox_audio_assets") return {
+          data: [{ asset_id: AUDIO_ASSET, bucket_id: "inbox-voice-private", object_path: objectPath }],
+          error: null,
+        };
+        if (name === "complete_inbox_audio_asset_purge") {
+          const ids = args.p_asset_ids as string[];
+          const auditIds = args.p_audit_ids as string[];
+          if (ids.length !== 1 || ids[0] !== AUDIO_ASSET || auditIds.length !== 1
+            || !/^019[0-9a-f-]{0,32}$/i.test(auditIds[0])) {
+            throw new Error("Audio purge RPC arguments were not bounded.");
+          }
+          return { data: 1, error: null };
+        }
+        if (name === "purge_expired_inbox_captures") {
+          return { data: [{ purged_count: 0, purged_capture_ids: [] }], error: null };
+        }
+        throw new Error("Unexpected RPC " + name);
+      },
+      storage: {
+        from(bucket: string) {
+          if (bucket !== "inbox-voice-private") throw new Error("Unexpected storage bucket.");
+          return {
+            async remove(paths: string[]) {
+              calls.push("storage.remove");
+              if (paths.length !== 1 || paths[0] !== objectPath) {
+                throw new Error("Unexpected private audio object path.");
+              }
+              return { data: [{ name: objectPath }], error: null };
+            },
+          };
+        },
+      },
+    },
+  };
+  const response = await handleRequest(request({ maxJobs: 1 }), ctx as never);
+  const result = await body(response);
+  if (response.status !== 200 || result.audioPurgedCount !== 1
+    || result.audioPurgeFailed !== false || result.purgeFailed !== false) {
+    throw new Error("Private audio retention did not complete successfully.");
+  }
+  if (calls.indexOf("storage.remove") < 0
+    || calls.indexOf("storage.remove") > calls.indexOf("complete_inbox_audio_asset_purge")) {
+    throw new Error("Audio metadata was deleted before its private Storage object.");
+  }
 });
