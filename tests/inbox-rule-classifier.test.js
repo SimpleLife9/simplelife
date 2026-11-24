@@ -9,6 +9,25 @@ test("rules engine proposes conservative category labels", () => {
   assert.equal(classifyInboxCapture("No olvidar la idea del menú")[0].category, "note_idea");
 });
 
+test("all eight Inbox categories have explicit deterministic classification coverage", () => {
+  const cases = [
+    ["task", "Comprar leche"],
+    ["event", "Mañana reunión con Ana"],
+    ["request", "Por favor, coordina con Ana"],
+    ["habit", "Todos los días entrenar treinta minutos"],
+    ["goal_subgoal", "Mi objetivo es correr cinco kilómetros"],
+    ["project", "Desarrollar un nuevo sistema de ventas"],
+    ["note_idea", "No olvidar la idea del menú"],
+    ["list", "Lista"],
+  ];
+  for (const [expectedCategory, source] of cases) {
+    const [proposal] = classifyInboxCapture(source);
+    assert.equal(proposal.category, expectedCategory, source);
+    assert.ok(proposal.confidence >= 0 && proposal.confidence <= 1, source);
+    assert.equal(typeof proposal.requiresClarification, "boolean", source);
+  }
+});
+
 test("multi-bullet input is split into reviewable parts without changing a character", () => {
   const source = "Pendientes:\n- Comprar café ☕\n- Llamar a Ana\n";
   const parts = classifyInboxCapture(source);
