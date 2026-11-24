@@ -135,7 +135,7 @@ Deno.test("dispatcher removes expired private voice objects before deleting meta
           const ids = args.p_asset_ids as string[];
           const auditIds = args.p_audit_ids as string[];
           if (ids.length !== 1 || ids[0] !== AUDIO_ASSET || auditIds.length !== 1
-            || !/^019[0-9a-f-]{0,32}$/i.test(auditIds[0])) {
+            || !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(auditIds[0])) {
             throw new Error("Audio purge RPC arguments were not bounded.");
           }
           return { data: 1, error: null };
