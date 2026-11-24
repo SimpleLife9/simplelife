@@ -65,14 +65,17 @@ CREATE TABLE public.capture_audio_asset (
 
 ALTER TABLE public.capture_audio_asset ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY capture_audio_asset_owner_self
-ON public.capture_audio_asset FOR ALL TO authenticated
+CREATE POLICY capture_audio_asset_owner_select
+ON public.capture_audio_asset FOR SELECT TO authenticated
 USING (
   owner_user_id IN (
     SELECT up.id FROM public.user_profile up
     WHERE up.auth_user_id=(SELECT auth.uid()) AND up.account_status='active'
   )
-)
+);
+
+CREATE POLICY capture_audio_asset_owner_insert
+ON public.capture_audio_asset FOR INSERT TO authenticated
 WITH CHECK (
   owner_user_id IN (
     SELECT up.id FROM public.user_profile up
@@ -83,19 +86,13 @@ WITH CHECK (
     WHERE up.auth_user_id=(SELECT auth.uid()) AND up.account_status='active'
   )
   AND object_path LIKE owner_user_id::text || '/%'
-  AND (capture_id IS NULL OR EXISTS (
-    SELECT 1 FROM public.capture c
-    WHERE c.id=capture_id AND c.owner_user_id=owner_user_id
-      AND c.deleted_at IS NULL
-  ))
+  AND status='uploading'
+  AND capture_id IS NULL
+  AND transcript_text IS NULL
 );
 
 GRANT SELECT, INSERT ON TABLE public.capture_audio_asset TO authenticated;
-GRANT UPDATE (status, file_size_bytes, sha256_hex, uploaded_at, capture_id,
-  transcript_text, transcription_provider, transcription_model, transcription_region,
-  transcribed_at, retention_until)
-ON TABLE public.capture_audio_asset TO authenticated;
-REVOKE DELETE ON TABLE public.capture_audio_asset FROM PUBLIC, anon, authenticated;
+REVOKE UPDATE, DELETE ON TABLE public.capture_audio_asset FROM PUBLIC, anon, authenticated;
 
 CREATE POLICY inbox_voice_private_owner_insert
 ON storage.objects FOR INSERT TO authenticated
@@ -136,7 +133,7 @@ CREATE OR REPLACE FUNCTION public.finalize_inbox_audio_upload(
   p_sha256_hex text
 )
 RETURNS boolean
-LANGUAGE plpgsql VOLATILE SECURITY INVOKER
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $function$
 DECLARE
@@ -191,7 +188,7 @@ CREATE OR REPLACE FUNCTION public.record_inbox_voice_transcription(
   p_region text
 )
 RETURNS TABLE(capture_id uuid, part_id uuid)
-LANGUAGE plpgsql VOLATILE SECURITY INVOKER
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $function$
 DECLARE
