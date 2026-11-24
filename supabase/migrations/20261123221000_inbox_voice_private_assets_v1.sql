@@ -50,7 +50,16 @@ CREATE TABLE public.capture_audio_asset (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CHECK ((get_byte(uuid_send(id),6) >> 4)=7 AND (get_byte(uuid_send(id),8) & 192)=128),
-  CHECK (left(object_path,length(owner_user_id::text)+1)=owner_user_id::text || '/'),
+  CHECK (
+    object_path = owner_user_id::text || '/' || id::text || '/source.' ||
+    CASE mime_type
+      WHEN 'audio/webm' THEN 'webm'
+      WHEN 'audio/ogg' THEN 'ogg'
+      WHEN 'audio/mp4' THEN 'm4a'
+      WHEN 'audio/wav' THEN 'wav'
+      WHEN 'audio/mpeg' THEN 'mp3'
+    END
+  ),
   CHECK (
     (status <> 'transcribed')
     OR (
@@ -119,7 +128,7 @@ USING (
   bucket_id='inbox-voice-private'
   AND EXISTS (
     SELECT 1 FROM public.capture_audio_asset aa
-    WHERE aa.object_path=name AND aa.bucket_id=bucket_id
+    WHERE aa.object_path=name AND aa.bucket_id='inbox-voice-private'
       AND aa.owner_user_id IN (
         SELECT up.id FROM public.user_profile up
         WHERE up.auth_user_id=(SELECT auth.uid()) AND up.account_status='active'
@@ -139,13 +148,18 @@ AS $function$
 DECLARE
   v_owner_profile_id uuid;
   v_rows integer;
+  v_storage_size bigint;
+  v_object_found boolean := false;
 BEGIN
   IF auth.uid() IS NULL THEN
     RAISE EXCEPTION 'A signed-in user is required' USING ERRCODE='42501';
   END IF;
+  IF p_owner_profile_id IS NULL THEN
+    RAISE EXCEPTION 'A verified owner profile is required' USING ERRCODE='42501';
+  END IF;
   SELECT up.id INTO v_owner_profile_id
   FROM public.user_profile up
-  WHERE up.auth_user_id=auth.uid() AND up.account_status='active';
+  WHERE up.id=p_owner_profile_id AND up.account_status='active';
   IF v_owner_profile_id IS NULL THEN
     RAISE EXCEPTION 'An active SimpleLife profile is required' USING ERRCODE='42501';
   END IF;
@@ -155,6 +169,19 @@ BEGIN
      OR p_file_size_bytes IS NULL OR p_file_size_bytes NOT BETWEEN 1 AND 26214400
      OR p_sha256_hex IS NULL OR p_sha256_hex !~ '^[0-9a-fA-F]{64}$' THEN
     RAISE EXCEPTION 'Audio upload metadata is invalid' USING ERRCODE='22023';
+  END IF;
+
+  SELECT aa.owner_user_id, (o.metadata->>'size')::bigint, true
+  INTO v_owner_profile_id, v_storage_size, v_object_found
+  FROM public.capture_audio_asset aa
+  JOIN storage.objects o
+    ON o.bucket_id='inbox-voice-private' AND o.name=aa.object_path
+  WHERE aa.id=p_asset_id
+    AND aa.owner_user_id=v_owner_profile_id
+    AND aa.status='uploading';
+  IF NOT FOUND OR NOT v_object_found OR v_storage_size <> p_file_size_bytes THEN
+    RAISE EXCEPTION 'Uploaded private audio size does not match its registered metadata'
+      USING ERRCODE='22023';
   END IF;
 
   UPDATE public.capture_audio_asset aa
@@ -179,6 +206,7 @@ GRANT EXECUTE ON FUNCTION public.finalize_inbox_audio_upload(uuid,integer,text)
   TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.record_inbox_voice_transcription(
+  p_owner_profile_id uuid,
   p_asset_id uuid,
   p_capture_id uuid,
   p_part_id uuid,
@@ -256,12 +284,12 @@ BEGIN
   RETURN QUERY SELECT p_capture_id, p_part_id;
 END;
 $function$;
-ALTER FUNCTION public.record_inbox_voice_transcription(uuid,uuid,uuid,text,text,text,text)
+ALTER FUNCTION public.record_inbox_voice_transcription(uuid,uuid,uuid,uuid,text,text,text,text)
   OWNER TO postgres;
-REVOKE ALL PRIVILEGES ON FUNCTION public.record_inbox_voice_transcription(uuid,uuid,uuid,text,text,text,text)
-  FROM PUBLIC, anon, service_role;
-GRANT EXECUTE ON FUNCTION public.record_inbox_voice_transcription(uuid,uuid,uuid,text,text,text,text)
-  TO authenticated;
+REVOKE ALL PRIVILEGES ON FUNCTION public.record_inbox_voice_transcription(uuid,uuid,uuid,uuid,text,text,text,text)
+  FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.record_inbox_voice_transcription(uuid,uuid,uuid,uuid,text,text,text,text)
+  TO service_role;
 
 CREATE OR REPLACE FUNCTION private.sync_capture_audio_retention()
 RETURNS trigger
