@@ -72,7 +72,20 @@ BEGIN
  IF v_count <> 0 THEN RAISE EXCEPTION 'Owner B queried Owner A duplicate metadata'; END IF;
  SELECT count(*) INTO v_count FROM public.capture
  WHERE search_document @@ websearch_to_tsquery('simple', 'premium oficina');
- IF v_count <> 0 THEN RAISE EXCEPTION 'Owner B full-text search can read Owner A captures'; END IF;
+ IF v_count <> 1 THEN
+   RAISE EXCEPTION 'Owner B should see exactly its own matching capture, found %', v_count;
+ END IF;
+ IF EXISTS (
+   SELECT 1 FROM public.capture
+   WHERE id IN (
+     '019b4000-0000-7000-8000-000000000101',
+     '019b4000-0000-7000-8000-000000000102',
+     '019b4000-0000-7000-8000-000000000103'
+   )
+     AND search_document @@ websearch_to_tsquery('simple', 'premium oficina')
+ ) THEN
+   RAISE EXCEPTION 'Owner B full-text search can read Owner A captures';
+ END IF;
 END;
 $test$;
 RESET ROLE;
