@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { createSingleSubmissionGate } from '../domain/capture-pipeline.js';
 
-export function CaptureComposer({ busy = false, onSubmit }) {
+export function CaptureComposer({ busy = false, onSubmit, onSaveOffline, onOfflineUnavailable }) {
   const [contentOriginal, setContentOriginal] = useState('');
   const submissionGate = useRef(null);
 
@@ -14,7 +14,20 @@ export function CaptureComposer({ busy = false, onSubmit }) {
     const source = contentOriginal;
     if (!source.trim()) return;
 
-    const saved = await submissionGate.current(() => onSubmit(source));
+    const offline = globalThis.navigator?.onLine === false;
+    if (offline && !onSaveOffline) {
+      onOfflineUnavailable?.();
+      return;
+    }
+    const operation = offline ? onSaveOffline : onSubmit;
+    const saved = await submissionGate.current(() => operation(source));
+    if (saved) setContentOriginal('');
+  };
+
+  const handleSaveOffline = async () => {
+    const source = contentOriginal;
+    if (!source.trim() || !onSaveOffline) return;
+    const saved = await submissionGate.current(() => onSaveOffline(source));
     if (saved) setContentOriginal('');
   };
 
@@ -39,9 +52,16 @@ export function CaptureComposer({ busy = false, onSubmit }) {
         />
         <div className="composer-bottom">
           <span>✦ El original se conserva sin alteraciones.</span>
-          <button className="button button-primary" disabled={busy || !contentOriginal.trim()}>
-            Guardar captura <span>→</span>
-          </button>
+          <div className="composer-capture-actions">
+            {onSaveOffline && (
+              <button type="button" className="capture-action-button" disabled={busy || !contentOriginal.trim()} onClick={handleSaveOffline}>
+                Guardar cifrada
+              </button>
+            )}
+            <button className="button button-primary" disabled={busy || !contentOriginal.trim()}>
+              {globalThis.navigator?.onLine === false ? 'Guardar offline' : 'Guardar captura'} <span>→</span>
+            </button>
+          </div>
         </div>
       </form>
     </div>
