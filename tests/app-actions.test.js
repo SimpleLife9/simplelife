@@ -44,6 +44,24 @@ test('runAction reports an operation error and does not refresh on failure', asy
   assert.equal(scheduled.length, 0);
 });
 
+test('runAction can route errors to a local handler without showing the global banner', async () => {
+  const { state, scheduled, actions } = createHarness();
+  let inlineError = null;
+  const result = await actions.runAction(async () => {
+    throw new Error('Network unavailable');
+  }, 'No debe mostrarse', {
+    onError: (error) => { inlineError = error.message; },
+  });
+
+  assert.equal(result, false);
+  assert.equal(state.busy, false);
+  assert.equal(state.error, '');
+  assert.equal(state.notice, '');
+  assert.equal(state.refreshKey, 0);
+  assert.equal(inlineError, 'Network unavailable');
+  assert.equal(scheduled.length, 0);
+});
+
 test('notice timeout does not erase a newer notice', () => {
   const { state, scheduled, actions } = createHarness();
   actions.showNotice('Primera operación');
