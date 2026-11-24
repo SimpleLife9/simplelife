@@ -114,6 +114,17 @@ Deno.test("voice finalizer hashes the downloaded private Storage bytes before th
   }
 });
 
+Deno.test("voice finalizer re-verifies uploaded assets and returns an idempotent replay receipt", async () => {
+  const sha256 = await digest(AUDIO);
+  const fixture = context({ assetOverrides: { sha256_hex: sha256, status: "uploaded" } });
+  const response = await handleRequest(request(), fixture.ctx as never);
+  if (response.status !== 200) throw new Error("verified retry of an uploaded asset failed");
+  const result = await response.json();
+  if (result.verified !== true || result.replayed !== true || fixture.calls.rpc.length !== 1) {
+    throw new Error("uploaded asset retry was not verified and acknowledged idempotently");
+  }
+});
+
 Deno.test("voice finalizer rejects bytes whose actual SHA-256 differs from client metadata", async () => {
   const otherBytes = new TextEncoder().encode("different voice fixture bytes");
   const fixture = context({
