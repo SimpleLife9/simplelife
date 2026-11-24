@@ -38,6 +38,8 @@ Perform on the owner's actual Android phone, not a desktop emulator.
 
 ## 3. Hosted scheduler acceptance (DEV only)
 
+Deployment order: apply the ordered Inbox migrations, deploy the queue/worker/process/dispatcher/scheduled Edge Functions, run `scripts/sql/bootstrap-inbox-scheduler-dev.sql` against `Simplelife_dev`, then run `scripts/sql/activate-inbox-scheduler.sql`. The bootstrap script stores only the public project URL/key in Vault; the migration generates the separate random scheduler token internally.
+
 - [ ] Confirm the DEV Edge Function `inbox-processing-scheduled` and dispatcher are deployed at the same SHA.
 - [ ] Confirm the named `simplelife-inbox-dispatcher` cron job is active at one-minute cadence.
 - [ ] Confirm the Vault token name exists without reading/decrypting it in the owner-facing evidence.
