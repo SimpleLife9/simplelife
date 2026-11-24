@@ -70,6 +70,54 @@ INSERT INTO public.capture_audio_asset (
   'audio/webm', 4096, repeat('a',64)
 );
 
+
+-- The browser may create staging metadata, but cannot disable or extend
+-- the seven-day cleanup window with client-controlled retention values.
+DO $test$
+DECLARE
+  v_null_denied boolean := false;
+  v_future_denied boolean := false;
+BEGIN
+  BEGIN
+    INSERT INTO public.capture_audio_asset (
+      id,owner_user_id,created_by_user_id,bucket_id,object_path,mime_type,
+      file_size_bytes,sha256_hex,retention_until,status
+    ) VALUES (
+      '019b7200-0000-7000-8000-000000000106',
+      '019b7200-0000-7000-8000-000000000001',
+      '019b7200-0000-7000-8000-000000000001',
+      'inbox-voice-private',
+      '019b7200-0000-7000-8000-000000000001/019b7200-0000-7000-8000-000000000106/source.webm',
+      'audio/webm',1024,repeat('c',64),NULL,'uploading'
+    );
+  EXCEPTION WHEN insufficient_privilege THEN
+    v_null_denied := true;
+  END;
+  IF NOT v_null_denied THEN
+    RAISE EXCEPTION 'Authenticated owner bypassed staging retention with NULL';
+  END IF;
+
+  BEGIN
+    INSERT INTO public.capture_audio_asset (
+      id,owner_user_id,created_by_user_id,bucket_id,object_path,mime_type,
+      file_size_bytes,sha256_hex,retention_until,status
+    ) VALUES (
+      '019b7200-0000-7000-8000-000000000107',
+      '019b7200-0000-7000-8000-000000000001',
+      '019b7200-0000-7000-8000-000000000001',
+      'inbox-voice-private',
+      '019b7200-0000-7000-8000-000000000107/source.webm',
+      'audio/webm',1024,repeat('d',64),statement_timestamp()+interval '8 days','uploading'
+    );
+  EXCEPTION WHEN insufficient_privilege THEN
+    v_future_denied := true;
+  END;
+  IF NOT v_future_denied THEN
+    RAISE EXCEPTION 'Authenticated owner extended staging retention beyond seven days';
+  END IF;
+END;
+$test$;
+
 INSERT INTO storage.objects (bucket_id, name, owner_id, metadata)
 VALUES (
   'inbox-voice-private',
