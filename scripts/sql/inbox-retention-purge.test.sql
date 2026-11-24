@@ -110,12 +110,20 @@ END;
 $test$;
 RESET ROLE;
 
--- Inspect the append-only audit receipt as the local database owner. The
--- purge service deliberately has INSERT but not SELECT on audit_event.
+-- Inspect the append-only audit receipt as the local database owner.
+-- The purge function is SECURITY DEFINER; service_role receives EXECUTE only,
+-- never direct privileges on the immutable audit table.
 DO $test$
 BEGIN
- IF has_table_privilege('service_role','public.audit_event','SELECT') THEN
-   RAISE EXCEPTION 'Purge service must not receive broad audit_event SELECT access';
+ IF has_table_privilege('service_role','public.audit_event','SELECT')
+    OR has_table_privilege('service_role','public.audit_event','INSERT')
+    OR has_table_privilege('service_role','public.audit_event','UPDATE')
+    OR has_table_privilege('service_role','public.audit_event','DELETE')
+    OR has_table_privilege('service_role','public.audit_event','TRUNCATE')
+    OR has_table_privilege('service_role','public.audit_event','REFERENCES')
+    OR has_table_privilege('service_role','public.audit_event','TRIGGER')
+    OR has_table_privilege('service_role','public.audit_event','MAINTAIN') THEN
+   RAISE EXCEPTION 'Purge service must not receive direct audit_event privileges';
  END IF;
  IF NOT EXISTS (
    SELECT 1 FROM public.audit_event
