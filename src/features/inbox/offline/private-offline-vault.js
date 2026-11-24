@@ -39,14 +39,14 @@ function makeRequestPromise(request) {
 }
 
 /** IndexedDB contains only AES-GCM ciphertext and non-sensitive queue metadata. */
-export function createIndexedDbOfflineStorage(indexedDb = globalThis.indexedDB) {
+export function createIndexedDbOfflineStorage(indexedDb = globalThis.indexedDB, databaseName = DB_NAME) {
   assert(indexedDb?.open, 'PRIVATE_OFFLINE_STORAGE_UNAVAILABLE');
 
   let databasePromise;
   const openDatabase = () => {
     if (!databasePromise) {
       databasePromise = new Promise((resolve, reject) => {
-        const request = indexedDb.open(DB_NAME, DB_VERSION);
+        const request = indexedDb.open(databaseName, DB_VERSION);
         request.onupgradeneeded = () => {
           const database = request.result;
           if (!database.objectStoreNames.contains(SETTINGS_STORE)) {
