@@ -106,6 +106,17 @@ BEGIN
  IF NOT EXISTS (SELECT 1 FROM public.capture WHERE id='019b6200-0000-7000-8000-000000000203') THEN
    RAISE EXCEPTION 'Purger removed a capture with a live worker lease';
  END IF;
+END;
+$test$;
+RESET ROLE;
+
+-- Inspect the append-only audit receipt as the local database owner. The
+-- purge service deliberately has INSERT but not SELECT on audit_event.
+DO $test$
+BEGIN
+ IF has_table_privilege('service_role','public.audit_event','SELECT') THEN
+   RAISE EXCEPTION 'Purge service must not receive broad audit_event SELECT access';
+ END IF;
  IF NOT EXISTS (
    SELECT 1 FROM public.audit_event
    WHERE id='019b6200-0000-7000-8000-000000000801'
@@ -113,10 +124,11 @@ BEGIN
      AND entity_id='019b6200-0000-7000-8000-000000000201'
      AND source='system' AND actor_user_id IS NULL
      AND details->>'content_removed'='true'
- ) THEN RAISE EXCEPTION 'Physical purge did not append its privacy-safe audit record'; END IF;
+ ) THEN
+   RAISE EXCEPTION 'Physical purge did not append its privacy-safe audit record';
+ END IF;
 END;
 $test$;
-RESET ROLE;
 
 SET LOCAL ROLE authenticated;
 SET LOCAL request.jwt.claim.sub='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
