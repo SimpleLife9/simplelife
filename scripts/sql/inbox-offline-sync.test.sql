@@ -25,8 +25,6 @@ BEGIN
   IF NOT has_function_privilege('authenticated',
       'public.sync_inbox_offline_text_capture(uuid,uuid,text,timestamptz)','EXECUTE')
      OR has_function_privilege('anon',
-      'public.sync_inbox_offline_text_capture(uuid,uuid,text,timestamptz)','EXECUTE')
-     OR has_function_privilege('PUBLIC',
       'public.sync_inbox_offline_text_capture(uuid,uuid,text,timestamptz)','EXECUTE') THEN
     RAISE EXCEPTION 'Offline sync RPC grants must be authenticated-only';
   END IF;
