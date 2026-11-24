@@ -40,10 +40,11 @@ Perform on the owner's actual Android phone, not a desktop emulator.
 
 Deployment order: apply the ordered Inbox migrations, deploy the queue/worker/process/dispatcher/scheduled Edge Functions, run `scripts/sql/bootstrap-inbox-scheduler-dev.sql` against `Simplelife_dev`, then run `scripts/sql/activate-inbox-scheduler.sql`. The bootstrap script stores only the public project URL/key in Vault; the migration generates the separate random scheduler token internally.
 
-- [ ] Confirm the DEV Edge Function `inbox-processing-scheduled` and dispatcher are deployed at the same SHA.
+- [x] Confirm the DEV Edge Function `inbox-processing-scheduled` and dispatcher are deployed from the recorded final DEV source SHA.
 - [x] Confirm the named `simplelife-inbox-dispatcher` cron job is active at one-minute cadence.
 - [x] Confirm the Vault token name exists without reading/decrypting it in the owner-facing evidence.
-- [ ] Confirm unauthenticated calls and wrong scheduler tokens return 401 and do not claim any work.
+- [x] Confirm wrong scheduler tokens return 401 and do not dispatch or claim work.
+- [ ] Confirm a request with no `x-inbox-scheduler-token` returns 401 in the deployed DEV endpoint (automated Deno regression added; hosted probe still to run).
 - [ ] Enqueue one disposable owner-owned DEV capture. Confirm the scheduled run processes it, persists one unreviewed proposal batch and records the expected terminal state.
 - [ ] Confirm expired private voice objects are removed before their metadata/audit receipt is deleted.
 - [ ] Confirm scheduler failures are visible in cron/net/Edge logs without printing secrets or source audio.

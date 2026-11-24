@@ -74,6 +74,31 @@ Deno.test("scheduled endpoint refuses invalid tokens without dispatching", async
   }
 });
 
+Deno.test("scheduled endpoint rejects requests without a scheduler token before dispatch", async () => {
+  let calls = 0;
+  const missingToken = new Request("https://local.test/scheduled", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  });
+  const response = await handleRequest(missingToken, {
+    env: (name) => {
+      const values: Record<string, string> = {
+        SUPABASE_URL: URL,
+        SUPABASE_SECRET_KEYS: JSON.stringify({ default: SECRET }),
+      };
+      return values[name];
+    },
+    fetcher: async () => {
+      calls += 1;
+      return new Response("false", { status: 200 });
+    },
+  });
+  if (response.status !== 401 || calls !== 0) {
+    throw new Error("A request without the scheduler token reached validation or dispatch.");
+  }
+});
+
 Deno.test("scheduled endpoint fails closed for missing secret configuration and oversized payloads", async () => {
   const missing = await handleRequest(request(), {
     env: () => undefined,
