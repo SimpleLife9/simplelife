@@ -25,6 +25,13 @@ ALTER TABLE public.capture_link VALIDATE CONSTRAINT capture_link_exactly_one_tar
 CREATE INDEX capture_link_calendar_event_id_idx
   ON public.capture_link(calendar_event_id) WHERE calendar_event_id IS NOT NULL;
 
+-- The Inbox UI supports one confirmed destination per source fragment.
+-- Suggested/rejected alternatives may remain, but concurrent confirmations
+-- must serialize through this database invariant.
+CREATE UNIQUE INDEX capture_link_one_confirmed_per_part_uq
+  ON public.capture_link(capture_part_id)
+  WHERE link_status = 'confirmed';
+
 DROP POLICY capture_link_self ON public.capture_link;
 CREATE POLICY capture_link_self ON public.capture_link FOR ALL TO authenticated
 USING (
