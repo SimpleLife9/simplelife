@@ -91,7 +91,7 @@ BEGIN
  IF v_count <> 0 THEN RAISE EXCEPTION 'Owner B can read owner A Event provenance link'; END IF;
  BEGIN
    INSERT INTO public.capture_link(id,capture_part_id,calendar_event_id,link_status)
-   VALUES('019b3000-0000-7000-8000-000000000402',
+   VALUES('019b3000-0000-7000-8000-000000000404',
           '019b3000-0000-7000-8000-000000000302',
           '019b3000-0000-7000-8000-000000000101','confirmed');
    RAISE EXCEPTION 'Owner B unexpectedly linked a capture to owner A Event';
