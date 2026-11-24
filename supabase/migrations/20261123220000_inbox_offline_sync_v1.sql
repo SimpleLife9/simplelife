@@ -92,7 +92,7 @@ BEGIN
   ) VALUES (
     p_part_id, p_capture_id, 0, p_content_original
   )
-  ON CONFLICT (capture_id, part_index) DO NOTHING;
+  ON CONFLICT ON CONSTRAINT capture_part_capture_id_part_index_key DO NOTHING;
   GET DIAGNOSTICS v_part_inserted = ROW_COUNT;
 
   SELECT cp.*
