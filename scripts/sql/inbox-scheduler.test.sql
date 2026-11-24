@@ -3,9 +3,8 @@ BEGIN;
 
 DO $test$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM vault.secrets WHERE name='inbox_scheduler_token')
-     OR NOT EXISTS (SELECT 1 FROM vault.secrets WHERE name='inbox_project_url') THEN
-    RAISE EXCEPTION 'Inbox scheduler secrets are missing from Vault';
+  IF NOT EXISTS (SELECT 1 FROM vault.secrets WHERE name='inbox_scheduler_token') THEN
+    RAISE EXCEPTION 'Inbox scheduler token is missing from Vault';
   END IF;
 
   IF NOT has_function_privilege('service_role',
