@@ -2156,6 +2156,8 @@ test('Inbox converts a capture into a task and preserves its source link', async
   await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
 
   const original = captures[0].content_original;
+  const initialCaptureRow = page.locator('.capture-row').filter({ hasText: original });
+  await expect(initialCaptureRow.getByRole('button', { name: 'Descartar sugerencia' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Organizar captura: ' + original }).click();
   await page.getByLabel('Tipo de destino').selectOption('task');
   await page.getByLabel('Título de la tarea').fill('Llamar al proveedor');
@@ -2186,6 +2188,10 @@ test('Inbox converts a capture into a task and preserves its source link', async
 
   await page.getByLabel('Filtrar capturas por revisión').selectOption('organized');
   await expect(page.getByText('Organizada · Tarea')).toBeVisible();
+  const organizedCaptureRow = page.locator('.capture-row').filter({ hasText: original });
+  await expect(organizedCaptureRow.getByRole('button', { name: 'Generar sugerencias' })).toHaveCount(0);
+  await expect(organizedCaptureRow.getByRole('button', { name: 'Reintentar procesamiento' })).toHaveCount(0);
+  await expect(organizedCaptureRow.getByRole('button', { name: 'Descartar sugerencia' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Organizar captura: ' + original })).toHaveCount(0);
   await page.getByRole('button', { name: 'Archivar captura: ' + original }).click();
   await expect(page.getByText('Organizada · Tarea · Archivada')).toBeVisible();
