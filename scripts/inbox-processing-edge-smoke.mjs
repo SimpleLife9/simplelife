@@ -404,6 +404,10 @@ try {
   const finalizedVoiceBody = await responseJson(finalizedVoice, "server-verified voice finalization");
   equal(finalizedVoiceBody.verified, true, "server digest verification receipt");
   equal(finalizedVoiceBody.assetId, voiceAssetId, "server digest asset identity");
+  const replayedVoice = await finalizeVoice(ownerA.accessToken, voiceAssetId);
+  equal(replayedVoice.status, 200, "verified voice finalization retry status");
+  equal((await responseJson(replayedVoice, "verified voice finalization retry")).replayed, true,
+    "verified voice finalization replay marker");
   equal(sqlScalar(
     "SELECT status || ':' || sha256_hex FROM public.capture_audio_asset WHERE id='" + voiceAssetId + "'::uuid",
   ), "uploaded:" + voiceSha256, "server-computed digest persisted");
