@@ -600,6 +600,10 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
         <div className="capture-list">{visibleCaptures.map((capture) => {
           const parts = getCaptureParts(capture.id);
           const part = parts[0];
+          // A processed/manual-reviewed fragment must never be sent back through
+          // the whole-capture processor, which correctly refuses to overwrite it.
+          const canProcessCapture = parts.length === 0
+            || parts.every((capturePart) => capturePart.review_status === 'unreviewed');
           const confirmedLink = getConfirmedLink(capture.id);
           const processingRun = processingRuns.find((run) => run.capture_id === capture.id);
           const proposals = processingRun?.result?.proposals || [];
@@ -649,7 +653,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
                   {capturePart.original_fragment !== capture.content_original && <p>{capturePart.original_fragment}</p>}
                   {partLink ? <span className="muted">Destino vinculado y trazable.</span> : <>
                     <button type="button" className="capture-action-button" disabled={busy || capture.attention_status === 'archived' || Boolean(capture.deleted_at)} onClick={() => openOrganizer(capture, capturePart)}>Revisar y confirmar destino</button>
-                    {capturePart.review_status === 'unreviewed' && !capture.deleted_at && <button type="button" className="capture-action-button capture-archive-button" disabled={busy} onClick={() => discardPartSuggestion(capturePart)}>Descartar sugerencia</button>}
+                    {capture.processing_status === 'processed' && capturePart.review_status === 'unreviewed' && !capture.deleted_at && <button type="button" className="capture-action-button capture-archive-button" disabled={busy} onClick={() => discardPartSuggestion(capturePart)}>Descartar sugerencia</button>}
                     {capturePart.review_status === 'rejected' && <span className="muted">Sugerencia descartada por el propietario.</span>}
                   </>}
                 </div>;
@@ -659,7 +663,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
                   ? <span className="capture-status capture-status-organized">Organizada · {label}{capture.attention_status === 'archived' ? ' · Archivada' : ''}</span>
                   : <span className={'capture-status capture-status-' + capture.attention_status}>{attentionLabels[capture.attention_status] || 'Pendiente de revisión'}</span>}
                 {capture.deleted_at ? <button type="button" className="capture-action-button" disabled={busy} onClick={() => restoreTrashedCapture(capture)}>Restaurar desde papelera</button> : <>
-                {capture.processing_status !== 'processed' && capture.attention_status !== 'archived' ? <button type="button" className="capture-action-button" disabled={busy} onClick={() => processCapture(capture)}>{capture.processing_status === 'queued' || capture.processing_status === 'processing' ? 'Reintentar procesamiento' : 'Generar sugerencias'}</button> : null}
+                {capture.processing_status !== 'processed' && capture.attention_status !== 'archived' && canProcessCapture ? <button type="button" className="capture-action-button" disabled={busy} onClick={() => processCapture(capture)}>{capture.processing_status === 'queued' || capture.processing_status === 'processing' ? 'Reintentar procesamiento' : 'Generar sugerencias'}</button> : null}
                 {confirmedLink ? (
                   <>
                     <button type="button" className="capture-action-button" onClick={() => openOrganizedTarget(confirmedLink)}>{'Abrir ' + ({ event: 'Agenda', task: 'tareas', note_idea: 'notas e ideas', list: 'listas', goal_subgoal: 'metas', project: 'proyectos' }[linkKind] || 'destino')} →</button>
