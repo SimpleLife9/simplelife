@@ -85,7 +85,7 @@ function toHex(bytes: ArrayBuffer): string {
 function validAsset(asset: AudioAsset, assetId: string, ownerProfileId: string): boolean {
   if (asset.id !== assetId || asset.owner_user_id !== ownerProfileId
     || asset.bucket_id !== BUCKET || asset.capture_id !== null
-    || asset.status !== "uploading"
+    || (asset.status !== "uploading" && asset.status !== "uploaded")
     || typeof asset.object_path !== "string"
     || typeof asset.mime_type !== "string"
     || typeof asset.file_size_bytes !== "number"
@@ -193,5 +193,5 @@ export async function handleRequest(request: Request, ctx: Context): Promise<Res
   if (finalized.error) return json({ error: "VOICE_UPLOAD_FINALIZATION_FAILED" }, 503);
   if (finalized.data !== true) return json({ error: "VOICE_UPLOAD_FINALIZATION_NOT_CONFIRMED" }, 409);
 
-  return json({ assetId, verified: true }, 200);
+  return json({ assetId, verified: true, replayed: lookup.data.status === "uploaded" }, 200);
 }
