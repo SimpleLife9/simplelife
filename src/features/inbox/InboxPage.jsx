@@ -328,7 +328,9 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
         };
         // A previous capture may have been saved before its initial part insert failed.
         // Recreate that first part from the immutable source, then read the row back under RLS.
-        await supabase.from('capture_part').insert(candidate);
+        const { error: recoveryInsertError } = await supabase.from('capture_part').insert(candidate);
+        // Another tab/session may win the unique (capture_id, part_index) insert.
+        // Re-read under RLS even after a conflict and reuse only the exact source row.
         const { data: recoveredParts, error: recoveryError } = await supabase.from('capture_part')
           .select('*')
           .eq('capture_id', capture.id)
@@ -336,7 +338,13 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
           .limit(1);
         if (recoveryError) throw recoveryError;
         part = Array.isArray(recoveredParts) ? recoveredParts[0] : recoveredParts;
-        if (!part) throw new Error('No se pudo recuperar el fragmento inicial de esta captura.');
+        if (!part) {
+          if (recoveryInsertError) throw recoveryInsertError;
+          throw new Error('No se pudo recuperar el fragmento inicial de esta captura.');
+        }
+        if (part.part_index !== 0 || part.original_fragment !== capture.content_original) {
+          throw new Error('El fragmento inicial existente no coincide con el texto original. La captura permanece intacta y requiere revisión.'); 
+        }
       }
     } catch (error) {
       setCaptureRecoveryError(error?.message || 'No se pudo recuperar la captura original.');
