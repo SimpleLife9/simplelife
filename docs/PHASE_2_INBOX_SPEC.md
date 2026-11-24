@@ -169,3 +169,10 @@ No production migration, production Edge deployment, provider request, billing c
 - **Private audio purge:** the dispatcher deletes the Storage object before completing metadata/audit removal. It now requires Storage's documented array response; Storage errors or malformed responses fail closed. If Storage deletion succeeded but metadata completion failed, the next run repeats Storage removal before retrying metadata completion. Deno tests exercise these paths; CI #782 supplies the exact-SHA result.
 - **Offline vault:** five automated tests passed in CI #781. Desktop and physical Android owner acceptance remain open.
 - **Provider boundary:** transcription and model-backed classification remain disabled until ARIA Model Routing is available on 26 November and the provider/model/region/retention/free-quota/fallback checks are completed. Cloudflare Workers AI remains an approved but inactive fallback. No paid billing, production migration, deploy, merge or release is authorized by this checkpoint.
+
+
+## 8. Server-verified voice asset integrity
+
+The browser may calculate a SHA-256 value as an expected upload digest, but that value is not proof of object integrity. After upload, the browser invokes the owner-authenticated `inbox-voice-finalize` Edge Function with only the staging asset ID. The server resolves the active owner from the verified JWT, reads the corresponding owner-scoped metadata, downloads the object from `inbox-voice-private`, checks its actual byte size, and computes SHA-256 from the downloaded bytes. It must match the registered digest before any status transition.
+
+The finalization RPC is service-role-only. The legacy authenticated RPC that accepted a browser-provided digest is revoked. A mismatch, missing object, malformed metadata, or Storage failure must fail closed and leave the asset unfinalized for bounded staging retention cleanup. No transcription/provider calls are part of this path.
