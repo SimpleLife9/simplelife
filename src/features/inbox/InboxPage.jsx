@@ -40,6 +40,9 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
   });
   const [offlineQueuedCaptures, setOfflineQueuedCaptures] = useState([]);
   const [offlinePassphrase, setOfflinePassphrase] = useState('');
+  const [offlineRecoveryMode, setOfflineRecoveryMode] = useState(false);
+  const [offlineRecoveryKey, setOfflineRecoveryKey] = useState('');
+  const [offlineRecoveryCode, setOfflineRecoveryCode] = useState('');
   const [offlineVaultBusy, setOfflineVaultBusy] = useState(false);
   const [offlineVaultError, setOfflineVaultError] = useState('');
   const [offlineVaultNotice, setOfflineVaultNotice] = useState('');
@@ -112,13 +115,23 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
     setOfflineVaultError('');
     setOfflineVaultNotice('');
     try {
-      if (offlineVaultStatus.configured) await offlineVault.unlock(offlinePassphrase);
-      else await offlineVault.create(offlinePassphrase);
+      if (offlineVaultStatus.configured && offlineRecoveryMode) {
+        await offlineVault.recoverWithRecoveryKey(offlineRecoveryKey, offlinePassphrase);
+        setOfflineVaultNotice('Bóveda recuperada. La frase de desbloqueo se ha actualizado.');
+      } else if (offlineVaultStatus.configured) {
+        await offlineVault.unlock(offlinePassphrase);
+        setOfflineVaultNotice('Bóveda privada desbloqueada en memoria.');
+      } else {
+        const created = await offlineVault.create(offlinePassphrase);
+        setOfflineRecoveryCode(created.recoveryKey);
+        setOfflineVaultNotice('Bóveda creada. Guarda ahora la clave de recuperación que aparece abajo.');
+      }
       setOfflinePassphrase('');
-      setOfflineVaultNotice('Bóveda privada desbloqueada en memoria. La frase no se almacena.');
+      setOfflineRecoveryKey('');
+      setOfflineRecoveryMode(false);
       await refreshOfflineVaultState();
     } catch (error) {
-      setOfflineVaultError(error?.message || 'No se pudo desbloquear la bóveda privada.');
+      setOfflineVaultError(error?.message || 'No se pudo desbloquear o recuperar la bóveda privada.');
     } finally {
       setOfflineVaultBusy(false);
     }
@@ -130,6 +143,8 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
     setOfflineQueuedCaptures([]);
     setOfflineVaultError('');
     setOfflineVaultNotice('Bóveda bloqueada. El contenido local permanece cifrado.');
+    setOfflineRecoveryMode(false);
+    setOfflineRecoveryKey('');
     void refreshOfflineVaultState();
   };
 
@@ -765,6 +780,12 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
       status={{ ...offlineVaultStatus, available: offlineVaultStatus.available && Boolean(offlineVault), online: offlineOnline }}
       passphrase={offlinePassphrase}
       setPassphrase={setOfflinePassphrase}
+      recoveryMode={offlineRecoveryMode}
+      setRecoveryMode={setOfflineRecoveryMode}
+      recoveryKey={offlineRecoveryKey}
+      setRecoveryKey={setOfflineRecoveryKey}
+      recoveryCode={offlineRecoveryCode}
+      onDismissRecoveryCode={() => setOfflineRecoveryCode('')}
       busy={offlineVaultBusy}
       error={offlineVaultError}
       notice={offlineVaultNotice}
