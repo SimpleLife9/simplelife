@@ -17,11 +17,11 @@ function assertEquals(actual: unknown, expected: unknown, label: string): void {
 async function body(response: Response): Promise<Record<string, unknown>> {
   return await response.json() as Record<string, unknown>;
 }
-function queueRequest(captureId = CAPTURE_ID, key = KEY): Request {
+function queueRequest(captureId = CAPTURE_ID, key = KEY, extra: Record<string, unknown> = {}): Request {
   return new Request("https://local.test/inbox-processing-queue", {
     method: "POST",
-    headers: { "content-type": "application/json", "idempotency-key": key },
-    body: JSON.stringify({ captureId }),
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ captureId, idempotencyKey: key, ...extra }),
   });
 }
 function makeQueueContext({
@@ -102,6 +102,14 @@ Deno.test("queue fails closed for inactive profile and malformed request/idempot
   assertEquals((await handleQueueRequest(queueRequest(CAPTURE_ID, "not-a-uuid"), malformedKey.ctx as never)).status,
     422, "invalid key");
   assertEquals(malformedKey.calls.rpc, 0, "invalid key never writes");
+
+  const missingKey = makeQueueContext();
+  assertEquals((await handleQueueRequest(new Request("https://local.test/inbox-processing-queue", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ captureId: CAPTURE_ID }),
+  }), missingKey.ctx as never)).status, 422, "missing idempotency key");
+  assertEquals(missingKey.calls.rpc, 0, "missing idempotency key never writes");
 });
 
 Deno.test("queue returns a sanitized unavailable error instead of leaking database detail", async () => {
