@@ -49,34 +49,42 @@ self.addEventListener('fetch', (event) => {
 
   if (request.mode === 'navigate') {
     event.respondWith((async () => {
+      let cachedDocument = null;
+
+      // Read the document while Cache Storage is known to be reachable,
+      // before attempting a network request. Keep the Response in memory so
+      // the offline branch does not need another Cache API operation after
+      // the network has failed or the browser has just restarted.
+      try {
+        const cache = await caches.open(CACHE_NAME);
+        cachedDocument = await cache.match(
+          new URL('/index.html', self.location.origin),
+          { ignoreVary: true },
+        ) || await cache.match(
+          new URL('/', self.location.origin),
+          { ignoreVary: true },
+        );
+      } catch (cacheError) {
+        console.error('Offline app-shell lookup failed:', cacheError);
+      }
+
       try {
         const response = await fetch(request);
         if (response.ok && (url.pathname === '/' || url.pathname === '/index.html')) {
-          const cache = await caches.open(CACHE_NAME);
-          // Keep the last successfully delivered app document available for
-          // a cold launch when the next navigation happens without a network.
-          await cache.put('/index.html', response.clone());
-          await cache.put('/', response.clone());
+          try {
+            const cache = await caches.open(CACHE_NAME);
+            // Refresh both navigation aliases only after a successful response.
+            await cache.put('/index.html', response.clone());
+            await cache.put('/', response.clone());
+          } catch (cacheError) {
+            console.error('Online app-shell refresh failed:', cacheError);
+          }
         }
         return response;
-      } catch {
-        // The public HTML shell is safe to serve offline. Preview hosts may
-        // vary public documents by request headers, so ignore Vary here just
-        // as we do for the immutable JS/CSS bundle.
-        try {
-          const cache = await caches.open(CACHE_NAME);
-          const cachedDocument = await cache.match(
-            new URL('/index.html', self.location.origin),
-            { ignoreVary: true },
-          ) || await cache.match(
-            new URL('/', self.location.origin),
-            { ignoreVary: true },
-          );
-          if (cachedDocument) return cachedDocument;
-        } catch (cacheError) {
-          console.error('Offline app-shell fallback failed:', cacheError);
-        }
+      } catch (networkError) {
+        if (cachedDocument) return cachedDocument;
 
+        console.warn('Offline app-shell document is not cached:', networkError);
         return new Response('SimpleLife necesita abrirse online al menos una vez para preparar este dispositivo.', {
           status: 503,
           headers: { 'content-type': 'text/plain; charset=utf-8' },
