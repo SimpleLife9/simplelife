@@ -60,13 +60,27 @@ self.addEventListener('fetch', (event) => {
         }
         return response;
       } catch {
-        const cache = await caches.open(CACHE_NAME);
-        return (await cache.match('/index.html'))
-          || (await cache.match('/'))
-          || new Response('SimpleLife necesita abrirse online al menos una vez para preparar este dispositivo.', {
-            status: 503,
-            headers: { 'content-type': 'text/plain; charset=utf-8' },
-          });
+        // The public HTML shell is safe to serve offline. Preview hosts may
+        // vary public documents by request headers, so ignore Vary here just
+        // as we do for the immutable JS/CSS bundle.
+        try {
+          const cache = await caches.open(CACHE_NAME);
+          const cachedDocument = await cache.match(
+            new URL('/index.html', self.location.origin),
+            { ignoreVary: true },
+          ) || await cache.match(
+            new URL('/', self.location.origin),
+            { ignoreVary: true },
+          );
+          if (cachedDocument) return cachedDocument;
+        } catch (cacheError) {
+          console.error('Offline app-shell fallback failed:', cacheError);
+        }
+
+        return new Response('SimpleLife necesita abrirse online al menos una vez para preparar este dispositivo.', {
+          status: 503,
+          headers: { 'content-type': 'text/plain; charset=utf-8' },
+        });
       }
     })());
     return;
