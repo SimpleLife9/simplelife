@@ -328,6 +328,12 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
     setLocalError('');
     const timer = setTimeout(async () => {
       try {
+        if (globalThis.navigator?.onLine === false) {
+          if (isCurrentQuery()) {
+            setLocalError('Sin conexión: el archivo sincronizado no está disponible. Desbloquea la bóveda para consultar las capturas locales de este dispositivo.');
+          }
+          return;
+        }
         const { data, error, count } = await buildCaptureQuery(0);
         if (error) throw error;
         if (!isCurrentQuery()) return;
@@ -351,7 +357,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
       duplicateRequestGenerationRef.current += 1;
       clearTimeout(timer);
     };
-  }, [profile?.id, refreshKey, captureSearch, attentionFilter]);
+  }, [profile?.id, refreshKey, captureSearch, attentionFilter, offlineOnline]);
 
   const loadMoreCaptures = async () => {
     if (loadingMore || loading || !hasMore) return;
