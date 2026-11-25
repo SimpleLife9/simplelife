@@ -432,6 +432,20 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
   const [listItemText, setListItemText] = useState('');
   const [operationIds, setOperationIds] = useState(null);
 
+  const retryVoiceAssetFinalization = (asset) => runAction(async () => {
+    if (!offlineOnline) throw new Error('Conecta a Internet para verificar el audio privado.');
+    if (!asset?.id || asset.status !== 'uploading') {
+      throw new Error('Este audio no está pendiente de verificación. Actualiza Inbox e inténtalo de nuevo.');
+    }
+    const { data, error } = await supabase.functions.invoke('inbox-voice-finalize', {
+      body: { assetId: asset.id },
+    });
+    if (error) throw error;
+    if (data?.verified !== true || data?.assetId !== asset.id) {
+      throw new Error('El servidor no confirmó la verificación del audio privado.');
+    }
+  }, 'Audio verificado y finalizado. La transcripción sigue pendiente del proveedor aprobado.');
+
   const getCaptureParts = (captureId) => captureParts.filter((part) => part.capture_id === captureId).sort((a, b) => a.part_index - b.part_index);
   const getCapturePart = (captureId) => getCaptureParts(captureId)[0];
   const getConfirmedLink = (captureId, partId = null) => {
@@ -907,7 +921,20 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
         <strong>Audios privados pendientes</strong>
         {voiceAssets.filter((asset) => !asset.capture_id).map((asset) => (
           <div className="voice-asset-row" key={asset.id}>
-            <span>Audio original · {asset.status === 'uploaded' ? 'esperando transcripción' : asset.status === 'failed' ? 'falló la preparación' : 'preparándose'}</span>
+            <span>Audio original · {asset.status === 'uploaded' ? 'esperando transcripción' : asset.status === 'failed' ? 'falló la preparación' : asset.status === 'uploading' ? 'verificación pendiente' : 'estado no disponible'}</span>
+            {asset.status === 'uploading' && (
+              <div className="voice-asset-retry">
+                <small>Si la carga terminó pero se interrumpió la confirmación, puedes verificar el archivo existente sin volver a grabarlo ni subirlo.</small>
+                <button
+                  type="button"
+                  className="capture-action-button"
+                  disabled={busy || !offlineOnline}
+                  onClick={() => retryVoiceAssetFinalization(asset)}
+                >
+                  {busy ? 'Verificando…' : 'Reintentar verificación'}
+                </button>
+              </div>
+            )}
             {asset.retention_until && <small>Retención temporal hasta {new Intl.DateTimeFormat('es', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(asset.retention_until))}</small>}
           </div>
         ))}
