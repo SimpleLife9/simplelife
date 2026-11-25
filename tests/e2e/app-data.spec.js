@@ -4394,6 +4394,90 @@ test('offline reopen restores the same owner vault and encrypted queue without S
     .toContainText('Capturas offline sincronizadas.');
 });
 
+test('mobile vault recovery key restores queued encrypted capture and rotates the passphrase', async ({ page }) => {
+  await mockSupabaseSession(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.locator('.mobile-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  await page.getByLabel('Nueva frase de desbloqueo offline').fill('offline-vault-original-passphrase-2026');
+  await page.getByRole('button', { name: 'Crear bóveda privada' }).click();
+  await expect(page.getByText('Guarda ahora tu clave de recuperación')).toBeVisible();
+
+  const recoveryKey = await page.locator('.offline-vault-recovery code').innerText();
+  expect(recoveryKey).toMatch(/^[0-9a-f]{64}$/);
+  await page.getByLabel('Confirmar clave de recuperación offline').fill(recoveryKey);
+  await page.getByRole('button', { name: 'Ya la guardé' }).click();
+  await expect(page.locator('.offline-vault-state')).toHaveText('Desbloqueada');
+
+  const source = 'CAPTURA RECUPERABLE — debe sobrevivir a la rotación de clave.';
+  await page.context().setOffline(true);
+  await expect(page.locator('.connection-state')).toHaveText('Sin conexión');
+  await page.locator('.inbox-composer textarea').fill(source);
+  await page.getByRole('button', { name: 'Guardar cifrada' }).click();
+  await expect(page.locator('.offline-vault-queue')).toContainText(source);
+  await expect(page.locator('.offline-vault-panel'))
+    .toContainText('1 captura(s) cifrada(s) pendiente(s)');
+
+  const storedRecords = await page.evaluate(async (profileId) => {
+    const database = await new Promise((resolve, reject) => {
+      const request = indexedDB.open('simplelife-private-offline-v1-' + profileId);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      return await new Promise((resolve, reject) => {
+        const request = database.transaction('captures', 'readonly')
+          .objectStore('captures').getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    } finally {
+      database.close();
+    }
+  }, profile.id);
+  expect(storedRecords).toHaveLength(1);
+  expect(JSON.stringify(storedRecords)).not.toContain(source);
+
+  await page.getByRole('button', { name: 'Bloquear' }).click();
+  await expect(page.locator('.offline-vault-state')).toHaveText('Bloqueada');
+  await page.getByRole('button', { name: 'Perdí mi frase de desbloqueo' }).click();
+
+  const wrongKey = (recoveryKey[0] === '0' ? '1' : '0') + recoveryKey.slice(1);
+  const keyInput = page.getByLabel('Clave de recuperación offline');
+  const newPassphrase = page.getByLabel('Nueva frase offline');
+  const recoverButton = page.getByRole('button', { name: 'Recuperar y cambiar frase' });
+  await keyInput.fill(wrongKey);
+  await newPassphrase.fill('offline-vault-rotated-passphrase-2026');
+  await recoverButton.click();
+  await expect(page.locator('.offline-vault-panel .form-error[role="alert"]'))
+    .toHaveText('Clave de recuperación incorrecta. Comprueba la clave e inténtalo de nuevo.');
+  await expect(page.locator('.offline-vault-state')).toHaveText('Bloqueada');
+
+  await keyInput.fill(recoveryKey);
+  await recoverButton.click();
+  await expect(page.locator('.offline-vault-state')).toHaveText('Desbloqueada');
+  await expect(page.locator('.offline-vault-panel'))
+    .toContainText('Bóveda recuperada. La frase de desbloqueo se ha actualizado.');
+  await expect(page.locator('.offline-vault-queue')).toContainText(source);
+
+  // Lock and unlock again to prove the new passphrase, not only the recovery
+  // operation, can reopen the same encrypted queue on this browser profile.
+  await page.getByRole('button', { name: 'Bloquear' }).click();
+  await expect(page.locator('.offline-vault-state')).toHaveText('Bloqueada');
+  await page.getByLabel('Frase de desbloqueo offline')
+    .fill('offline-vault-rotated-passphrase-2026');
+  await page.getByRole('button', { name: 'Desbloquear bóveda' }).click();
+  await expect(page.locator('.offline-vault-state')).toHaveText('Desbloqueada');
+  await expect(page.locator('.offline-vault-queue')).toContainText(source);
+  await expect(page.locator('.offline-vault-panel'))
+    .toContainText('1 captura(s) cifrada(s) pendiente(s)');
+  await expect(page.locator('.connection-state')).toHaveText('Sin conexión');
+});
+
 test('mobile voice capture uploads a private original and leaves transcription pending', async ({ page }) => {
   await page.addInitScript(() => {
     const track = { stop: () => { window.__voiceMicrophoneTrackStopped = true; } };
