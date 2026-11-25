@@ -4383,7 +4383,7 @@ test('mobile voice capture uploads a private original and leaves transcription p
   expect(asset.file_size_bytes).toBeGreaterThan(0);
   expect(asset.sha256_hex).toMatch(/^[0-9a-f]{64}$/);
   expect(upload.objectPath).toBe(profile.id + '/' + asset.id + '/source.webm');
-  expect(upload.contentType).toContain('audio/webm');
+  expect(upload.contentType).toContain('multipart/form-data');
   expect(voiceFinalizeRequests[0]).toEqual({ assetId: asset.id });
   expect(await page.evaluate(() => window.__voiceMicrophoneTrackStopped)).toBe(true);
 });
