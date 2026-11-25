@@ -21,7 +21,7 @@ async function prepareOnlineShell(page) {
     null,
     { timeout: 20_000 },
   );
-  await expect(page.locator('#root > *')).toHaveCount(1);
+  await expect(page.locator('#root > :not(.offline-shell-status)')).toHaveCount(1);
 
   return page.evaluate(async () => {
     const cache = await caches.open('simplelife-shell-v2');
@@ -77,7 +77,7 @@ test('a cold app launch works offline after one successful online visit', async 
 
   const response = await offlinePage.goto(appURL, { waitUntil: 'load', timeout: 15_000 });
   expect(response?.ok()).toBe(true);
-  await expect(offlinePage.locator('#root > *')).toHaveCount(1);
+  await expect(offlinePage.locator('#root > :not(.offline-shell-status)')).toHaveCount(1);
   expect(await offlinePage.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(true);
   expect(pageErrors).toEqual([]);
 
@@ -121,7 +121,7 @@ test('a cold app launch stays available offline after closing and reopening the 
       timeout: 15_000,
     });
     expect(response?.ok()).toBe(true);
-    await expect(offlinePage.locator('#root > *')).toHaveCount(1);
+    await expect(offlinePage.locator('#root > :not(.offline-shell-status)')).toHaveCount(1);
     expect(await offlinePage.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(true);
     expect(pageErrors).toEqual([]);
   } finally {
