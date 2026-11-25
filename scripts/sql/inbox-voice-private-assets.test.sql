@@ -56,7 +56,7 @@ BEGIN
        'public.record_inbox_voice_transcription(uuid,uuid,uuid,uuid,text,text,text,text)','EXECUTE')
      OR has_function_privilege('anon',
        'public.record_inbox_voice_transcription(uuid,uuid,uuid,uuid,text,text,text,text)','EXECUTE')
-     OR NOT has_function_privilege('service_role',
+     OR has_function_privilege('service_role',
        'public.record_inbox_voice_transcription(uuid,uuid,uuid,uuid,text,text,text,text)','EXECUTE') THEN
     RAISE EXCEPTION 'Voice finalization and transcription must be callable by trusted service_role only';
   END IF;
@@ -161,15 +161,22 @@ END;
 $test$;
 RESET ROLE;
 
--- Only the trusted backend may attach a provider-attributed transcript.
+-- Only the trusted backend may claim, attribute and atomically complete voice jobs.
 SET LOCAL ROLE service_role;
 DO $test$
 DECLARE
-  v_capture uuid;
-  v_part uuid;
+  v_capture uuid := '019b7200-0000-7000-8000-000000000103';
+  v_part uuid := '019b7200-0000-7000-8000-000000000104';
+  v_run uuid := '019b7200-0000-7000-8000-000000000105';
+  v_attempt record;
+  v_capture_out uuid;
+  v_part_out uuid;
+  v_run_out uuid;
+  v_replayed boolean;
   v_duplicate_rejected boolean := false;
   v_capture_count integer;
   v_part_count integer;
+  v_run_count integer;
 BEGIN
   IF NOT public.finalize_inbox_audio_upload_verified(
     '019b7200-0000-7000-8000-000000000001',
@@ -178,30 +185,60 @@ BEGIN
     repeat('a',64)
   ) THEN RAISE EXCEPTION 'Service role could not finalize private audio upload after verified digest'; END IF;
 
-  SELECT capture_id, part_id INTO v_capture, v_part
-  FROM public.record_inbox_voice_transcription(
-    '019b7200-0000-7000-8000-000000000001',
-    '019b7200-0000-7000-8000-000000000101',
-    '019b7200-0000-7000-8000-000000000103',
-    '019b7200-0000-7000-8000-000000000104',
-    'Texto transcrito de prueba.',
-    'test-provider','fixture-model','us-west-2'
+  SELECT * INTO v_attempt
+  FROM public.claim_inbox_voice_transcription_job(
+    '019b7200-0000-7000-8000-000000000110',
+    '00000000-0000-4000-8000-000000000110',90
   );
-  IF v_capture <> '019b7200-0000-7000-8000-000000000103'
-     OR v_part <> '019b7200-0000-7000-8000-000000000104' THEN
-    RAISE EXCEPTION 'Trusted voice transcription did not produce its capture/part';
+  IF NOT FOUND OR v_attempt.asset_id<>'019b7200-0000-7000-8000-000000000101'
+     OR v_attempt.attempt_number<>1 THEN
+    RAISE EXCEPTION 'Verified voice upload did not receive a durable job lease';
   END IF;
+
+  IF NOT public.mark_inbox_voice_transcription_request_started(
+    v_attempt.asset_id,v_attempt.lease_token,'test-provider','fixture-model','test-adapter',
+    'us-west-2','inbox-speech-route-policy-v1',
+    jsonb_build_object(
+      'capability','evidence:capability','provider','evidence:provider',
+      'model','evidence:model','adapter','evidence:adapter','account','evidence:account',
+      'legalEligibility','evidence:legal','region','evidence:region',
+      'privacy','evidence:privacy','quota','evidence:quota'
+    )
+  ) THEN RAISE EXCEPTION 'Trusted worker could not persist request-start evidence'; END IF;
+
+  SELECT capture_id,part_id,processing_run_id,replayed
+  INTO v_capture_out,v_part_out,v_run_out,v_replayed
+  FROM public.complete_inbox_voice_transcription_job(
+    v_attempt.asset_id,v_attempt.lease_token,v_capture,v_part,v_run,
+    'Texto transcrito de prueba.','test-provider','fixture-model','us-west-2'
+  );
+  IF v_capture_out<>v_capture OR v_part_out<>v_part OR v_run_out<>v_run OR v_replayed THEN
+    RAISE EXCEPTION 'Atomic voice completion did not return the expected capture/part/run';
+  END IF;
+
   IF NOT EXISTS (
     SELECT 1 FROM public.capture
     WHERE id=v_capture AND input_type='voice'
       AND content_original='Texto transcrito de prueba.'
+      AND processing_status='queued'
   ) OR NOT EXISTS (
     SELECT 1 FROM public.capture_part
-    WHERE capture_id=v_capture AND part_index=0
+    WHERE id=v_part AND capture_id=v_capture AND part_index=0
       AND original_fragment='Texto transcrito de prueba.'
   ) THEN
-    RAISE EXCEPTION 'Voice transcript was not persisted as derived searchable text';
+    RAISE EXCEPTION 'Voice transcript was not persisted as an Inbox-ready capture and part';
   END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM public.processing_run
+    WHERE id=v_run AND capture_id=v_capture
+      AND processor_version='inbox-proposal-v1'
+      AND status='queued'
+      AND idempotency_key='019b7200-0000-7000-8000-000000000101'
+  ) THEN
+    RAISE EXCEPTION 'Voice completion did not enqueue the normal Inbox processing pipeline';
+  END IF;
+
   IF NOT EXISTS (
     SELECT 1 FROM public.capture_audio_asset
     WHERE id='019b7200-0000-7000-8000-000000000101'
@@ -211,42 +248,43 @@ BEGIN
       AND transcription_region='us-west-2'
       AND retention_until IS NULL
   ) THEN
-    RAISE EXCEPTION 'Original audio was not linked to its server-attributed transcript';
+    RAISE EXCEPTION 'Original audio was not linked to its provider-attributed transcript';
   END IF;
 
-  -- A repeated completion must not create a second capture or capture_part
-  -- for an asset that has already reached the transcribed terminal state.
+  SELECT capture_id,part_id,processing_run_id,replayed
+  INTO v_capture_out,v_part_out,v_run_out,v_replayed
+  FROM public.complete_inbox_voice_transcription_job(
+    v_attempt.asset_id,v_attempt.lease_token,v_capture,v_part,v_run,
+    'Texto transcrito de prueba.','test-provider','fixture-model','us-west-2'
+  );
+  IF NOT v_replayed OR v_capture_out<>v_capture OR v_part_out<>v_part OR v_run_out<>v_run THEN
+    RAISE EXCEPTION 'Exact voice completion replay was not idempotent';
+  END IF;
+
   BEGIN
-    PERFORM 1 FROM public.record_inbox_voice_transcription(
-      '019b7200-0000-7000-8000-000000000001',
-      '019b7200-0000-7000-8000-000000000101',
+    PERFORM * FROM public.complete_inbox_voice_transcription_job(
+      v_attempt.asset_id,v_attempt.lease_token,
       '019b7200-0000-7000-8000-000000000108',
       '019b7200-0000-7000-8000-000000000109',
-      'Duplicate transcript must not persist.',
-      'test-provider','fixture-model','us-west-2'
+      '019b7200-0000-7000-8000-000000000112',
+      'Duplicate transcript must not persist.','test-provider','fixture-model','us-west-2'
     );
-  EXCEPTION WHEN insufficient_privilege THEN
+  EXCEPTION WHEN SQLSTATE '55000' THEN
     v_duplicate_rejected := true;
   END;
   IF NOT v_duplicate_rejected THEN
-    RAISE EXCEPTION 'A transcribed asset accepted a duplicate completion';
+    RAISE EXCEPTION 'A completed voice job accepted a conflicting transcript replay';
   END IF;
 
   SELECT count(*) INTO v_capture_count
-  FROM public.capture
-  WHERE id IN (
-    '019b7200-0000-7000-8000-000000000103',
-    '019b7200-0000-7000-8000-000000000108'
-  );
+  FROM public.capture WHERE id IN (v_capture,'019b7200-0000-7000-8000-000000000108');
   SELECT count(*) INTO v_part_count
-  FROM public.capture_part
-  WHERE id IN (
-    '019b7200-0000-7000-8000-000000000104',
-    '019b7200-0000-7000-8000-000000000109'
-  );
-  IF v_capture_count <> 1 OR v_part_count <> 1 THEN
-    RAISE EXCEPTION 'Duplicate transcription changed capture/part counts (% / %)',
-      v_capture_count, v_part_count;
+  FROM public.capture_part WHERE id IN (v_part,'019b7200-0000-7000-8000-000000000109');
+  SELECT count(*) INTO v_run_count
+  FROM public.processing_run WHERE id=v_run AND capture_id=v_capture;
+  IF v_capture_count<>1 OR v_part_count<>1 OR v_run_count<>1 THEN
+    RAISE EXCEPTION 'Voice replay duplicated capture/part/run counts (% / % / %)',
+      v_capture_count,v_part_count,v_run_count;
   END IF;
 END;
 $test$;
