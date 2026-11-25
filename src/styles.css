@@ -452,3 +452,13 @@
 .offline-vault-recovery strong{color:#80652b;font-size:.7rem}
 .offline-vault-recovery p{margin:0;color:#87764e;font-size:.62rem;line-height:1.45}
 .offline-vault-recovery code{display:block;overflow-wrap:anywhere;padding:9px;border:1px dashed #dfc982;border-radius:7px;background:#fff;color:#695426;font-size:.68rem;user-select:all}
+
+
+/* PWA offline-shell readiness indicator */
+.offline-shell-status{position:fixed;right:14px;bottom:14px;z-index:1000;display:flex;align-items:center;gap:8px;max-width:min(360px,calc(100vw - 28px));padding:9px 12px;border:1px solid #dfe8df;border-radius:999px;background:rgba(255,255,255,.97);box-shadow:0 8px 22px rgba(25,57,46,.09);color:#5c6e61;font-size:.67rem;font-weight:700;line-height:1.35;pointer-events:none}
+.offline-shell-status-dot{width:7px;height:7px;flex:0 0 7px;border-radius:50%;background:#d2a15a}
+.offline-shell-status.is-ready{border-color:#cfe4d1;background:#f5fbf5;color:#356b49}
+.offline-shell-status.is-ready .offline-shell-status-dot{background:#4a9a61}
+.offline-shell-status.is-unavailable{border-color:#f0dfc6;background:#fffaf1;color:#946a2d}
+.offline-shell-status.is-unavailable .offline-shell-status-dot{background:#c18b3f}
+@media(max-width:600px){.offline-shell-status{right:9px;bottom:9px;max-width:calc(100vw - 18px);padding:8px 10px;font-size:.62rem}}
