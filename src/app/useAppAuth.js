@@ -10,31 +10,40 @@ function isOfflineNetworkFailure(error) {
   );
 }
 
+function getOfflineOnlyProfile(authUser) {
+  const cachedProfileId = getCachedProfileIdForAuthUser(authUser.id);
+  if (!cachedProfileId) {
+    throw new Error('Esta cuenta aún no tiene una identidad offline vinculada. Conecta SimpleLife una vez para preparar la bóveda en este dispositivo.');
+  }
+
+  // This local identity can open only the matching encrypted IndexedDB
+  // namespace. Server-backed operations remain unavailable until online
+  // profile resolution succeeds and replaces this temporary profile.
+  return {
+    id: cachedProfileId,
+    auth_user_id: authUser.id,
+    display_name: authUser.user_metadata?.full_name
+      || authUser.user_metadata?.name
+      || authUser.email?.split('@')[0]
+      || 'Mi cuenta',
+    offlineOnly: true,
+  };
+}
+
 async function resolveProfileForUser(authUser) {
+  // When the browser already knows it is offline, do not spend several
+  // network retry windows before opening the owner-bound local vault.
+  if (globalThis.navigator?.onLine === false) {
+    return getOfflineOnlyProfile(authUser);
+  }
+
   try {
     const profile = await ensureUserProfile(authUser);
     cacheProfileIdForAuthUser(authUser.id, profile);
     return profile;
   } catch (error) {
     if (!isOfflineNetworkFailure(error)) throw error;
-
-    const cachedProfileId = getCachedProfileIdForAuthUser(authUser.id);
-    if (!cachedProfileId) {
-      throw new Error('Esta cuenta aún no tiene una identidad offline vinculada. Conecta SimpleLife una vez para preparar la bóveda en este dispositivo.');
-    }
-
-    // This local identity can open only the matching encrypted IndexedDB
-    // namespace. Server-backed operations remain unavailable until online
-    // profile resolution succeeds and replaces this temporary profile.
-    return {
-      id: cachedProfileId,
-      auth_user_id: authUser.id,
-      display_name: authUser.user_metadata?.full_name
-        || authUser.user_metadata?.name
-        || authUser.email?.split('@')[0]
-        || 'Mi cuenta',
-      offlineOnly: true,
-    };
+    return getOfflineOnlyProfile(authUser);
   }
 }
 
