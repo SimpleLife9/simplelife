@@ -57,6 +57,9 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
   const [offlineRecoveryMode, setOfflineRecoveryMode] = useState(false);
   const [offlineRecoveryKey, setOfflineRecoveryKey] = useState('');
   const [offlineRecoveryCode, setOfflineRecoveryCode] = useState('');
+  const [offlineRecoveryCodeType, setOfflineRecoveryCodeType] = useState('created');
+  const [offlineRecoveryRotationMode, setOfflineRecoveryRotationMode] = useState(false);
+  const [offlineRecoveryRotationPassphrase, setOfflineRecoveryRotationPassphrase] = useState('');
   const [offlineVaultBusy, setOfflineVaultBusy] = useState(false);
   const [offlineVaultError, setOfflineVaultError] = useState('');
   const [offlineVaultNotice, setOfflineVaultNotice] = useState('');
@@ -94,6 +97,8 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
       setOfflinePassphrase('');
       setOfflineRecoveryKey('');
       setOfflineRecoveryMode(false);
+      setOfflineRecoveryRotationMode(false);
+      setOfflineRecoveryRotationPassphrase('');
       setOfflineQueuedCaptures([]);
       setOfflineVaultStatus((current) => ({ ...current, unlocked: false, queuedCount: 0 }));
       setOfflineVaultNotice('Bóveda bloqueada automáticamente al salir de la aplicación.');
@@ -160,6 +165,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
         setOfflineVaultNotice('Bóveda privada desbloqueada en memoria.');
       } else {
         const created = await offlineVault.create(offlinePassphrase);
+        setOfflineRecoveryCodeType('created');
         setOfflineRecoveryCode(created.recoveryKey);
         setOfflineVaultNotice('Bóveda creada. Guarda ahora la clave de recuperación que aparece abajo.');
       }
@@ -174,9 +180,32 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
     }
   };
 
+  const rotateOfflineRecoveryKey = async (event) => {
+    event.preventDefault();
+    if (!offlineVault || !visibleOfflineVaultStatus.unlocked || offlineVaultBusy) return;
+    setOfflineVaultBusy(true);
+    setOfflineVaultError('');
+    setOfflineVaultNotice('');
+    try {
+      const rotated = await offlineVault.rotateRecoveryKey(offlineRecoveryRotationPassphrase);
+      setOfflineRecoveryCodeType('rotated');
+      setOfflineRecoveryCode(rotated.recoveryKey);
+      setOfflineRecoveryRotationPassphrase('');
+      setOfflineRecoveryRotationMode(false);
+      setOfflineVaultNotice('Clave de recuperación renovada. La anterior ya no es válida.');
+      await refreshOfflineVaultState();
+    } catch (error) {
+      setOfflineVaultError(getOfflineVaultUserMessage(error));
+    } finally {
+      setOfflineVaultBusy(false);
+    }
+  };
+
   const lockOfflineVault = () => {
     offlineVault?.lock();
     setOfflinePassphrase('');
+    setOfflineRecoveryRotationMode(false);
+    setOfflineRecoveryRotationPassphrase('');
     setOfflineQueuedCaptures([]);
     setOfflineVaultError('');
     setOfflineVaultNotice('Bóveda bloqueada. El contenido local permanece cifrado.');
@@ -846,7 +875,16 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
       recoveryKey={offlineRecoveryKey}
       setRecoveryKey={setOfflineRecoveryKey}
       recoveryCode={offlineRecoveryCode}
-      onDismissRecoveryCode={() => setOfflineRecoveryCode('')}
+      recoveryCodeType={offlineRecoveryCodeType}
+      onDismissRecoveryCode={() => {
+        setOfflineRecoveryCode('');
+        setOfflineRecoveryCodeType('created');
+      }}
+      recoveryRotationMode={offlineRecoveryRotationMode}
+      setRecoveryRotationMode={setOfflineRecoveryRotationMode}
+      recoveryRotationPassphrase={offlineRecoveryRotationPassphrase}
+      setRecoveryRotationPassphrase={setOfflineRecoveryRotationPassphrase}
+      onRotateRecoveryKey={rotateOfflineRecoveryKey}
       busy={offlineVaultBusy}
       error={offlineVaultError}
       notice={offlineVaultNotice}

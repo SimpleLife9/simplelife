@@ -4442,22 +4442,40 @@ test('mobile vault recovery key restores queued encrypted capture and rotates th
   expect(storedRecords).toHaveLength(1);
   expect(JSON.stringify(storedRecords)).not.toContain(source);
 
+  // A lost one-time key can be replaced safely while the owner still knows the current passphrase.
+  await page.getByRole('button', { name: 'Bloquear' }).click();
+  await expect(page.locator('.offline-vault-state')).toHaveText('Bloqueada');
+  await page.getByLabel('Frase de desbloqueo offline')
+    .fill('offline-vault-original-passphrase-2026');
+  await page.getByRole('button', { name: 'Desbloquear bóveda' }).click();
+  await expect(page.locator('.offline-vault-state')).toHaveText('Desbloqueada');
+
+  await page.getByRole('button', { name: 'Renovar clave de recuperación' }).click();
+  await page.getByLabel('Frase actual de desbloqueo offline')
+    .fill('offline-vault-original-passphrase-2026');
+  await page.getByRole('button', { name: 'Generar nueva clave de recuperación' }).click();
+  await expect(page.getByText('Guarda tu nueva clave de recuperación')).toBeVisible();
+  const newRecoveryKey = await page.locator('.offline-vault-recovery code').innerText();
+  expect(newRecoveryKey).toMatch(/^[0-9a-f]{64}$/);
+  expect(newRecoveryKey).not.toBe(recoveryKey);
+  await page.getByLabel('Confirmar clave de recuperación offline').fill(newRecoveryKey);
+  await page.getByRole('button', { name: 'Ya la guardé' }).click();
+
   await page.getByRole('button', { name: 'Bloquear' }).click();
   await expect(page.locator('.offline-vault-state')).toHaveText('Bloqueada');
   await page.getByRole('button', { name: 'Perdí mi frase de desbloqueo' }).click();
 
-  const wrongKey = (recoveryKey[0] === '0' ? '1' : '0') + recoveryKey.slice(1);
   const keyInput = page.getByLabel('Clave de recuperación offline');
   const newPassphrase = page.getByLabel('Nueva frase offline');
   const recoverButton = page.getByRole('button', { name: 'Recuperar y cambiar frase' });
-  await keyInput.fill(wrongKey);
+  await keyInput.fill(recoveryKey);
   await newPassphrase.fill('offline-vault-rotated-passphrase-2026');
   await recoverButton.click();
   await expect(page.locator('.offline-vault-panel .form-error[role="alert"]'))
     .toHaveText('Clave de recuperación incorrecta. Comprueba la clave e inténtalo de nuevo.');
   await expect(page.locator('.offline-vault-state')).toHaveText('Bloqueada');
 
-  await keyInput.fill(recoveryKey);
+  await keyInput.fill(newRecoveryKey);
   await recoverButton.click();
   await expect(page.locator('.offline-vault-state')).toHaveText('Desbloqueada');
   await expect(page.locator('.offline-vault-panel'))

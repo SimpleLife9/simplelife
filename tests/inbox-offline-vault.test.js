@@ -136,3 +136,52 @@ test('offline vault validates input before encrypting', async () => {
   await assert.rejects(vault.saveTextCapture({ contentOriginal: '   ' }), /CONTENT_REQUIRED/);
   assert.equal(storage.captures.size, 0);
 });
+
+
+test('offline vault rotates a lost recovery key only after current-passphrase verification and preserves queued ciphertext', async () => {
+  const storage = createMemoryStorage();
+  const vault = createVault(storage);
+  const created = await vault.create('rotation-original-passphrase-2026');
+  const oldRecoveryKey = created.recoveryKey;
+  const saved = await vault.saveTextCapture({
+    contentOriginal: 'Esta captura debe sobrevivir a la renovación de la clave.',
+    captureId: '019b7000-0000-7000-8000-000000000401',
+    partId: '019b7000-0000-7000-8000-000000000402',
+  });
+  const before = await storage.getSettings();
+
+  await assert.rejects(
+    vault.rotateRecoveryKey('incorrect-rotation-passphrase'),
+    /PASSPHRASE_INVALID/,
+  );
+  const afterRejectedAttempt = await storage.getSettings();
+  assert.deepEqual(afterRejectedAttempt.recoveryWrap, before.recoveryWrap);
+
+  const rotated = await vault.rotateRecoveryKey('rotation-original-passphrase-2026');
+  const newRecoveryKey = rotated.recoveryKey;
+  assert.match(newRecoveryKey, /^[0-9a-f]{64}$/);
+  assert.notEqual(newRecoveryKey, oldRecoveryKey);
+  const afterRotation = await storage.getSettings();
+  assert.deepEqual(afterRotation.passphraseWrap, before.passphraseWrap);
+  assert.notDeepEqual(afterRotation.recoveryWrap, before.recoveryWrap);
+
+  const [stillQueued] = await vault.listQueuedCaptures();
+  assert.equal(stillQueued.captureId, saved.captureId);
+  assert.equal(stillQueued.partId, saved.partId);
+  assert.equal(stillQueued.contentOriginal, 'Esta captura debe sobrevivir a la renovación de la clave.');
+
+  vault.lock();
+  await assert.rejects(
+    vault.recoverWithRecoveryKey(oldRecoveryKey, 'new-rotation-passphrase-2026'),
+    /RECOVERY_KEY_INVALID/,
+  );
+  await vault.recoverWithRecoveryKey(newRecoveryKey, 'new-rotation-passphrase-2026');
+  const [recovered] = await vault.listQueuedCaptures();
+  assert.equal(recovered.captureId, saved.captureId);
+  assert.equal(recovered.contentOriginal, 'Esta captura debe sobrevivir a la renovación de la clave.');
+
+  vault.lock();
+  await vault.unlock('rotation-original-passphrase-2026');
+  const [afterPassphraseUnlock] = await vault.listQueuedCaptures();
+  assert.equal(afterPassphraseUnlock.captureId, saved.captureId);
+});

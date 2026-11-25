@@ -291,6 +291,40 @@ export function createOfflineCaptureVault({
       return await getStatus();
     },
 
+    async rotateRecoveryKey(currentPassphrase) {
+      if (!unlockedKey) throw new Error('PRIVATE_OFFLINE_VAULT_LOCKED');
+      const settings = await storage.getSettings();
+      if (!settings || settings.version !== 2 || !settings.passphraseWrap || !settings.recoveryWrap) {
+        throw new Error('PRIVATE_OFFLINE_VAULT_VERSION_UNSUPPORTED');
+      }
+
+      let verified;
+      try {
+        verified = await unwrapWithPassphrase(currentPassphrase, settings);
+      } catch {
+        throw new Error('PRIVATE_OFFLINE_PASSPHRASE_INVALID');
+      }
+
+      const recoveryRaw = cryptoProvider.getRandomValues(new Uint8Array(32));
+      try {
+        const recoveryWrappingKey = await importAesKey(recoveryRaw);
+        const recoveryWrap = await encryptBytes(recoveryWrappingKey, verified.rawDataKey, RECOVERY_AAD);
+        await storage.putSettings({
+          ...settings,
+          recoveryWrap,
+          updatedAt: now(),
+        });
+        unlockedKey = verified.dataKey;
+        return Object.freeze({
+          ...(await getStatus()),
+          recoveryKey: toHex(recoveryRaw),
+        });
+      } finally {
+        recoveryRaw.fill(0);
+        verified.rawDataKey.fill(0);
+      }
+    },
+
     lock() {
       unlockedKey = null;
     },

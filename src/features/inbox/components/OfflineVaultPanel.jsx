@@ -10,6 +10,12 @@ export function OfflineVaultPanel({
   setRecoveryKey,
   recoveryCode,
   onDismissRecoveryCode,
+  recoveryCodeType = 'created',
+  recoveryRotationMode = false,
+  setRecoveryRotationMode,
+  recoveryRotationPassphrase = '',
+  setRecoveryRotationPassphrase,
+  onRotateRecoveryKey,
   busy,
   error,
   notice,
@@ -52,8 +58,10 @@ export function OfflineVaultPanel({
 
       {recoveryCode && (
         <div className="offline-vault-recovery" role="alert">
-          <strong>Guarda ahora tu clave de recuperación</strong>
-          <p>Es la única forma de recuperar esta bóveda si pierdes la frase de desbloqueo. Solo se muestra una vez y no se almacena en el servidor.</p>
+          <strong>{recoveryCodeType === 'rotated' ? 'Guarda tu nueva clave de recuperación' : 'Guarda ahora tu clave de recuperación'}</strong>
+          <p>{recoveryCodeType === 'rotated'
+            ? 'La clave anterior ya no funciona. Esta nueva clave sustituye a la anterior y solo se muestra una vez.'
+            : 'Es la única forma de recuperar esta bóveda si pierdes la frase de desbloqueo. Solo se muestra una vez y no se almacena en el servidor.'}</p>
           <code>{recoveryCode}</code>
           <div className="offline-vault-actions">
             <button type="button" className="capture-action-button" onClick={copyRecoveryKey}>Copiar clave</button>
@@ -152,7 +160,57 @@ export function OfflineVaultPanel({
             {busy ? 'Sincronizando…' : 'Sincronizar ahora'}
           </button>
           <button type="button" className="capture-action-button" onClick={onLock} disabled={busy}>Bloquear</button>
+          {!recoveryRotationMode && !recoveryCode && (
+            <button
+              type="button"
+              className="capture-action-button"
+              disabled={busy}
+              onClick={() => setRecoveryRotationMode?.(true)}
+            >
+              Renovar clave de recuperación
+            </button>
+          )}
         </div>
+      )}
+
+      {unlocked && recoveryRotationMode && !recoveryCode && (
+        <form className="offline-vault-access" onSubmit={onRotateRecoveryKey}>
+          <label className="offline-vault-passphrase">
+            <span>Confirma tu frase actual para renovar la clave</span>
+            <input
+              aria-label="Frase actual de desbloqueo offline"
+              type="password"
+              minLength={14}
+              autoComplete="off"
+              value={recoveryRotationPassphrase}
+              onChange={(event) => setRecoveryRotationPassphrase?.(event.target.value)}
+              required
+              disabled={busy}
+              placeholder="Frase de desbloqueo actual"
+            />
+          </label>
+          <div className="offline-vault-actions">
+            <button
+              type="submit"
+              className="capture-action-button"
+              disabled={busy || recoveryRotationPassphrase.length < 14}
+            >
+              {busy ? 'Renovando…' : 'Generar nueva clave de recuperación'}
+            </button>
+            <button
+              type="button"
+              className="capture-action-button"
+              disabled={busy}
+              onClick={() => {
+                setRecoveryRotationPassphrase?.('');
+                setRecoveryRotationMode?.(false);
+              }}
+            >
+              Cancelar renovación
+            </button>
+          </div>
+          <p>Esta operación se realiza localmente. La clave anterior quedará invalidada y las capturas cifradas no se modifican.</p>
+        </form>
       )}
 
       {unlocked && queuedCaptures.length > 0 && (
