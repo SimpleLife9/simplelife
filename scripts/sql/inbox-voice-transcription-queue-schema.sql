@@ -289,11 +289,11 @@ BEGIN
   v_new_attempt := v_job.attempt_number+1;
   v_expires_at := clock_timestamp()+make_interval(secs=>p_lease_seconds);
 
-  UPDATE private.inbox_voice_transcription_job
+  UPDATE private.inbox_voice_transcription_job AS j
   SET status='leased',attempt_number=v_new_attempt,
       lease_token=p_lease_token,lease_expires_at=v_expires_at,
       last_error_code=NULL,updated_at=clock_timestamp()
-  WHERE private.inbox_voice_transcription_job.asset_id=v_job.asset_id;
+  WHERE j.asset_id=v_job.asset_id;
 
   INSERT INTO private.inbox_voice_transcription_attempt(
     id,asset_id,attempt_number,lease_token,status
