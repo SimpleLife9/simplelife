@@ -167,6 +167,9 @@ DO $test$
 DECLARE
   v_capture uuid;
   v_part uuid;
+  v_duplicate_rejected boolean := false;
+  v_capture_count integer;
+  v_part_count integer;
 BEGIN
   IF NOT public.finalize_inbox_audio_upload_verified(
     '019b7200-0000-7000-8000-000000000001',
@@ -209,6 +212,41 @@ BEGIN
       AND retention_until IS NULL
   ) THEN
     RAISE EXCEPTION 'Original audio was not linked to its server-attributed transcript';
+  END IF;
+
+  -- A repeated completion must not create a second capture or capture_part
+  -- for an asset that has already reached the transcribed terminal state.
+  BEGIN
+    PERFORM 1 FROM public.record_inbox_voice_transcription(
+      '019b7200-0000-7000-8000-000000000001',
+      '019b7200-0000-7000-8000-000000000101',
+      '019b7200-0000-7000-8000-000000000108',
+      '019b7200-0000-7000-8000-000000000109',
+      'Duplicate transcript must not persist.',
+      'test-provider','fixture-model','us-west-2'
+    );
+  EXCEPTION WHEN insufficient_privilege THEN
+    v_duplicate_rejected := true;
+  END;
+  IF NOT v_duplicate_rejected THEN
+    RAISE EXCEPTION 'A transcribed asset accepted a duplicate completion';
+  END IF;
+
+  SELECT count(*) INTO v_capture_count
+  FROM public.capture
+  WHERE id IN (
+    '019b7200-0000-7000-8000-000000000103',
+    '019b7200-0000-7000-8000-000000000108'
+  );
+  SELECT count(*) INTO v_part_count
+  FROM public.capture_part
+  WHERE id IN (
+    '019b7200-0000-7000-8000-000000000104',
+    '019b7200-0000-7000-8000-000000000109'
+  );
+  IF v_capture_count <> 1 OR v_part_count <> 1 THEN
+    RAISE EXCEPTION 'Duplicate transcription changed capture/part counts (% / %)',
+      v_capture_count, v_part_count;
   END IF;
 END;
 $test$;

@@ -11,6 +11,7 @@ function validRoute() {
     capability: { id: "speech_to_text", status: "verified" },
     adapter: { id: "example-audio-transcriptions-v1", status: "verified" },
     account: { id: "account-free-1", status: "available", enabled: true },
+    legalEligibility: { status: "verified", allowed: true },
     inferenceRegion: { value: "us-east-1", status: "verified" },
     privacy: {
       noTraining: true,
@@ -37,6 +38,7 @@ function validRoute() {
       model: "model-card-1",
       adapter: "adapter-smoke-1",
       account: "provider-account-1",
+      legalEligibility: "legal-use-eligibility-1",
       region: "region-attestation-1",
       privacy: "privacy-terms-1",
       quota: "live-free-quota-probe-1",
@@ -69,6 +71,18 @@ test("unverified capability, model, adapter or account is not selectable", () =>
     route[section][key] = value;
     assert.equal(evaluateInboxSpeechRoute(route, NOW).reason, expected, section);
   }
+});
+
+test("unknown or denied jurisdiction and use-case eligibility is rejected", () => {
+  const unknown = validRoute();
+  unknown.legalEligibility.status = "unknown";
+  assert.equal(evaluateInboxSpeechRoute(unknown, NOW).reason,
+    "SPEECH_LEGAL_ELIGIBILITY_NOT_VERIFIED");
+
+  const denied = validRoute();
+  denied.legalEligibility.allowed = false;
+  assert.equal(evaluateInboxSpeechRoute(denied, NOW).reason,
+    "SPEECH_LEGAL_ELIGIBILITY_NOT_VERIFIED");
 });
 
 test("global or unverified inference location is rejected", () => {

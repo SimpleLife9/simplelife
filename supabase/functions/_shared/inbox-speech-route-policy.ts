@@ -61,6 +61,14 @@ export function evaluateInboxSpeechRoute(route, now = Date.now()) {
     return fail("SPEECH_ACCOUNT_NOT_AVAILABLE");
   }
 
+  // The provider/account must also be legally eligible for this account,
+  // deployment jurisdiction and specific API use case.
+  if (!isRecord(route.legalEligibility)
+    || route.legalEligibility.status !== "verified"
+    || route.legalEligibility.allowed !== true) {
+    return fail("SPEECH_LEGAL_ELIGIBILITY_NOT_VERIFIED");
+  }
+
   const region = route.inferenceRegion;
   if (!isRecord(region)
     || region.status !== "verified"
@@ -107,7 +115,7 @@ export function evaluateInboxSpeechRoute(route, now = Date.now()) {
   const evidence = route.evidence;
   const evidenceKeys = [
     "capability", "provider", "model", "adapter",
-    "account", "region", "privacy", "quota",
+    "account", "legalEligibility", "region", "privacy", "quota",
   ];
   if (!isRecord(evidence) || evidenceKeys.some((key) => !hasText(evidence[key]))) {
     return fail("SPEECH_ROUTE_EVIDENCE_INCOMPLETE");
