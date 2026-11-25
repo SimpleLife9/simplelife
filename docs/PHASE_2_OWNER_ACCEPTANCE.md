@@ -1,6 +1,6 @@
 # Phase 2 — Owner Acceptance (Desktop + Physical Android)
 
-**Status (updated 25 Nov 2026 AST):** PR #97 HEAD `5de11c82f2bbbfd3c14b2e92e513c114c1fb678a`; CI #876 exact-SHA and Cloudflare Preview validation **PASS**. The owner accepted the physical desktop/Android PWA shell cold start offline and the corrected non-obstructive readiness indicator. Existing Playwright checks cover desktop encrypted offline-save/retry and offline vault re-open without Supabase. Scheduler failure visibility is **PASS in DEV logs**, with intermittent DNS timeouts retained as an operational watch item. **Phase 2 owner acceptance remains OPEN** for Android recovery-key safe storage/recovery and actual force-close/reopen; physical Android voice recording/private access/controls; remaining desktop functional owner checks not yet accepted; and ARIA Model Routing/transcription after its planned 26 November recovery. The new mobile-viewport recovery-key UI E2E is being added and requires its own exact-SHA CI. Playwright does not replace physical-device acceptance.
+**Authoritative status (updated 25 Nov 2026 AST):** PR #97 HEAD 29de4c6ecaa610c462e44bd6107133f968cd52dc; CI #879 exact-SHA **SUCCESS (49/49 steps; zero failures)**. CI includes recovery-key rotation, browser/mobile, local Postgres/migrations, Deno, local Edge Runtime, build and exact Cloudflare Preview cold-start tests. Physical owner acceptance remains partial; see the consolidated current gate list in Section 9. Voice transcription/model-backed classification remains a **technical provider gate**, not a user check: do not send private captures/audio to a model until route, model, region, retention and free-only capacity are verified. PR #97 remains OPEN / DRAFT / NOT MERGED; DEV/Preview only.
 **Target:** SimpleLife DEV deployment from the final exact PR #97 SHA.
 **Required evidence:** final deployed SHA, desktop browser/version, Android model + Android version + browser/PWA mode, date, and owner PASS/FAIL for each section.
 
@@ -109,3 +109,43 @@ The former authenticated `finalize_inbox_audio_upload(uuid,integer,text)` RPC is
 - This test uses synthetic browser data and mocked Supabase. It does not read or alter the owner's real device, does not transmit the recovery key, and does not replace physical Android acceptance.
 - Commit/CI exact-SHA result to be recorded after the workflow finishes.
 - Physical Android acceptance still requires the owner to store the real recovery key outside the device and prove recovery after force-close/reopen in airplane mode. Do not ask the owner to paste the real key into chat or screenshots.
+
+
+## 9. Authoritative closeout — 25 November 2026
+
+This section supersedes the older status snapshots in Sections 7 and 8. Historical entries remain for audit; the exact current evidence and outstanding gates are consolidated here.
+
+### Automated engineering — PASS
+
+- **Current HEAD:** 29de4c6ecaa610c462e44bd6107133f968cd52dc.
+- **CI #879:** [SUCCESS](https://github.com/SimpleLife9/simplelife/actions/runs/45673467009), exact-SHA; all 49 workflow steps completed successfully, zero failed steps.
+- CI includes recovery-key unit tests, 159 unit tests total, Playwright browser/mobile, Deno dependency/type checks, clean Postgres migrations and SQL assertions, five local Edge Runtime smokes, production asset build and exact Cloudflare Preview verification.
+- Cloudflare Preview served the exact manifest and service worker; hosted cold-start suite passed 3/3, including first online visit → offline, full browser restart → offline, and browser HTTP-cache fallback.
+- **Recovery-key rotation:** while unlocked, the owner can enter the current passphrase and replace the one-time 256-bit recovery key locally. The previous recovery key is invalidated; the passphrase wrap and queued ciphertext stay intact. A wrong passphrase leaves the existing recovery wrap unchanged. New unit and mobile Playwright tests prove the old key is rejected, the new key restores the same queued capture, and the updated passphrase unlocks it. These tests use synthetic browser data and mocks; they do not access the owner's actual device or real key.
+- **Hosted DEV read-only checks (25 Nov):** Simplelife_dev is ACTIVE_HEALTHY; one-minute dispatcher cron and scheduler secret existence are confirmed without reading the secret; audio bucket is private; verified voice-finalizer RPC is service-role-only; old client-callable finalizer is not executable by authenticated users. No hosted data, secrets, migrations, cron or Edge Functions were changed during this audit.
+- The owner physically confirmed that the PWA shell starts offline on PC and Android and that the corrected readiness indicator no longer covers navigation. Earlier Android acceptance for offline encrypted text capture, background auto-lock and reconnect/sync remains recorded in Section 7.
+
+### Only remaining owner-side checks
+
+1. **Desktop — functional offline transaction:** create one disposable text capture while fully offline; reconnect; confirm exactly one capture/part appears. Repeat one interrupted/retry sync and confirm no duplicate.
+2. **Android — recovery and cold re-open:** while the vault is unlocked, generate a fresh recovery key using the current passphrase; store it outside the phone in a private password manager or safe place; force-close the PWA; reopen in airplane mode; unlock and verify the queued capture remains; then exercise recovery with the new key and verify the same capture remains. Never send the real key in chat or screenshots.
+3. **Android — microphone and controls:** record a short non-sensitive test phrase, verify it becomes a private voice asset and the recording controls/dialogs remain usable at normal display scale. This verifies capture/storage only; it must not be described as transcription.
+
+Already accepted tests are not to be repeated: initial offline app-shell start on both devices, repaired offline banner, sign-in and Inbox core capture/review/search/filter/provenance, and earlier Android airplane-mode encrypted text capture/background auto-lock/reconnect flow.
+
+### Technical provider gate — not owner acceptance
+
+- **Transcription and model-backed classification are not complete.** Deterministic local category proposals remain heuristics, not AI.
+- The owner preference recorded on 24 Nov remains: use ARIA canonical Model Routing after the planned 26 Nov recovery; Cloudflare Workers AI is an authorized fallback, not automatically activated. No model request or private audio/capture was sent in this session.
+- A read-only ARIA audit found Google Gemini Direct account/model/quota marked available in the database, but its evidence points to an old live probe and the model metadata says a fresh live probe is pending. Rate-limit/remaining quota numbers are unknown. GitHub's current static model registry also differs from database state. Treat the route as **not freshly certified** until ARIA reconciles that drift and completes an approved live synthetic probe.
+- Privacy/cost constraint: Google's current Gemini API pricing page says Free-tier content is used to improve its products, whereas Paid-tier content is not. Therefore Free-tier Gemini must not receive private SimpleLife audio or capture content. [Google Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing)
+- Cloudflare Workers AI documents zero retention for standard non-stateful inference and says customer content is not used to train models. Its Free Workers allocation is 10,000 Neurons/day; above that Free-plan requests fail, while Paid-plan usage above the allocation is billable. The owner has previously exhausted the Cloudflare free allocation, so do not enable or assume current capacity without checking the daily reset and enforcing a no-paid fail-closed limit. [Cloudflare Workers AI data usage](https://developers.cloudflare.com/workers-ai/platform/data-usage/) · [Cloudflare Workers AI pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/)
+- No paid billing, provider fallback or real transcription has been enabled. This gate is technical and cannot be cleared by the owner merely checking the phone.
+
+### Separate security observation — ARIA, not SimpleLife
+
+Supabase's schema advisor flagged two ARIA internal Mission Wonder tables with RLS disabled. A read-only privilege check confirmed anon and authenticated lack USAGE on schema aria_internal and have no table privileges for those relations. No data access through those roles was observed. This remains a separate defense-in-depth review; no RLS or policy changes were applied.
+
+### Release boundary
+
+PR #97 stays OPEN / DRAFT / NOT MERGED. No production deployment, production migration, billing change, external model request or real user audio upload was performed. Do not declare Phase 2 100% closed, merge, or begin Phase 3 until the provider gate is resolved and the three owner-side checks above are recorded PASS (or the owner explicitly removes/changes an acceptance requirement).
