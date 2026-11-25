@@ -163,3 +163,34 @@ PR #97 stays OPEN / DRAFT / NOT MERGED. No production deployment, production mig
 - Gemini Direct is also not an acceptable private-content route on Free Tier because Google's pricing terms state that Free-tier content can be used to improve products. Its ARIA text-generation route also lacks an explicitly registered speech-to-text capability in the current capability matrix. [Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing)
 - **Next technical step:** after the planned ARIA recovery on 26 Nov, reconcile repository/model/account/quota state with the live control plane; register and verify an explicit speech-to-text capability and approved provider/region; run a synthetic, non-sensitive audio smoke; confirm a strict free-only fail-closed budget; and only then enable server-side transcription in DEV. Classification of private capture text must also use an approved no-training/no-retention path. No provider call was made in this assessment; no audio or private capture was sent.
 
+
+
+## 16. Owner physical-test findings and corrective actions — 25 November 2026 (AST)
+
+### Desktop offline capture — NOT YET TESTED
+
+- The owner's first offline save attempt returned: "No hay conexión. Para guardar sin conexión, crea o desbloquea la bóveda privada primero." No capture was saved by that attempt.
+- This is the intended vault guard, but the previous test instruction omitted the setup prerequisite. Corrected procedure: while connected, open Inbox and inspect "Modo sin conexión privado". If it says "Sin configurar", create the vault with a private passphrase of at least 14 characters and store/confirm the one-time recovery key outside that PC. If it says "Bloqueada", unlock it with that PC's normal unlock passphrase. Keep it unlocked, disconnect all network access, then save the synthetic test capture with "Guardar cifrada". Reconnect and use "Sincronizar ahora"; verify one capture/part and duplicate-free retry.
+- The failed attempt did not constitute a successful offline save and is not counted as owner acceptance.
+
+### Android recovery-key clarification — OWNER ACTION STILL OPEN
+
+- The PC and Android vaults use separate local IndexedDB stores and independently generated data-encryption keys. The PC recovery key cannot recover the Android vault.
+- Losing only the Android recovery key does not prevent rotating it if the owner still knows the Android vault's normal unlock passphrase. On Android: unlock the existing vault using that passphrase, choose "Renovar clave de recuperación", enter the same current unlock passphrase in the confirmation field, generate a replacement key, and save/verify it outside the phone. This does not require the old recovery key and preserves queued ciphertext.
+- If both the Android unlock passphrase and Android recovery key are lost, queued ciphertext is unrecoverable by design. Do not clear browser storage, uninstall/reset the PWA, or create a replacement vault while the old queue may contain data.
+
+### Physical voice capture — PARTIAL PASS; storage metadata audit
+
+- The owner reports four voice assets in Inbox: two "esperando transcripción" and two "preparándose".
+- Read-only DEV metadata audit (no audio bytes read/downloaded) confirms the private inbox voice bucket is non-public, capped at 25 MiB, and the four records are split into two uploaded and two uploading. All four matching Storage objects exist and each object's stored size matches its registered metadata size.
+- The two uploaded items are correctly waiting for an approved transcription provider. The two uploading items have not completed the server-side SHA-256 finalization; object existence and size match are not by themselves integrity verification.
+- Added an owner-authenticated retry action to invoke the existing inbox voice finalizer endpoint for an uploading asset. The server re-downloads the private object, verifies size and SHA-256, and finalizes only when verified. This operation does not re-record, re-upload or send the audio to a model. Exact-SHA CI must pass before owner re-test.
+- The provider gate remains open. No transcription or external model request was run, and no audio was listened to.
+
+### Updated owner checklist
+
+1. PC: prepare/unlock the local vault **while online first**, then conduct the complete offline save → reconnect → sync → interrupted retry test.
+2. Android: the PC recovery key is not applicable. Use the Android normal unlock passphrase to rotate and safely store a new Android recovery key; if that passphrase is also lost, stop and do not reset local storage.
+3. Android voice: after the updated Preview is available, use "Reintentar verificación" on the two pending uploading assets. Confirm they change to "esperando transcripción". No need to record duplicates.
+
+These results do not change the release boundary: PR #97 remains OPEN / DRAFT / NOT MERGED, DEV/Preview only.
