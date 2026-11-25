@@ -69,11 +69,17 @@ test('a cold app launch works offline after one successful online visit', async 
   expect(cacheAudit.cachedUrls.some((url) => url.endsWith('.css'))).toBe(true);
   expect(cacheAudit.cachedUrls.some((url) => url.includes('supabase.co'))).toBe(false);
 
-  await onlinePage.close();
+  // Keep the installed origin alive while Chromium's offline emulation is
+  // enabled. This tests a genuine cold navigation in a new tab without
+  // terminating the only running worker before the browser can wake it.
   await context.setOffline(true);
   const offlinePage = await context.newPage();
   const pageErrors = [];
   offlinePage.on('pageerror', (error) => pageErrors.push(error.message));
+
+  const serviceWorkerSession = await context.newCDPSession(offlinePage);
+  await serviceWorkerSession.send('ServiceWorker.enable');
+  await serviceWorkerSession.send('ServiceWorker.startWorker', { scopeURL: appURL });
 
   const response = await offlinePage.goto(appURL, { waitUntil: 'load', timeout: 15_000 });
   expect(response?.ok()).toBe(true);
@@ -115,6 +121,13 @@ test('a cold app launch stays available offline after closing and reopening the 
     const offlinePage = context.pages()[0] || await context.newPage();
     const pageErrors = [];
     offlinePage.on('pageerror', (error) => pageErrors.push(error.message));
+
+    // On a closed profile Chromium may leave the SW process stopped. Wake the
+    // persisted registration through CDP, matching the browser's worker-start
+    // lifecycle before the first offline PWA navigation.
+    const serviceWorkerSession = await context.newCDPSession(offlinePage);
+    await serviceWorkerSession.send('ServiceWorker.enable');
+    await serviceWorkerSession.send('ServiceWorker.startWorker', { scopeURL: appURL });
 
     const response = await offlinePage.goto(appURL, {
       waitUntil: 'load',
