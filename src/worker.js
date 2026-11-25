@@ -6,8 +6,13 @@ export default {
     // Chrome does not implement stale-if-error for browser HTTP cache. Keep
     // the public document fresh for a bounded offline window instead, so a
     // cold navigation can be served without contacting the network at all.
+    // Cloudflare identifies browser navigations with Fetch Metadata. Read the
+    // header directly because Request.mode is not a reliable signal on every
+    // Worker/static-asset request path.
+    const isBrowserNavigation = request.headers.get('sec-fetch-mode') === 'navigate'
+      || request.mode === 'navigate';
     const isAppNavigation = request.method === 'GET'
-      && request.mode === 'navigate'
+      && isBrowserNavigation
       && response.ok;
 
     // Vite emits content-hashed files under /assets/. They are immutable and
@@ -18,6 +23,8 @@ export default {
 
     if (!isAppNavigation && !isHashedBuildAsset) return response;
 
+    // _headers rules do not apply to Worker-generated responses when
+    // run_worker_first is enabled, so set these policies on the Worker response.
     const headers = new Headers(response.headers);
     if (isAppNavigation) {
       headers.set('Cache-Control', 'public, max-age=604800');
