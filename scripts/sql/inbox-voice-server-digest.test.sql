@@ -12,19 +12,22 @@ BEGIN
 
   IF has_table_privilege('service_role','public.capture_audio_asset','INSERT')
      OR has_table_privilege('service_role','public.capture_audio_asset','UPDATE')
-     OR has_table_privilege('service_role','public.capture_audio_asset','DELETE') THEN
-    RAISE EXCEPTION 'service_role must not receive direct write privileges on capture_audio_asset';
+     OR has_table_privilege('service_role','public.capture_audio_asset','DELETE')
+     OR has_table_privilege('service_role','public.capture_audio_asset','TRUNCATE') THEN
+    RAISE EXCEPTION 'service_role must remain read-only on capture_audio_asset';
   END IF;
 
   IF has_table_privilege('anon','public.capture_audio_asset','SELECT')
      OR has_table_privilege('anon','public.capture_audio_asset','INSERT')
      OR has_table_privilege('anon','public.capture_audio_asset','UPDATE')
-     OR has_table_privilege('anon','public.capture_audio_asset','DELETE') THEN
+     OR has_table_privilege('anon','public.capture_audio_asset','DELETE')
+     OR has_table_privilege('anon','public.capture_audio_asset','TRUNCATE') THEN
     RAISE EXCEPTION 'Voice asset metadata must remain unavailable to anon';
   END IF;
 
   IF has_table_privilege('authenticated','public.capture_audio_asset','UPDATE')
-     OR has_table_privilege('authenticated','public.capture_audio_asset','DELETE') THEN
+     OR has_table_privilege('authenticated','public.capture_audio_asset','DELETE')
+     OR has_table_privilege('authenticated','public.capture_audio_asset','TRUNCATE') THEN
     RAISE EXCEPTION 'Authenticated users must not update or delete voice asset metadata directly';
   END IF;
 
