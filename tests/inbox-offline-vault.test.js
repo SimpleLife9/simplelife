@@ -171,6 +171,10 @@ test('offline vault rotates a lost recovery key only after current-passphrase ve
   assert.equal(stillQueued.contentOriginal, 'Esta captura debe sobrevivir a la renovación de la clave.');
 
   vault.lock();
+  await vault.unlock('rotation-original-passphrase-2026');
+  const [stillAvailableWithOriginalPassphrase] = await vault.listQueuedCaptures();
+  assert.equal(stillAvailableWithOriginalPassphrase.captureId, saved.captureId);
+
   await assert.rejects(
     vault.recoverWithRecoveryKey(oldRecoveryKey, 'new-rotation-passphrase-2026'),
     /RECOVERY_KEY_INVALID/,
@@ -181,7 +185,7 @@ test('offline vault rotates a lost recovery key only after current-passphrase ve
   assert.equal(recovered.contentOriginal, 'Esta captura debe sobrevivir a la renovación de la clave.');
 
   vault.lock();
-  await vault.unlock('rotation-original-passphrase-2026');
+  await vault.unlock('new-rotation-passphrase-2026');
   const [afterPassphraseUnlock] = await vault.listQueuedCaptures();
   assert.equal(afterPassphraseUnlock.captureId, saved.captureId);
 });
