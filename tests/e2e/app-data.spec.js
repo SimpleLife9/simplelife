@@ -4356,7 +4356,7 @@ test('mobile voice capture uploads a private original and leaves transcription p
   await page.getByLabel('Correo electrónico').fill(authUser.email);
   await page.getByLabel('Contraseña').fill('not-a-real-password');
   await page.getByRole('button', { name: 'Iniciar sesión' }).click();
-  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+  await page.locator('.mobile-nav').getByRole('button', { name: /Inbox/ }).click();
 
   const voicePanel = page.getByRole('region', { name: 'Captura de voz privada' });
   const recordButton = voicePanel.getByRole('button', { name: 'Grabar audio' });
