@@ -75,7 +75,9 @@ self.addEventListener('fetch', (event) => {
   if (APP_SHELL.includes(url.pathname) || url.pathname.startsWith('/assets/')) {
     event.respondWith((async () => {
       const cache = await caches.open(CACHE_NAME);
-      const cached = await cache.match(request);
+      // Preview/static hosts may add Vary: Origin even for identical public bundles.
+      // Ignore that header difference when serving same-origin immutable build assets.
+      const cached = await cache.match(request, { ignoreVary: true });
       if (cached) return cached;
 
       const response = await fetch(request);
