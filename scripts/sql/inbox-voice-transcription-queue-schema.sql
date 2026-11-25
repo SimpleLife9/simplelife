@@ -215,15 +215,15 @@ BEGIN
       WHEN 'expired' THEN 'AUDIO_RETENTION_EXPIRED'
       ELSE 'LEASE_EXPIRED_BEFORE_REQUEST'
     END;
-    UPDATE private.inbox_voice_transcription_attempt
+    UPDATE private.inbox_voice_transcription_attempt AS a
     SET status=v_next_status,finished_at=clock_timestamp(),error_code=v_error_code
-    WHERE asset_id=v_stale.asset_id AND lease_token=v_stale.lease_token
-      AND finished_at IS NULL;
-    UPDATE private.inbox_voice_transcription_job
+    WHERE a.asset_id=v_stale.asset_id AND a.lease_token=v_stale.lease_token
+      AND a.finished_at IS NULL;
+    UPDATE private.inbox_voice_transcription_job AS j
     SET status=v_next_status,lease_token=NULL,lease_expires_at=NULL,
         last_error_code=v_error_code,updated_at=clock_timestamp()
-    WHERE asset_id=v_stale.asset_id AND status='leased'
-      AND lease_token=v_stale.lease_token;
+    WHERE j.asset_id=v_stale.asset_id AND j.status='leased'
+      AND j.lease_token=v_stale.lease_token;
   END LOOP;
 
   -- Retention expiry or a changed asset state makes queued work terminal.
@@ -238,32 +238,32 @@ BEGIN
       )
     FOR UPDATE OF j SKIP LOCKED
   LOOP
-    UPDATE private.inbox_voice_transcription_attempt
+    UPDATE private.inbox_voice_transcription_attempt AS a
     SET status='expired',finished_at=clock_timestamp(),error_code='AUDIO_RETENTION_EXPIRED'
-    WHERE asset_id=v_stale.asset_id AND attempt_number=v_stale.attempt_number
-      AND finished_at IS NULL;
-    UPDATE private.inbox_voice_transcription_job
+    WHERE a.asset_id=v_stale.asset_id AND a.attempt_number=v_stale.attempt_number
+      AND a.finished_at IS NULL;
+    UPDATE private.inbox_voice_transcription_job AS j
     SET status='expired',lease_token=NULL,lease_expires_at=NULL,
         last_error_code='AUDIO_RETENTION_EXPIRED',updated_at=clock_timestamp()
-    WHERE asset_id=v_stale.asset_id;
+    WHERE j.asset_id=v_stale.asset_id;
   END LOOP;
 
   -- Bound retries. Reaching the limit requires manual review; it never loops.
   FOR v_stale IN
-    SELECT asset_id,attempt_number
-    FROM private.inbox_voice_transcription_job
-    WHERE status IN ('queued','retryable') AND attempt_number>=3
-    FOR UPDATE SKIP LOCKED
+    SELECT j.asset_id,j.attempt_number
+    FROM private.inbox_voice_transcription_job AS j
+    WHERE j.status IN ('queued','retryable') AND j.attempt_number>=3
+    FOR UPDATE OF j SKIP LOCKED
   LOOP
-    UPDATE private.inbox_voice_transcription_attempt
+    UPDATE private.inbox_voice_transcription_attempt AS a
     SET status='manual_review',finished_at=clock_timestamp(),
         error_code='MAX_ATTEMPTS_EXCEEDED'
-    WHERE asset_id=v_stale.asset_id AND attempt_number=v_stale.attempt_number
-      AND finished_at IS NULL;
-    UPDATE private.inbox_voice_transcription_job
+    WHERE a.asset_id=v_stale.asset_id AND a.attempt_number=v_stale.attempt_number
+      AND a.finished_at IS NULL;
+    UPDATE private.inbox_voice_transcription_job AS j
     SET status='manual_review',last_error_code='MAX_ATTEMPTS_EXCEEDED',
         updated_at=clock_timestamp()
-    WHERE asset_id=v_stale.asset_id;
+    WHERE j.asset_id=v_stale.asset_id;
   END LOOP;
 
   SELECT j.* INTO v_job
