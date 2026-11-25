@@ -217,6 +217,7 @@ DECLARE
   v_run_out uuid;
   v_replayed boolean;
   v_state text;
+  v_count integer;
   v_conflict_rejected boolean := false;
 BEGIN
   SELECT * INTO v_claim
@@ -306,8 +307,8 @@ BEGIN
     RAISE EXCEPTION 'Conflicting completion overwrote a committed transcript';
   END IF;
 
-  SELECT count(*) INTO v_state FROM public.processing_run WHERE capture_id=v_capture;
-  IF v_state<>1 THEN RAISE EXCEPTION 'Replay created a duplicate Inbox processing run'; END IF;
+  SELECT count(*) INTO v_count FROM public.processing_run WHERE capture_id=v_capture;
+  IF v_count<>1 THEN RAISE EXCEPTION 'Replay created a duplicate Inbox processing run'; END IF;
 
   -- The fourth asset exercises a definitive worker failure after request_started.
   SELECT * INTO v_claim
