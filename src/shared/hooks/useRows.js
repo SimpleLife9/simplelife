@@ -27,7 +27,7 @@ export function useRows(table, profile, refreshKey, configure = null) {
         setRows([]);
         previousOwnerIdRef.current = ownerId;
       }
-      if (!ownerId || !online) {
+      if (!ownerId || !online || profile?.offlineOnly === true) {
         setLoading(false);
         setLocalError('');
         return;
