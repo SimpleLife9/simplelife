@@ -111,7 +111,8 @@ export function useAppAuth({ setAppError }) {
       try {
         const { data, error } = await supabase.auth.getSession();
         if (!alive || error || !data.session?.user) return;
-        setProfileReady(false);
+        // The temporary owner-bound profile is already ready. Keep Inbox mounted
+        // while revalidating so its unlocked local vault is not discarded.
         await loadProfile(data.session.user);
       } catch {
         // Keep the locally bound profile and encrypted vault available.
