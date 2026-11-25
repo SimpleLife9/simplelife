@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { supabase } from '../../lib/supabase.js';
 
 export function useRows(table, profile, refreshKey, configure = null) {
@@ -6,6 +6,7 @@ export function useRows(table, profile, refreshKey, configure = null) {
   const [loading, setLoading] = useState(true);
   const [localError, setLocalError] = useState('');
   const [online, setOnline] = useState(() => globalThis.navigator?.onLine !== false);
+  const previousOwnerIdRef = useRef(profile?.id || null);
 
   useEffect(() => {
     const updateConnection = () => setOnline(globalThis.navigator?.onLine !== false);
@@ -21,7 +22,12 @@ export function useRows(table, profile, refreshKey, configure = null) {
   useEffect(() => {
     let alive = true;
     const load = async () => {
-      if (!profile?.id || !online) {
+      const ownerId = profile?.id || null;
+      if (previousOwnerIdRef.current !== ownerId) {
+        setRows([]);
+        previousOwnerIdRef.current = ownerId;
+      }
+      if (!ownerId || !online) {
         setLoading(false);
         setLocalError('');
         return;
