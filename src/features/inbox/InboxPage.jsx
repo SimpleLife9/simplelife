@@ -206,7 +206,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
   };
 
   const syncOfflineCaptures = () => runAction(async () => {
-    if (!offlineOnline) throw new Error('No hay conexión. Las capturas cifradas permanecen en el dispositivo.');
+    if (!offlineOnline || profile?.offlineOnly === true) throw new Error('El perfil aún está en modo local. Reconecta y espera a que SimpleLife verifique tu cuenta antes de sincronizar.');
     if (!offlineVault || !offlineStateMatchesOwner || !visibleOfflineVaultStatus.unlocked) throw new Error('Desbloquea la bóveda offline antes de sincronizar.');
     const result = await offlineVault.syncPending(async (capture) => {
       const { data, error } = await supabase.rpc('sync_inbox_offline_text_capture', {
@@ -328,9 +328,11 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
     setLocalError('');
     const timer = setTimeout(async () => {
       try {
-        if (globalThis.navigator?.onLine === false) {
+        if (globalThis.navigator?.onLine === false || profile?.offlineOnly === true) {
           if (isCurrentQuery()) {
-            setLocalError('Sin conexión: el archivo sincronizado no está disponible. Desbloquea la bóveda para consultar las capturas locales de este dispositivo.');
+            setLocalError(profile?.offlineOnly === true
+              ? 'Verificando la identidad de tu cuenta. Mientras tanto, puedes usar la bóveda local; el archivo sincronizado se cargará al confirmar el perfil.'
+              : 'Sin conexión: el archivo sincronizado no está disponible. Desbloquea la bóveda para consultar las capturas locales de este dispositivo.');
           }
           return;
         }
@@ -357,7 +359,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
       duplicateRequestGenerationRef.current += 1;
       clearTimeout(timer);
     };
-  }, [profile?.id, refreshKey, captureSearch, attentionFilter, offlineOnline]);
+  }, [profile?.id, profile?.offlineOnly, refreshKey, captureSearch, attentionFilter, offlineOnline]);
 
   const loadMoreCaptures = async () => {
     if (loadingMore || loading || !hasMore) return;
