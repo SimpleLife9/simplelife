@@ -12,9 +12,15 @@ function equal(actual, expected, label) {
 function parseJson(text, label) {
   try { return JSON.parse(text); } catch { fail(label + " returned invalid JSON: " + text); }
 }
+function redactSensitiveOutput(value) {
+  return String(value)
+    .replace(/\b(sb_secret|sb_publishable)_[A-Za-z0-9_-]+/g, "$1_[REDACTED]")
+    .replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "[REDACTED_JWT]");
+}
+
 function run(command, args) {
   const result = spawnSync(command, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-  if (result.status !== 0) fail(command + " failed:\n" + result.stdout + "\n" + result.stderr);
+  if (result.status !== 0) fail(command + " failed:\n" + redactSensitiveOutput(result.stdout + "\n" + result.stderr));
   return result.stdout + result.stderr;
 }
 function sqlScalar(sql) {
