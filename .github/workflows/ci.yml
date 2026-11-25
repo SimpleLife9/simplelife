@@ -239,12 +239,36 @@ jobs:
                   .update(actualServiceWorker)
                   .digest('hex');
                 if (actualServiceWorkerHash === expectedServiceWorkerHash) {
-                  console.log(`Preview serves the exact production asset manifest (${actual.assets.length} assets).`);
-                  console.log(`Preview serves the exact production Service Worker (sha256 ${actualServiceWorkerHash}).`);
-                  process.exit(0);
-                }
+                  // A matching manifest and Service Worker are not sufficient:
+                  // Cloudflare's static asset headers must also be deployed.
+                  // Send the same Fetch Metadata used by a browser navigation
+                  // so this gate observes the actual app-document cache policy.
+                  const documentUrl = new URL('/', process.env.PWA_PREVIEW_URL);
+                  documentUrl.searchParams.set('ci_check', String(Date.now()));
+                  const documentResponse = await fetch(documentUrl, {
+                    cache: 'no-store',
+                    headers: {
+                      'sec-fetch-mode': 'navigate',
+                      'sec-fetch-dest': 'document',
+                    },
+                    signal: AbortSignal.timeout(8_000),
+                  });
+                  if (!documentResponse.ok) {
+                    throw new Error(`Preview app document returned HTTP ${documentResponse.status}`);
+                  }
 
-                lastIssue = 'Preview Service Worker is stale; its content hash does not match dist/sw.js.';
+                  const documentCacheControl = documentResponse.headers.get('cache-control') || '';
+                  if (!/max-age=604800/.test(documentCacheControl)) {
+                    lastIssue = `Preview app document cache policy is stale: ${documentCacheControl || 'missing'}`;
+                  } else {
+                    console.log(`Preview serves the exact production asset manifest (${actual.assets.length} assets).`);
+                    console.log(`Preview serves the exact production Service Worker (sha256 ${actualServiceWorkerHash}).`);
+                    console.log(`Preview app document cache policy verified (${documentCacheControl}).`);
+                    process.exit(0);
+                  }
+                } else {
+                  lastIssue = 'Preview Service Worker is stale; its content hash does not match dist/sw.js.';
+                }
               }
             } catch (error) {
               lastIssue = error.message;
