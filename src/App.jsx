@@ -8,9 +8,10 @@ import { getPageTitle, getPageDescription } from './app/navigation.js';
 import { createAppActions } from './app/createAppActions.js';
 import { AppPages } from './app/AppPages.jsx';
 import { useAppAuth } from './app/useAppAuth.js';
+import { OFFLINE_SHELL_CACHE_NAME, getOfflineShellStatusMessage } from './lib/offline-shell-readiness.js';
 
 function OfflinePreparationStatus() {
-  const [state, setState] = useState(import.meta.env.PROD ? 'preparing' : 'hidden');
+  const [state, setState] = useState(import.meta.env.PROD ? 'checking' : 'hidden');
 
   useEffect(() => {
     if (!import.meta.env.PROD || !('serviceWorker' in navigator) || !('caches' in window)) {
@@ -39,7 +40,7 @@ function OfflinePreparationStatus() {
           return;
         }
 
-        const cache = await caches.open('simplelife-shell-v2');
+        const cache = await caches.open(OFFLINE_SHELL_CACHE_NAME);
         const manifestResponse = await cache.match(
           new URL('/precache-manifest.json', window.location.origin).href,
           { ignoreVary: true },
@@ -90,13 +91,10 @@ function OfflinePreparationStatus() {
     };
   }, []);
 
-  if (state === 'hidden') return null;
+  if (state === 'hidden' || state === 'checking' || state === 'ready') return null;
 
-  const message = state === 'ready'
-    ? 'Modo sin conexión preparado'
-    : state === 'unavailable'
-      ? 'Mantén Internet conectado para preparar el modo sin conexión'
-      : 'Preparando modo sin conexión…';
+  const message = getOfflineShellStatusMessage(state, navigator.onLine !== false);
+  if (!message) return null;
 
   return (
     <div className={`offline-shell-status is-${state}`} role="status" aria-live="polite">
