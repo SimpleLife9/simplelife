@@ -4360,6 +4360,9 @@ test('offline reopen restores the same owner vault and encrypted queue without S
   const blockSupabase = (route) => route.abort();
   await page.route(`${projectUrl}/**`, blockSupabase);
   await page.reload();
+  // A full reload restores the app's default section (Today); navigate back
+  // to Inbox before asserting its private vault state.
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
   await expect(page.locator('.connection-state')).toHaveText('Sin conexión');
   await expect(page.locator('.offline-vault-state')).toHaveText('Bloqueada');
   await expect(page.getByLabel('Frase de desbloqueo offline')).toBeVisible();
