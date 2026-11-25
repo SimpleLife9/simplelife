@@ -51,9 +51,9 @@ test('offline profile cache rejects malformed IDs and corrupted records', () => 
   storage.setItem('simplelife:offline-profile:v1:' + authUserA, JSON.stringify({
     version: 1,
     authUserId: authUserA,
-    profileId: profileB,
+    profileId: 'not-a-uuid',
   }));
-  assert.equal(getCachedProfileIdForAuthUser(authUserA, storage), profileB);
+  assert.equal(getCachedProfileIdForAuthUser(authUserA, storage), null);
 });
 
 test('offline profile cache handles unavailable browser storage without throwing', () => {
