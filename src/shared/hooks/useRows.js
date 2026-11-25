@@ -6,7 +6,10 @@ export function useRows(table, profile, refreshKey, configure = null) {
   const [loading, setLoading] = useState(true);
   const [localError, setLocalError] = useState('');
   const [online, setOnline] = useState(() => globalThis.navigator?.onLine !== false);
-  const previousOwnerIdRef = useRef(profile?.id || null);
+  const profileIdentityRef = useRef({
+    ownerId: profile?.id || null,
+    offlineOnly: profile?.offlineOnly === true,
+  });
 
   useEffect(() => {
     const updateConnection = () => setOnline(globalThis.navigator?.onLine !== false);
@@ -23,11 +26,13 @@ export function useRows(table, profile, refreshKey, configure = null) {
     let alive = true;
     const load = async () => {
       const ownerId = profile?.id || null;
-      if (previousOwnerIdRef.current !== ownerId) {
+      const offlineOnly = profile?.offlineOnly === true;
+      if (profileIdentityRef.current.ownerId !== ownerId
+        || profileIdentityRef.current.offlineOnly !== offlineOnly) {
         setRows([]);
-        previousOwnerIdRef.current = ownerId;
+        profileIdentityRef.current = { ownerId, offlineOnly };
       }
-      if (!ownerId || !online || profile?.offlineOnly === true) {
+      if (!ownerId || !online || offlineOnly) {
         setLoading(false);
         setLocalError('');
         return;
@@ -48,7 +53,7 @@ export function useRows(table, profile, refreshKey, configure = null) {
     };
     void load();
     return () => { alive = false; };
-  }, [table, profile?.id, refreshKey, online]);
+  }, [table, profile?.id, profile?.offlineOnly, refreshKey, online]);
 
   return { rows, loading, localError, setRows };
 }
