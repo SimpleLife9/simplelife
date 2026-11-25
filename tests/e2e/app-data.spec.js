@@ -1138,7 +1138,7 @@ async function mockSupabaseSession(page, initialData = {}) {
       const payload = request.postDataJSON();
       const rows = Array.isArray(payload) ? payload : [payload];
       insertedVoiceAssets.push(...rows);
-      voiceAssets.push(...rows);
+      voiceAssets.push(...rows.map((row) => ({ ...row })));
       await json(201, rows, { 'content-range': '0-0/*' });
       return;
     }
