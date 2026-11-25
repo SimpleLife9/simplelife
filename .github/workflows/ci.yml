@@ -185,6 +185,53 @@ jobs:
       - name: Verify production PWA cold-start offline launch
         run: npm run test:pwa
 
+      - name: Wait for Cloudflare branch Preview to match this production build
+        if: github.event_name == 'pull_request'
+        env:
+          PWA_PREVIEW_URL: https://feat-phase2-inbox-completion-v1-simplelife-inbox-p2-preview.robvg9.workers.dev
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFile } from 'node:fs/promises';
+
+          const expected = JSON.parse(await readFile('dist/precache-manifest.json', 'utf8'));
+          const expectedAssets = JSON.stringify([...expected.assets].sort());
+          const deadline = Date.now() + 180_000;
+          let lastIssue = 'Preview deployment has not published the current build.';
+
+          while (Date.now() < deadline) {
+            try {
+              const manifestUrl = new URL('/precache-manifest.json', process.env.PWA_PREVIEW_URL);
+              manifestUrl.searchParams.set('ci_check', String(Date.now()));
+              const response = await fetch(manifestUrl, {
+                cache: 'no-store',
+                signal: AbortSignal.timeout(8_000),
+              });
+              if (!response.ok) throw new Error(`Preview returned HTTP ${response.status}`);
+
+              const actual = await response.json();
+              if (actual.version === expected.version && Array.isArray(actual.assets)
+                && JSON.stringify([...actual.assets].sort()) === expectedAssets) {
+                console.log(`Preview serves the exact production asset manifest (${actual.assets.length} assets).`);
+                process.exit(0);
+              }
+
+              lastIssue = 'Preview manifest does not match the asset list built by this CI commit.';
+            } catch (error) {
+              lastIssue = error.message;
+            }
+
+            await new Promise((resolve) => setTimeout(resolve, 5_000));
+          }
+
+          throw new Error(`Cloudflare Preview did not match this CI build: ${lastIssue}`);
+          NODE
+
+      - name: Verify Cloudflare Preview cold launch after full browser restart
+        if: github.event_name == 'pull_request'
+        env:
+          PWA_BASE_URL: https://feat-phase2-inbox-completion-v1-simplelife-inbox-p2-preview.robvg9.workers.dev
+        run: npm run test:pwa
+
       - name: Upload browser traces on failure
         if: failure()
         uses: actions/upload-artifact@v4
