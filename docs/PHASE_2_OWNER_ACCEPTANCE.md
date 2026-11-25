@@ -1,6 +1,6 @@
 # Phase 2 — Owner Acceptance (Desktop + Physical Android)
 
-**Authoritative status (updated 25 Nov 2026 AST):** PR #97 HEAD 1b6c8327db46602d94bdc67adf556923a01e0ad0; CI #881 exact-SHA **SUCCESS (48 required steps PASS; one conditional failure-artifact upload step SKIPPED as expected; zero failures)**. The full branch includes the exact-SHA validations of functional code (CI #879), consolidated acceptance docs (CI #880), and the final documentation correction (CI #881). Physical owner acceptance remains partial; see the consolidated current gate list in Section 9. Voice transcription/model-backed classification remains a **technical provider gate**, not a user check: do not send private captures/audio to a model until route, model, region, retention and free-only capacity are verified. PR #97 remains OPEN / DRAFT / NOT MERGED; DEV/Preview only.
+**Authoritative status (updated 25 Nov 2026 AST):** Latest functional-code HEAD before this documentation-only closeout: `40eab5b944b0e957e32b796c5b803d15edd88c78`; CI #886 exact-SHA [SUCCESS](https://github.com/SimpleLife9/simplelife/actions/runs/45712399806). The owner-confirmed checks completed in this session are consolidated in Section 17: PC offline save + reconnect visibility, Android recovery-key renewal, and verification/finalization of all four private voice assets. This status-only documentation commit requires its own exact-SHA CI run before validation. The only Phase 2 technical blocker is a verified private speech-to-text route; current ARIA control-plane and declarative registries contain no registered `speech-to-text` capability. PR #97 remains OPEN / DRAFT / NOT MERGED; Preview/DEV only.
 **Target:** SimpleLife DEV deployment from the final exact PR #97 SHA.
 **Required evidence:** final deployed SHA, desktop browser/version, Android model + Android version + browser/PWA mode, date, and owner PASS/FAIL for each section.
 
@@ -194,3 +194,35 @@ PR #97 stays OPEN / DRAFT / NOT MERGED. No production deployment, production mig
 3. Android voice: after the updated Preview is available, use "Reintentar verificación" on the two pending uploading assets. Confirm they change to "esperando transcripción". No need to record duplicates.
 
 These results do not change the release boundary: PR #97 remains OPEN / DRAFT / NOT MERGED, DEV/Preview only.
+
+## 17. Consolidated owner acceptance and ARIA capability audit — 25 November 2026
+
+### Owner-confirmed physical checks — PASS
+
+- **PC offline capture + reconnect:** Roberto confirmed the encrypted offline capture saved successfully and appears correctly after reconnect. Record as owner-confirmed PASS for offline save and subsequent visibility/synchronization.
+- **Android recovery key:** Roberto replied “listo” after the recovery-key renewal procedure. Record as owner-confirmed PASS for renewal. Keep the replacement recovery key stored outside the phone; the key itself is not copied into this document or chat.
+- **Private voice assets:** after “Reintentar verificación”, all four records display “Audio original · esperando transcripción”. This confirms that the two records previously stuck in `uploading` completed server-side object verification/finalization and joined the two already uploaded records. No re-recording or re-upload is needed.
+- **Scope of these PASS results:** the PC result confirms the save and post-reconnect appearance reported by the owner; it is not a claim that a separate manually interrupted retry was performed. The voice result confirms private-asset upload/finalization, **not** transcription or AI classification.
+
+### Current ARIA speech-to-text gate — OPEN
+
+- Read-only Supabase project check: ARIA project `icuqsstxfdbvjytkhlog` is `ACTIVE_HEALTHY`. No schema, rows, secrets, functions, quota or provider settings were changed.
+- Read-only inspection of `aria_internal.capability_matrix` found only registered `text_generation` capabilities. A direct query for capability IDs containing `speech`, `transcrib` or `audio`, and for model capability metadata containing those terms, returned no rows.
+- GitHub `Robvg9/aria-worker@main` declares `capabilities/registry.json` version `aria-capability-matrix-v1.1.1`; its canonical capability list contains only `text_generation`. `models/registry.json` is version `aria-model-registry-v1.0.5`; the inspected model references do not establish speech-to-text support.
+- The SimpleLife worker at the tested HEAD continues to identify its processing engine as `deterministic-rules`. It does not call an external model. Its classification proposals remain heuristic and advisory.
+- Conclusion: there is no registered, evidence-backed speech-to-text route available for SimpleLife to invoke today. A model being multimodal, an old provider probe, or a successful text-generation route does not prove transcription capability. Keep the four private assets waiting; do not send their contents to a provider.
+
+### Next technical sequence
+
+1. After the planned ARIA recovery on 26 Nov, reconcile the live Control Plane with the GitHub provider/model/capability registries and current account/quota state.
+2. Require an explicit `speech-to-text` capability, exact model and adapter, evidence from a synthetic non-sensitive audio probe, acceptable inference region and retention terms.
+3. Enforce a strict Free-only budget with fail-closed behavior. No paid fallback, billing activation, or silent provider substitution.
+4. Only after all gates pass, integrate server-side transcription in DEV, preserving the original asset, idempotency, provenance and manual review; then run exact-SHA CI/E2E.
+5. Keep private capture-text classification on an independently approved privacy-safe route. The current deterministic classifier remains available as a transparent heuristic fallback.
+
+### Release boundary
+
+- PR #97 remains OPEN / DRAFT / NOT MERGED.
+- CI #886 remains the PASS for functional code SHA `40eab5b944b0e957e32b796c5b803d15edd88c78`. The documentation-only update containing this Section 17 must pass its own exact-SHA CI.
+- No production deploy, production migration, paid billing, provider request, audio download/listening, or real private-content transmission occurred.
+- Phase 2 is not 100% closed until the speech-to-text/provider gate is verified and the resulting DEV integration passes exact-SHA validation.
