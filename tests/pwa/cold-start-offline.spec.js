@@ -37,8 +37,8 @@ test('a cold app launch works offline after one successful online visit', async 
   expect(cacheAudit.missing).toEqual([]);
   expect(cacheAudit.cachedUrls).toContain('/index.html');
   expect(cacheAudit.cachedUrls).toContain('/precache-manifest.json');
-  expect(cacheAudit.cachedUrls.some((url) => /\\.js$/.test(url))).toBe(true);
-  expect(cacheAudit.cachedUrls.some((url) => /\\.css$/.test(url))).toBe(true);
+  expect(cacheAudit.cachedUrls.some((url) => url.endsWith('.js'))).toBe(true);
+  expect(cacheAudit.cachedUrls.some((url) => url.endsWith('.css'))).toBe(true);
   expect(cacheAudit.cachedUrls.some((url) => url.includes('supabase.co'))).toBe(false);
 
   // Close the already-running document, then open the same app origin offline.
