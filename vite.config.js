@@ -1,9 +1,29 @@
 import { defineConfig } from 'vite';
 
+function appShellPrecacheManifest() {
+  return {
+    name: 'simplelife-app-shell-precache-manifest',
+    apply: 'build',
+    generateBundle(_options, bundle) {
+      const assets = Object.keys(bundle)
+        .filter((fileName) => fileName !== 'precache-manifest.json'
+          && fileName !== 'sw.js'
+          && !fileName.endsWith('.map'))
+        .map((fileName) => `/${fileName}`);
+
+      this.emitFile({
+        type: 'asset',
+        fileName: 'precache-manifest.json',
+        source: JSON.stringify({ version: 1, assets }, null, 2),
+      });
+    },
+  };
+}
+
 export default defineConfig({
   // Cloudflare's Workers Builds initializer injects its plugin here.
-  // Keeping an explicit array also allows plain Vite builds to run unchanged.
-  plugins: [],
+  // Keep the local build plugin alongside that deployment integration.
+  plugins: [appShellPrecacheManifest()],
   server: {
     host: '0.0.0.0',
     port: 5173,
