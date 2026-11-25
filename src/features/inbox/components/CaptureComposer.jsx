@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { createSingleSubmissionGate } from '../domain/capture-pipeline.js';
 
-export function CaptureComposer({ busy = false, onSubmit, onSaveOffline, onOfflineUnavailable }) {
+export function CaptureComposer({ busy = false, offlineOnly = false, onSubmit, onSaveOffline, onOfflineUnavailable }) {
   const [contentOriginal, setContentOriginal] = useState('');
   const submissionGate = useRef(null);
 
@@ -14,7 +14,7 @@ export function CaptureComposer({ busy = false, onSubmit, onSaveOffline, onOffli
     const source = contentOriginal;
     if (!source.trim()) return;
 
-    const offline = globalThis.navigator?.onLine === false;
+    const offline = globalThis.navigator?.onLine === false || offlineOnly;
     if (offline && !onSaveOffline) {
       onOfflineUnavailable?.();
       return;
@@ -59,7 +59,7 @@ export function CaptureComposer({ busy = false, onSubmit, onSaveOffline, onOffli
               </button>
             )}
             <button className="button button-primary" disabled={busy || !contentOriginal.trim()}>
-              {globalThis.navigator?.onLine === false ? 'Guardar offline' : 'Guardar captura'} <span>→</span>
+              {globalThis.navigator?.onLine === false || offlineOnly ? 'Guardar offline' : 'Guardar captura'} <span>→</span>
             </button>
           </div>
         </div>
