@@ -1,6 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const baseURL = 'http://127.0.0.1:4173';
+const baseURL = process.env.PWA_BASE_URL || 'http://127.0.0.1:4173';
+const useLocalPreview = !process.env.PWA_BASE_URL;
 
 export default defineConfig({
   testDir: './tests/pwa',
@@ -21,10 +22,12 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
   ],
-  webServer: {
-    command: 'npm run preview -- --host 127.0.0.1 --port 4173 --strictPort',
-    url: baseURL,
-    reuseExistingServer: !process.env.CI,
-    timeout: 30_000,
-  },
+  webServer: useLocalPreview
+    ? {
+      command: 'npm run preview -- --host 127.0.0.1 --port 4173 --strictPort',
+      url: baseURL,
+      reuseExistingServer: !process.env.CI,
+      timeout: 30_000,
+    }
+    : undefined,
 });
