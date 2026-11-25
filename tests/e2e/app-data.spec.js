@@ -4357,7 +4357,8 @@ test('offline reopen restores the same owner vault and encrypted queue without S
   await page.addInitScript(() => {
     Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => false });
   });
-  await page.route(`${projectUrl}/**`, (route) => route.abort());
+  const blockSupabase = (route) => route.abort();
+  await page.route(`${projectUrl}/**`, blockSupabase);
   await page.reload();
   await expect(page.locator('.connection-state')).toHaveText('Sin conexión');
   await expect(page.locator('.offline-vault-state')).toHaveText('Bloqueada');
@@ -4372,6 +4373,22 @@ test('offline reopen restores the same owner vault and encrypted queue without S
     .toContainText('1 captura(s) cifrada(s) pendiente(s)');
   await expect(page.getByRole('button', { name: 'Sincronizar ahora' })).toBeDisabled();
   await expect(page.getByRole('button', { name: /Grabar audio/ })).toBeDisabled();
+
+  // Reconnect and allow the same authenticated owner to revalidate against DEV.
+  await page.unroute(`${projectUrl}/**`, blockSupabase);
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => true });
+    window.dispatchEvent(new Event('online'));
+  });
+  await expect(page.locator('.connection-state')).toHaveText('Con conexión');
+  await expect(page.getByText('Llamar al proveedor antes del viernes')).toBeVisible();
+  const syncButton = page.getByRole('button', { name: 'Sincronizar ahora' });
+  await expect(syncButton).toBeEnabled();
+  await syncButton.click();
+  await expect(page.locator('.offline-vault-panel'))
+    .toContainText('0 captura(s) cifrada(s) pendiente(s)');
+  await expect(page.locator('.alert.alert-success'))
+    .toContainText('Capturas offline sincronizadas.');
 });
 
 test('mobile voice capture uploads a private original and leaves transcription pending', async ({ page }) => {
