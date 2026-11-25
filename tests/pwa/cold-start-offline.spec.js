@@ -34,7 +34,7 @@ async function prepareOnlineShell(page) {
   await expect(page.locator('#root > :not(.offline-shell-status)')).toHaveCount(1);
 
   const cacheAudit = await page.evaluate(async () => {
-    const cache = await caches.open('simplelife-shell-v2');
+    const cache = await caches.open('simplelife-shell-v3');
     const manifestResponse = await cache.match(
       new URL('/precache-manifest.json', window.location.origin).href,
       { ignoreVary: true },
@@ -51,15 +51,22 @@ async function prepareOnlineShell(page) {
     }
 
     const cachedUrls = (await cache.keys()).map((request) => new URL(request.url).pathname);
+    const indexDocument = await cache.match(
+      new URL('/index.html', window.location.origin).href,
+      { ignoreVary: true },
+    );
+    const rootDocument = await cache.match(
+      new URL('/', window.location.origin).href,
+      { ignoreVary: true },
+    );
     return {
       controlled: Boolean(navigator.serviceWorker.controller),
       assetCount: manifest.assets.length,
       missing,
       cachedUrls,
-      documentCached: Boolean(await cache.match(
-        new URL('/index.html', window.location.origin).href,
-        { ignoreVary: true },
-      )),
+      documentCached: Boolean(indexDocument),
+      indexDocumentStatus: indexDocument?.status ?? null,
+      rootDocumentStatus: rootDocument?.status ?? null,
     };
   });
 
@@ -79,6 +86,8 @@ test('a cold app launch works offline after one successful online visit', async 
   expect(cacheAudit.assetCount).toBeGreaterThan(0);
   expect(cacheAudit.missing).toEqual([]);
   expect(cacheAudit.documentCached).toBe(true);
+  expect(cacheAudit.indexDocumentStatus).toBe(200);
+  expect(cacheAudit.rootDocumentStatus).toBe(200);
   expect(cacheAudit.cachedUrls).toContain('/index.html');
   expect(cacheAudit.cachedUrls).toContain('/precache-manifest.json');
   expect(cacheAudit.cachedUrls.some((url) => url.endsWith('.js'))).toBe(true);
@@ -121,6 +130,8 @@ test('a cold app launch stays available offline after closing and reopening the 
     expect(cacheAudit.controlled).toBe(true);
     expect(cacheAudit.missing).toEqual([]);
     expect(cacheAudit.documentCached).toBe(true);
+    expect(cacheAudit.indexDocumentStatus).toBe(200);
+    expect(cacheAudit.rootDocumentStatus).toBe(200);
 
     // Closing the persistent context flushes the browser profile to disk.
     // Reopening it below verifies that the SW registration and Cache Storage

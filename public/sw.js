@@ -1,5 +1,7 @@
-const CACHE_NAME = 'simplelife-shell-v2';
-const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest', '/leaf.svg', '/precache-manifest.json'];
+const CACHE_NAME = 'simplelife-shell-v3';
+// Cloudflare's SPA asset handler redirects /index.html to /. Precache the
+// canonical root document, then store a separate /index.html alias below.
+const APP_SHELL = ['/', '/manifest.webmanifest', '/leaf.svg', '/precache-manifest.json'];
 
 async function readBuildAssetManifest() {
   const response = await fetch('/precache-manifest.json', { cache: 'no-store' });
@@ -19,9 +21,24 @@ async function readBuildAssetManifest() {
 async function precacheAppShell() {
   const cache = await caches.open(CACHE_NAME);
   const assets = await readBuildAssetManifest();
-  // Install is committed only after the HTML shell and every compiled
-  // JavaScript/CSS/font/image asset needed to boot the app are available.
+  // Install is committed only after the canonical HTML shell and every
+  // compiled JavaScript/CSS/font/image asset needed to boot the app exist.
   await cache.addAll([...new Set([...APP_SHELL, ...assets])]);
+
+  // Cloudflare serves /index.html as a 307 redirect to /. Never store that
+  // redirect as the offline document: it loops when the browser is offline.
+  const rootDocument = await cache.match(
+    new URL('/', self.location.origin),
+    { ignoreVary: true },
+  );
+  if (!rootDocument || rootDocument.status !== 200 || !rootDocument.ok) {
+    throw new Error('The canonical offline app-shell document was not cached.');
+  }
+  await cache.put(
+    new URL('/index.html', self.location.origin),
+    rootDocument.clone(),
+  );
+
   await self.skipWaiting();
 }
 
@@ -51,17 +68,21 @@ self.addEventListener('fetch', (event) => {
     const navigationResponse = (async () => {
       let cachedDocument = null;
 
-      // Resolve the same-origin public document before any network operation.
-      // This response stays in memory for the entire navigation event.
+      // Prefer the canonical root document. Only accept a real HTTP 200 page,
+      // never a hosted SPA redirect from /index.html back to /.
       try {
         const cache = await caches.open(CACHE_NAME);
-        cachedDocument = await cache.match(
-          new URL('/index.html', self.location.origin),
-          { ignoreVary: true },
-        ) || await cache.match(
+        const cachedRoot = await cache.match(
           new URL('/', self.location.origin),
           { ignoreVary: true },
         );
+        const cachedIndex = await cache.match(
+          new URL('/index.html', self.location.origin),
+          { ignoreVary: true },
+        );
+        cachedDocument = [cachedRoot, cachedIndex].find((candidate) => (
+          candidate && candidate.status === 200 && candidate.ok
+        )) || null;
       } catch (cacheError) {
         console.error('Offline app-shell lookup failed:', cacheError);
       }
