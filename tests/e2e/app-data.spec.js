@@ -145,6 +145,7 @@ async function mockSupabaseSession(page, initialData = {}) {
   const insertedVoiceAssets = [];
   const uploadedVoiceObjects = [];
   const voiceFinalizeRequests = [];
+  const voiceAssets = [...(initialData.voiceAssets || [])];
   const captureLinks = [...(initialData.captureLinks || [])];
   const insertedCaptureLinks = [];
   const noteIdeas = [...(initialData.noteIdeas || [])];
@@ -1128,10 +1129,16 @@ async function mockSupabaseSession(page, initialData = {}) {
       return;
     }
 
+    if (url.pathname === '/rest/v1/capture_audio_asset' && method === 'GET') {
+      await json(200, voiceAssets, { 'content-range': voiceAssets.length ? '0-' + (voiceAssets.length - 1) + '/*' : '*/0' });
+      return;
+    }
+
     if (url.pathname === '/rest/v1/capture_audio_asset' && method === 'POST') {
       const payload = request.postDataJSON();
       const rows = Array.isArray(payload) ? payload : [payload];
       insertedVoiceAssets.push(...rows);
+      voiceAssets.push(...rows);
       await json(201, rows, { 'content-range': '0-0/*' });
       return;
     }
@@ -1150,6 +1157,11 @@ async function mockSupabaseSession(page, initialData = {}) {
     if (url.pathname === '/functions/v1/inbox-voice-finalize' && method === 'POST') {
       const payload = request.postDataJSON();
       voiceFinalizeRequests.push(payload);
+      const asset = voiceAssets.find((item) => item.id === payload.assetId);
+      if (asset) {
+        asset.status = 'uploaded';
+        asset.uploaded_at = '2026-11-25T00:00:00.000Z';
+      }
       await json(200, { verified: true, assetId: payload.assetId });
       return;
     }
@@ -1162,7 +1174,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     await json(404, { message: `Unexpected mocked Supabase request: ${method} ${url.pathname}` });
   });
 
-  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, protectedTimeBlocks, protectedTimeMutationRequests, protectedTimeConflicts, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, processingRuns, queueRequests, processingRequests, reviewRequests, reviewAuditEvents, trashRequests, offlineSyncRequests, offlineSyncReplayFlags, offlineSyncedCaptures, insertedVoiceAssets, uploadedVoiceObjects, voiceFinalizeRequests, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
+  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, protectedTimeBlocks, protectedTimeMutationRequests, protectedTimeConflicts, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, processingRuns, queueRequests, processingRequests, reviewRequests, reviewAuditEvents, trashRequests, offlineSyncRequests, offlineSyncReplayFlags, offlineSyncedCaptures, insertedVoiceAssets, uploadedVoiceObjects, voiceFinalizeRequests, voiceAssets, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
 }
 
 test('mock-authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
@@ -4494,6 +4506,53 @@ test('mobile vault recovery key restores queued encrypted capture and rotates th
   await expect(page.locator('.offline-vault-panel'))
     .toContainText('1 captura(s) cifrada(s) pendiente(s)');
   await expect(page.locator('.connection-state')).toHaveText('Sin conexión');
+});
+
+test('Inbox safely retries finalization for an already-uploaded private voice object', async ({ page }) => {
+  const firstAsset = {
+    id: '019b7000-0000-7000-8000-000000000501',
+    capture_id: null,
+    status: 'uploading',
+    retention_until: '2026-12-02T02:03:15.000Z',
+    created_at: '2026-11-25T21:03:15.000Z',
+  };
+  const secondAsset = {
+    ...firstAsset,
+    id: '019b7000-0000-7000-8000-000000000502',
+    created_at: '2026-11-25T21:03:25.000Z',
+  };
+  const { voiceAssets, voiceFinalizeRequests, uploadedVoiceObjects } = await mockSupabaseSession(page, {
+    voiceAssets: [secondAsset, firstAsset],
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  const pending = page.getByRole('region', { name: 'Audios privados pendientes' });
+  await expect(pending).toContainText('verificación pendiente');
+  const retryButtons = pending.getByRole('button', { name: 'Reintentar verificación' });
+  await expect(retryButtons).toHaveCount(2);
+
+  await retryButtons.first().click();
+  await expect(page.locator('.alert.alert-success'))
+    .toContainText('Audio verificado y finalizado');
+  await expect(pending).toContainText('esperando transcripción');
+  await expect(pending.getByRole('button', { name: 'Reintentar verificación' })).toHaveCount(1);
+
+  await pending.getByRole('button', { name: 'Reintentar verificación' }).click();
+  await expect(page.locator('.alert.alert-success'))
+    .toContainText('Audio verificado y finalizado');
+  await expect(pending.getByRole('button', { name: 'Reintentar verificación' })).toHaveCount(0);
+
+  expect(voiceFinalizeRequests).toHaveLength(2);
+  expect(voiceFinalizeRequests.map((request) => request.assetId).sort())
+    .toEqual([firstAsset.id, secondAsset.id].sort());
+  expect(voiceAssets.every((asset) => asset.status === 'uploaded')).toBe(true);
+  // Reconciliation sends only the owner-scoped asset IDs to the finalizer.
+  // It does not record or upload the audio bytes a second time.
+  expect(uploadedVoiceObjects).toHaveLength(0);
 });
 
 test('mobile voice capture uploads a private original and leaves transcription pending', async ({ page }) => {
