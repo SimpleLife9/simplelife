@@ -191,10 +191,13 @@ jobs:
           PWA_PREVIEW_URL: https://feat-phase2-inbox-completion-v1-simplelife-inbox-p2-preview.robvg9.workers.dev
         run: |
           node --input-type=module <<'NODE'
+          import { createHash } from 'node:crypto';
           import { readFile } from 'node:fs/promises';
 
           const expected = JSON.parse(await readFile('dist/precache-manifest.json', 'utf8'));
           const expectedAssets = JSON.stringify([...expected.assets].sort());
+          const expectedServiceWorker = await readFile('dist/sw.js', 'utf8');
+          const expectedServiceWorkerHash = createHash('sha256').update(expectedServiceWorker).digest('hex');
           const deadline = Date.now() + 180_000;
           let lastIssue = 'Preview deployment has not published the current build.';
 
@@ -202,20 +205,46 @@ jobs:
             try {
               const manifestUrl = new URL('/precache-manifest.json', process.env.PWA_PREVIEW_URL);
               manifestUrl.searchParams.set('ci_check', String(Date.now()));
-              const response = await fetch(manifestUrl, {
+              const manifestResponse = await fetch(manifestUrl, {
                 cache: 'no-store',
                 signal: AbortSignal.timeout(8_000),
               });
-              if (!response.ok) throw new Error(`Preview returned HTTP ${response.status}`);
-
-              const actual = await response.json();
-              if (actual.version === expected.version && Array.isArray(actual.assets)
-                && JSON.stringify([...actual.assets].sort()) === expectedAssets) {
-                console.log(`Preview serves the exact production asset manifest (${actual.assets.length} assets).`);
-                process.exit(0);
+              if (!manifestResponse.ok) {
+                throw new Error(`Preview manifest returned HTTP ${manifestResponse.status}`);
               }
 
-              lastIssue = 'Preview manifest does not match the asset list built by this CI commit.';
+              const actual = await manifestResponse.json();
+              const manifestMatches = actual.version === expected.version
+                && Array.isArray(actual.assets)
+                && JSON.stringify([...actual.assets].sort()) === expectedAssets;
+              if (!manifestMatches) {
+                lastIssue = 'Preview asset manifest does not match this CI build.';
+              } else {
+                // The Service Worker is excluded from precache-manifest.json.
+                // Compare it separately so an old SW cannot pass this gate just
+                // because the JS/CSS content hashes stayed unchanged.
+                const swUrl = new URL('/sw.js', process.env.PWA_PREVIEW_URL);
+                swUrl.searchParams.set('ci_check', String(Date.now()));
+                const swResponse = await fetch(swUrl, {
+                  cache: 'no-store',
+                  signal: AbortSignal.timeout(8_000),
+                });
+                if (!swResponse.ok) {
+                  throw new Error(`Preview Service Worker returned HTTP ${swResponse.status}`);
+                }
+
+                const actualServiceWorker = await swResponse.text();
+                const actualServiceWorkerHash = createHash('sha256')
+                  .update(actualServiceWorker)
+                  .digest('hex');
+                if (actualServiceWorkerHash === expectedServiceWorkerHash) {
+                  console.log(`Preview serves the exact production asset manifest (${actual.assets.length} assets).`);
+                  console.log(`Preview serves the exact production Service Worker (sha256 ${actualServiceWorkerHash}).`);
+                  process.exit(0);
+                }
+
+                lastIssue = 'Preview Service Worker is stale; its content hash does not match dist/sw.js.';
+              }
             } catch (error) {
               lastIssue = error.message;
             }
