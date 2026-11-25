@@ -4193,7 +4193,16 @@ test('offline vault displays a human-readable message for an incorrect passphras
   await page.getByLabel('Nueva frase de desbloqueo offline').fill('clave-de-prueba-segura-2026');
   await page.getByRole('button', { name: 'Crear bóveda privada' }).click();
   await expect(page.getByText('Guarda ahora tu clave de recuperación')).toBeVisible();
-  await page.getByRole('button', { name: 'Ya la guardé' }).click();
+  const recoveryCode = await page.locator('.offline-vault-recovery code').innerText();
+  const confirmRecovery = page.getByLabel('Confirmar clave de recuperación offline');
+  const dismissRecovery = page.getByRole('button', { name: 'Ya la guardé' });
+  await expect(dismissRecovery).toBeDisabled();
+  const wrongRecoveryCode = (recoveryCode[0] === '0' ? '1' : '0') + recoveryCode.slice(1);
+  await confirmRecovery.fill(wrongRecoveryCode);
+  await expect(dismissRecovery).toBeDisabled();
+  await confirmRecovery.fill(recoveryCode);
+  await expect(dismissRecovery).toBeEnabled();
+  await dismissRecovery.click();
   await page.getByRole('button', { name: 'Bloquear' }).click();
 
   await page.getByLabel('Frase de desbloqueo offline').fill('contraseña-incorrecta-2026');
@@ -4215,7 +4224,16 @@ test('desktop offline capture survives a lost sync acknowledgement and retries w
   await page.getByLabel('Nueva frase de desbloqueo offline').fill('desktop-offline-passphrase-2026');
   await page.getByRole('button', { name: 'Crear bóveda privada' }).click();
   await expect(page.getByText('Guarda ahora tu clave de recuperación')).toBeVisible();
-  await page.getByRole('button', { name: 'Ya la guardé' }).click();
+  const recoveryCode = await page.locator('.offline-vault-recovery code').innerText();
+  const confirmRecovery = page.getByLabel('Confirmar clave de recuperación offline');
+  const dismissRecovery = page.getByRole('button', { name: 'Ya la guardé' });
+  await expect(dismissRecovery).toBeDisabled();
+  const wrongRecoveryCode = (recoveryCode[0] === '0' ? '1' : '0') + recoveryCode.slice(1);
+  await confirmRecovery.fill(wrongRecoveryCode);
+  await expect(dismissRecovery).toBeDisabled();
+  await confirmRecovery.fill(recoveryCode);
+  await expect(dismissRecovery).toBeEnabled();
+  await dismissRecovery.click();
   await expect(page.locator('.offline-vault-state')).toHaveText('Desbloqueada');
 
   const source = 'PRUEBA DESKTOP OFFLINE — reintento idempotente.';

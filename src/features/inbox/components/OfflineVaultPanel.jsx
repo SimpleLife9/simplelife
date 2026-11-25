@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react';
+
 export function OfflineVaultPanel({
   status,
   passphrase,
@@ -20,6 +22,14 @@ export function OfflineVaultPanel({
   const configured = status?.configured === true;
   const unlocked = status?.unlocked === true;
   const available = status?.available !== false;
+  const [recoveryConfirmation, setRecoveryConfirmation] = useState('');
+
+  useEffect(() => {
+    setRecoveryConfirmation('');
+  }, [recoveryCode]);
+
+  const recoveryKeyMatches = Boolean(recoveryCode)
+    && recoveryConfirmation.trim().toLowerCase() === recoveryCode.trim().toLowerCase();
 
   const copyRecoveryKey = async () => {
     if (!recoveryCode || !globalThis.navigator?.clipboard?.writeText) return;
@@ -47,7 +57,37 @@ export function OfflineVaultPanel({
           <code>{recoveryCode}</code>
           <div className="offline-vault-actions">
             <button type="button" className="capture-action-button" onClick={copyRecoveryKey}>Copiar clave</button>
-            <button type="button" className="capture-action-button" onClick={onDismissRecoveryCode}>Ya la guardé</button>
+          </div>
+          <label className="offline-vault-passphrase">
+            <span>Confirma que guardaste la clave recuperándola de tu gestor seguro</span>
+            <input
+              aria-label="Confirmar clave de recuperación offline"
+              type="password"
+              inputMode="text"
+              autoComplete="off"
+              spellCheck={false}
+              minLength={64}
+              maxLength={64}
+              pattern="[a-fA-F0-9]{64}"
+              value={recoveryConfirmation}
+              onChange={(event) => setRecoveryConfirmation(event.target.value)}
+              placeholder="Pega aquí la clave guardada"
+              disabled={busy}
+            />
+          </label>
+          <p>Guárdala primero fuera de este dispositivo. Luego recupérala desde ese lugar y pégala aquí. La comprobación se hace localmente y no envía la clave al servidor.</p>
+          <div className="offline-vault-actions">
+            <button
+              type="button"
+              className="capture-action-button"
+              disabled={busy || !recoveryKeyMatches}
+              onClick={() => {
+                setRecoveryConfirmation('');
+                onDismissRecoveryCode();
+              }}
+            >
+              Ya la guardé
+            </button>
           </div>
         </div>
       )}
