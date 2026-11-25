@@ -82,7 +82,8 @@ jobs:
               raise SystemExit("Expected [db.migrations] config block was not found")
           path.write_text(config.replace(marker, "[db.migrations]\nenabled = false\nschema_paths = []", 1))
           PY
-          supabase start
+          set -o pipefail
+          supabase start 2>&1 | sed -E 's/(sb_secret|sb_publishable)_[A-Za-z0-9_-]+/\1_[REDACTED]/g'
 
       - name: Reproduce hosted RLS bootstrap in ephemeral local Postgres
         run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/local-supabase-bootstrap.sql
