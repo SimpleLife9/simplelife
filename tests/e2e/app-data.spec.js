@@ -4092,3 +4092,43 @@ test('Agenda Event edits recheck Protected Time and persist the selected hard ov
   expect(calendarEvents[0].description).toBe('Detalles actualizados; el horario sigue protegido.');
   expect(calendarEvents[0].protected_time_decisions).toHaveLength(1);
 });
+
+
+
+test('topbar reports network connectivity instead of claiming that data is synchronized', async ({ page }) => {
+  await mockSupabaseSession(page);
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.locator('.connection-state')).toHaveText('Con conexión');
+  await expect(page.locator('.connection-state')).toHaveClass(/is-online/);
+
+  await page.context().setOffline(true);
+  await expect(page.locator('.connection-state')).toHaveText('Sin conexión');
+  await expect(page.locator('.connection-state')).toHaveClass(/is-offline/);
+
+  await page.context().setOffline(false);
+  await expect(page.locator('.connection-state')).toHaveText('Con conexión');
+});
+
+
+test('offline vault displays a human-readable message for an incorrect passphrase', async ({ page }) => {
+  await mockSupabaseSession(page);
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  await page.getByLabel('Nueva frase de desbloqueo offline').fill('clave-de-prueba-segura-2026');
+  await page.getByRole('button', { name: 'Crear bóveda privada' }).click();
+  await expect(page.getByText('Guarda ahora tu clave de recuperación')).toBeVisible();
+  await page.getByRole('button', { name: 'Ya la guardé' }).click();
+  await page.getByRole('button', { name: 'Bloquear' }).click();
+
+  await page.getByLabel('Frase de desbloqueo offline').fill('contraseña-incorrecta-2026');
+  await page.getByRole('button', { name: 'Desbloquear bóveda' }).click();
+  await expect(page.locator('.offline-vault-panel .form-error[role="alert"]'))
+    .toHaveText('Contraseña incorrecta. Inténtalo de nuevo.');
+});

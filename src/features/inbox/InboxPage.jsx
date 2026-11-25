@@ -8,6 +8,7 @@ import { CaptureComposer } from './components/CaptureComposer.jsx';
 import { OfflineVaultPanel } from './components/OfflineVaultPanel.jsx';
 import { VoiceCapture } from './components/VoiceCapture.jsx';
 import { createIndexedDbOfflineStorage, createOfflineCaptureVault } from './offline/private-offline-vault.js';
+import { getOfflineVaultUserMessage } from './offline/offline-vault-errors.js';
 import { CapturePartPersistenceError, persistTextCapture } from './data/capture-repository.js';
 import { getSuggestedDestinationType, isInboxDestinationReady } from './domain/capture-pipeline.js';
 
@@ -167,7 +168,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
       setOfflineRecoveryMode(false);
       await refreshOfflineVaultState();
     } catch (error) {
-      setOfflineVaultError(error?.message || 'No se pudo desbloquear o recuperar la bóveda privada.');
+      setOfflineVaultError(getOfflineVaultUserMessage(error));
     } finally {
       setOfflineVaultBusy(false);
     }

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { Brand } from '../shared/components/Brand.jsx';
 import { NAV } from './navigation.js';
 
@@ -17,6 +18,24 @@ export function AppShell({
   onClearAlerts,
   children,
 }) {
+  const [networkAvailable, setNetworkAvailable] = useState(
+    () => globalThis.navigator?.onLine !== false,
+  );
+
+  useEffect(() => {
+    const updateNetworkStatus = () => {
+      setNetworkAvailable(globalThis.navigator?.onLine !== false);
+    };
+    const target = globalThis.window;
+    target?.addEventListener('online', updateNetworkStatus);
+    target?.addEventListener('offline', updateNetworkStatus);
+    updateNetworkStatus();
+    return () => {
+      target?.removeEventListener('online', updateNetworkStatus);
+      target?.removeEventListener('offline', updateNetworkStatus);
+    };
+  }, []);
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -45,7 +64,7 @@ export function AppShell({
         <header className="topbar">
           <div className="mobile-brand"><Brand compact /></div>
           <div className="breadcrumb">Mi vida <span>/</span> <strong>{title}</strong></div>
-          <div className="topbar-right"><span className="sync-state"><i /> Sincronizado</span><button className="mobile-signout" onClick={onSignOut}>Salir</button></div>
+          <div className="topbar-right"><span className={`connection-state ${networkAvailable ? 'is-online' : 'is-offline'}`} role="status" aria-live="polite" title="Estado de conectividad informado por el navegador; no confirma que los datos estén sincronizados."><i aria-hidden="true" />{networkAvailable ? 'Con conexión' : 'Sin conexión'}</span><button className="mobile-signout" onClick={onSignOut}>Salir</button></div>
         </header>
 
         <section className="page-content">
