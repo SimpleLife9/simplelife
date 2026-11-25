@@ -136,6 +136,12 @@ async function mockSupabaseSession(page, initialData = {}) {
   const reviewRequests = [];
   const reviewAuditEvents = [];
   const trashRequests = [];
+  const offlineSyncRequests = [];
+  const offlineSyncReplayFlags = [];
+  const offlineSyncedCaptures = new Map();
+  let offlineSyncFailuresRemaining = Number.isInteger(initialData.offlineSyncFailures)
+    ? Math.max(0, initialData.offlineSyncFailures)
+    : 0;
   const captureLinks = [...(initialData.captureLinks || [])];
   const insertedCaptureLinks = [];
   const noteIdeas = [...(initialData.noteIdeas || [])];
@@ -1056,6 +1062,69 @@ async function mockSupabaseSession(page, initialData = {}) {
       return;
     }
 
+    if (url.pathname === '/rest/v1/rpc/sync_inbox_offline_text_capture' && method === 'POST') {
+      const payload = request.postDataJSON();
+      offlineSyncRequests.push(payload);
+      const captureId = payload.p_capture_id;
+      const partId = payload.p_part_id;
+      const contentOriginal = payload.p_content_original;
+      if (typeof captureId !== 'string' || typeof partId !== 'string'
+        || typeof contentOriginal !== 'string' || !contentOriginal.trim()) {
+        await json(400, { message: 'INVALID_OFFLINE_SYNC_FIXTURE' });
+        return;
+      }
+
+      const existing = offlineSyncedCaptures.get(captureId);
+      if (existing && (existing.part_id !== partId || existing.content_original !== contentOriginal)) {
+        await json(409, { message: 'OFFLINE_IDEMPOTENCY_PAYLOAD_MISMATCH' });
+        return;
+      }
+      const replayed = Boolean(existing);
+      if (!existing) {
+        offlineSyncedCaptures.set(captureId, {
+          capture_id: captureId,
+          part_id: partId,
+          content_original: contentOriginal,
+        });
+        captures.unshift({
+          id: captureId,
+          owner_user_id: profile.id,
+          created_by_user_id: profile.id,
+          input_type: 'text',
+          content_original: contentOriginal,
+          attention_status: 'needs_review',
+          processing_status: 'not_started',
+          sync_status: 'synced',
+          captured_at: payload.p_captured_at,
+          deleted_at: null,
+        });
+        captureParts.push({
+          id: partId,
+          capture_id: captureId,
+          part_index: 0,
+          original_fragment: contentOriginal,
+          interpretation: null,
+          category: null,
+          review_status: 'unreviewed',
+        });
+      }
+      offlineSyncReplayFlags.push(replayed);
+
+      // Model a committed server write whose acknowledgement was lost in transit.
+      // The next identical request must return the same IDs as an idempotent replay.
+      if (offlineSyncFailuresRemaining > 0) {
+        offlineSyncFailuresRemaining -= 1;
+        await json(503, { message: 'SYNTHETIC_SYNC_ACKNOWLEDGEMENT_LOST' });
+        return;
+      }
+      await json(200, [{
+        capture_id: captureId,
+        part_id: partId,
+        replayed,
+      }]);
+      return;
+    }
+
     if (url.pathname.startsWith('/rest/v1/')) {
       await json(200, []);
       return;
@@ -1064,7 +1133,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     await json(404, { message: `Unexpected mocked Supabase request: ${method} ${url.pathname}` });
   });
 
-  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, protectedTimeBlocks, protectedTimeMutationRequests, protectedTimeConflicts, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, processingRuns, queueRequests, processingRequests, reviewRequests, reviewAuditEvents, trashRequests, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
+  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, protectedTimeBlocks, protectedTimeMutationRequests, protectedTimeConflicts, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, processingRuns, queueRequests, processingRequests, reviewRequests, reviewAuditEvents, trashRequests, offlineSyncRequests, offlineSyncReplayFlags, offlineSyncedCaptures, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
 }
 
 test('mock-authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
@@ -4131,4 +4200,68 @@ test('offline vault displays a human-readable message for an incorrect passphras
   await page.getByRole('button', { name: 'Desbloquear bóveda' }).click();
   await expect(page.locator('.offline-vault-panel .form-error[role="alert"]'))
     .toHaveText('Contraseña incorrecta. Inténtalo de nuevo.');
+});
+
+
+test('desktop offline capture survives a lost sync acknowledgement and retries with the same IDs', async ({ page }) => {
+  const { offlineSyncRequests, offlineSyncReplayFlags, offlineSyncedCaptures, captures, captureParts } =
+    await mockSupabaseSession(page, { offlineSyncFailures: 1 });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  await page.getByLabel('Nueva frase de desbloqueo offline').fill('desktop-offline-passphrase-2026');
+  await page.getByRole('button', { name: 'Crear bóveda privada' }).click();
+  await expect(page.getByText('Guarda ahora tu clave de recuperación')).toBeVisible();
+  await page.getByRole('button', { name: 'Ya la guardé' }).click();
+  await expect(page.locator('.offline-vault-state')).toHaveText('Desbloqueada');
+
+  const source = 'PRUEBA DESKTOP OFFLINE — reintento idempotente.';
+  await page.context().setOffline(true);
+  await expect(page.locator('.connection-state')).toHaveText('Sin conexión');
+  await page.locator('.inbox-composer textarea').fill(source);
+  await page.getByRole('button', { name: 'Guardar cifrada' }).click();
+  await expect(page.locator('.offline-vault-panel'))
+    .toContainText('1 captura(s) cifrada(s) pendiente(s)');
+  await expect(page.locator('.offline-vault-queue')).toContainText(source);
+  expect(offlineSyncRequests).toHaveLength(0);
+
+  await page.context().setOffline(false);
+  await expect(page.locator('.connection-state')).toHaveText('Con conexión');
+  const syncButton = page.getByRole('button', { name: 'Sincronizar ahora' });
+  await expect(syncButton).toBeEnabled();
+
+  // The mocked server commits the capture once, but the first acknowledgement is lost.
+  await syncButton.click();
+  await expect(page.locator('.alert.alert-error'))
+    .toContainText('1 permanecen cifradas para reintentar');
+  await expect(page.locator('.offline-vault-panel'))
+    .toContainText('1 captura(s) cifrada(s) pendiente(s)');
+  expect(offlineSyncRequests).toHaveLength(1);
+
+  await syncButton.click();
+  await expect(page.locator('.offline-vault-panel'))
+    .toContainText('0 captura(s) cifrada(s) pendiente(s)');
+  await expect(page.locator('.offline-vault-queue')).toHaveCount(0);
+  await expect(page.locator('.alert.alert-success'))
+    .toContainText('Capturas offline sincronizadas.');
+
+  expect(offlineSyncRequests).toHaveLength(2);
+  expect(offlineSyncRequests[1]).toMatchObject({
+    p_capture_id: offlineSyncRequests[0].p_capture_id,
+    p_part_id: offlineSyncRequests[0].p_part_id,
+    p_content_original: source,
+  });
+  expect(offlineSyncReplayFlags).toEqual([false, true]);
+  expect(offlineSyncedCaptures.size).toBe(1);
+  expect(offlineSyncedCaptures.get(offlineSyncRequests[0].p_capture_id))
+    .toMatchObject({
+      capture_id: offlineSyncRequests[0].p_capture_id,
+      part_id: offlineSyncRequests[0].p_part_id,
+      content_original: source,
+    });
+  expect(captures.filter((capture) => capture.id === offlineSyncRequests[0].p_capture_id)).toHaveLength(1);
+  expect(captureParts.filter((part) => part.id === offlineSyncRequests[0].p_part_id)).toHaveLength(1);
 });
