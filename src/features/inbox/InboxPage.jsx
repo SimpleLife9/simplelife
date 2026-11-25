@@ -858,11 +858,12 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
     />
     <CaptureComposer
       busy={busy || offlineVaultBusy}
+      offlineOnly={profile?.offlineOnly === true}
       onSubmit={submit}
       onSaveOffline={visibleOfflineVaultStatus.unlocked && offlineStateMatchesOwner ? saveOfflineCapture : undefined}
       onOfflineUnavailable={() => setOfflineVaultError('No hay conexión. Para guardar sin conexión, crea o desbloquea la bóveda privada primero.')}
     />
-    <VoiceCapture profile={profile} busy={busy || offlineVaultBusy} runAction={runAction} />
+    <VoiceCapture profile={profile} busy={busy || offlineVaultBusy || profile?.offlineOnly === true} runAction={runAction} />
     {voiceAssets.filter((asset) => !asset.capture_id).length > 0 && (
       <section className="voice-asset-list" aria-label="Audios privados pendientes">
         <strong>Audios privados pendientes</strong>
