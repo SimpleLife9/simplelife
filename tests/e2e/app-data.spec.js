@@ -142,6 +142,9 @@ async function mockSupabaseSession(page, initialData = {}) {
   let offlineSyncFailuresRemaining = Number.isInteger(initialData.offlineSyncFailures)
     ? Math.max(0, initialData.offlineSyncFailures)
     : 0;
+  const insertedVoiceAssets = [];
+  const uploadedVoiceObjects = [];
+  const voiceFinalizeRequests = [];
   const captureLinks = [...(initialData.captureLinks || [])];
   const insertedCaptureLinks = [];
   const noteIdeas = [...(initialData.noteIdeas || [])];
@@ -1125,6 +1128,32 @@ async function mockSupabaseSession(page, initialData = {}) {
       return;
     }
 
+    if (url.pathname === '/rest/v1/capture_audio_asset' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const rows = Array.isArray(payload) ? payload : [payload];
+      insertedVoiceAssets.push(...rows);
+      await json(201, rows, { 'content-range': '0-0/*' });
+      return;
+    }
+
+    const privateAudioObjectPrefix = '/storage/v1/object/inbox-voice-private/';
+    if (url.pathname.startsWith(privateAudioObjectPrefix) && method === 'POST') {
+      const objectPath = decodeURIComponent(url.pathname.slice(privateAudioObjectPrefix.length));
+      uploadedVoiceObjects.push({
+        objectPath,
+        contentType: request.headers()['content-type'] || '',
+      });
+      await json(200, { Key: 'inbox-voice-private/' + objectPath });
+      return;
+    }
+
+    if (url.pathname === '/functions/v1/inbox-voice-finalize' && method === 'POST') {
+      const payload = request.postDataJSON();
+      voiceFinalizeRequests.push(payload);
+      await json(200, { verified: true, assetId: payload.assetId });
+      return;
+    }
+
     if (url.pathname.startsWith('/rest/v1/')) {
       await json(200, []);
       return;
@@ -1133,7 +1162,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     await json(404, { message: `Unexpected mocked Supabase request: ${method} ${url.pathname}` });
   });
 
-  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, protectedTimeBlocks, protectedTimeMutationRequests, protectedTimeConflicts, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, processingRuns, queueRequests, processingRequests, reviewRequests, reviewAuditEvents, trashRequests, offlineSyncRequests, offlineSyncReplayFlags, offlineSyncedCaptures, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
+  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, protectedTimeBlocks, protectedTimeMutationRequests, protectedTimeConflicts, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, processingRuns, queueRequests, processingRequests, reviewRequests, reviewAuditEvents, trashRequests, offlineSyncRequests, offlineSyncReplayFlags, offlineSyncedCaptures, insertedVoiceAssets, uploadedVoiceObjects, voiceFinalizeRequests, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
 }
 
 test('mock-authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
@@ -4282,4 +4311,79 @@ test('desktop offline capture survives a lost sync acknowledgement and retries w
     });
   expect(captures.filter((capture) => capture.id === offlineSyncRequests[0].p_capture_id)).toHaveLength(1);
   expect(captureParts.filter((part) => part.id === offlineSyncRequests[0].p_part_id)).toHaveLength(1);
+});
+
+
+test('mobile voice capture uploads a private original and leaves transcription pending', async ({ page }) => {
+  await page.addInitScript(() => {
+    const track = { stop: () => { window.__voiceMicrophoneTrackStopped = true; } };
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        getUserMedia: async () => ({ getTracks: () => [track] }),
+      },
+    });
+    class FakeMediaRecorder {
+      static isTypeSupported(type) {
+        return type === 'audio/webm;codecs=opus';
+      }
+      constructor(stream, options = {}) {
+        this.stream = stream;
+        this.mimeType = options.mimeType || 'audio/webm';
+        this.state = 'inactive';
+        this.ondataavailable = null;
+        this.onstop = null;
+      }
+      start() {
+        this.state = 'recording';
+      }
+      stop() {
+        if (this.state === 'inactive') return;
+        this.state = 'inactive';
+        this.ondataavailable?.({
+          data: new Blob(['synthetic private voice bytes'], { type: this.mimeType }),
+        });
+        this.onstop?.();
+      }
+    }
+    window.MediaRecorder = FakeMediaRecorder;
+  });
+
+  const { insertedVoiceAssets, uploadedVoiceObjects, voiceFinalizeRequests } =
+    await mockSupabaseSession(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  const voicePanel = page.getByRole('region', { name: 'Captura de voz privada' });
+  const recordButton = voicePanel.getByRole('button', { name: 'Grabar audio' });
+  await expect(recordButton).toBeEnabled();
+  await recordButton.click();
+  await expect(voicePanel.getByText('Grabando…')).toBeVisible();
+  await voicePanel.getByRole('button', { name: 'Detener y guardar' }).click();
+
+  await expect(voicePanel)
+    .toContainText('La transcripción permanece pendiente hasta configurar un proveedor aprobado.');
+  expect(insertedVoiceAssets).toHaveLength(1);
+  expect(uploadedVoiceObjects).toHaveLength(1);
+  expect(voiceFinalizeRequests).toHaveLength(1);
+
+  const asset = insertedVoiceAssets[0];
+  const upload = uploadedVoiceObjects[0];
+  expect(asset).toMatchObject({
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    bucket_id: 'inbox-voice-private',
+    mime_type: 'audio/webm',
+    status: 'uploading',
+  });
+  expect(asset.file_size_bytes).toBeGreaterThan(0);
+  expect(asset.sha256_hex).toMatch(/^[0-9a-f]{64}$/);
+  expect(upload.objectPath).toBe(profile.id + '/' + asset.id + '/source.webm');
+  expect(upload.contentType).toContain('audio/webm');
+  expect(voiceFinalizeRequests[0]).toEqual({ assetId: asset.id });
+  expect(await page.evaluate(() => window.__voiceMicrophoneTrackStopped)).toBe(true);
 });
