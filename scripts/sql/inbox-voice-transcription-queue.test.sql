@@ -197,13 +197,10 @@ END;
 $test$;
 RESET ROLE;
 
--- Release the remaining staging assets. The expired one remains terminal.
+-- Release asset 2 first so its expected claim order is deterministic.
 UPDATE public.capture_audio_asset
 SET status='uploaded',uploaded_at=clock_timestamp()
-WHERE id IN (
-  '019b7300-0000-7000-8000-000000000102',
-  '019b7300-0000-7000-8000-000000000104'
-);
+WHERE id='019b7300-0000-7000-8000-000000000102';
 
 SET LOCAL ROLE service_role;
 DO $test$
@@ -216,7 +213,6 @@ DECLARE
   v_part_out uuid;
   v_run_out uuid;
   v_replayed boolean;
-  v_state text;
   v_count integer;
   v_conflict_rejected boolean := false;
 BEGIN
@@ -309,8 +305,21 @@ BEGIN
 
   SELECT count(*) INTO v_count FROM public.processing_run WHERE capture_id=v_capture;
   IF v_count<>1 THEN RAISE EXCEPTION 'Replay created a duplicate Inbox processing run'; END IF;
+END;
+$test$;
+RESET ROLE;
 
-  -- The fourth asset exercises a definitive worker failure after request_started.
+-- Process asset 4 only after asset 2 reached success.
+UPDATE public.capture_audio_asset
+SET status='uploaded',uploaded_at=clock_timestamp()
+WHERE id='019b7300-0000-7000-8000-000000000104';
+
+SET LOCAL ROLE service_role;
+DO $test$
+DECLARE
+  v_claim record;
+  v_state text;
+BEGIN
   SELECT * INTO v_claim
   FROM public.claim_inbox_voice_transcription_job(
     '019b7300-0000-7000-8000-000000000207',
