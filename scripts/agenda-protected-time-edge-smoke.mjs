@@ -7,9 +7,15 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 const UUID_V7_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function fail(message) { throw new Error(message); }
+function redactSensitiveOutput(value) {
+  return String(value)
+    .replace(/\b(sb_secret|sb_publishable)_[A-Za-z0-9_-]+/g, "$1_[REDACTED]")
+    .replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "[REDACTED_JWT]");
+}
+
 function run(command, args) {
   const result = spawnSync(command, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-  if (result.status !== 0) fail(command + " failed:\n" + result.stdout + "\n" + result.stderr);
+  if (result.status !== 0) fail(command + " failed:\n" + redactSensitiveOutput(result.stdout + "\n" + result.stderr));
   return result.stdout + result.stderr;
 }
 function sqlScalar(sql) {
