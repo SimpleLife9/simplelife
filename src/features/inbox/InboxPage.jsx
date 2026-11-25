@@ -851,7 +851,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
       error={offlineVaultError}
       notice={offlineVaultNotice}
       queuedCaptures={visibleOfflineQueuedCaptures}
-      online={offlineOnline}
+      online={offlineOnline && profile?.offlineOnly !== true}
       onCreateOrUnlock={activateOfflineVault}
       onLock={lockOfflineVault}
       onSync={syncOfflineCaptures}
