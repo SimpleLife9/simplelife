@@ -4314,6 +4314,63 @@ test('desktop offline capture survives a lost sync acknowledgement and retries w
 });
 
 
+test('offline reopen restores the same owner vault and encrypted queue without Supabase', async ({ page }) => {
+  await mockSupabaseSession(page);
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  const cachedProfile = await page.evaluate((authId) => {
+    const raw = localStorage.getItem('simplelife:offline-profile:v1:' + authId);
+    return raw ? JSON.parse(raw) : null;
+  }, authUser.id);
+  expect(cachedProfile).toMatchObject({
+    version: 1,
+    authUserId: authUser.id,
+    profileId: profile.id,
+  });
+
+  await page.getByLabel('Nueva frase de desbloqueo offline').fill('offline-reopen-passphrase-2026');
+  await page.getByRole('button', { name: 'Crear bóveda privada' }).click();
+  await expect(page.getByText('Guarda ahora tu clave de recuperación')).toBeVisible();
+  const recoveryCode = await page.locator('.offline-vault-recovery code').innerText();
+  const confirmRecovery = page.getByLabel('Confirmar clave de recuperación offline');
+  await confirmRecovery.fill(recoveryCode);
+  await page.getByRole('button', { name: 'Ya la guardé' }).click();
+  await expect(page.locator('.offline-vault-state')).toHaveText('Desbloqueada');
+
+  const source = 'CAPTURA CIFRADA PERSISTENTE — reapertura sin conexión.';
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => false });
+    window.dispatchEvent(new Event('offline'));
+  });
+  await expect(page.locator('.connection-state')).toHaveText('Sin conexión');
+  await page.locator('.inbox-composer textarea').fill(source);
+  await page.getByRole('button', { name: 'Guardar cifrada' }).click();
+  await expect(page.locator('.offline-vault-queue')).toContainText(source);
+  await page.getByRole('button', { name: 'Bloquear' }).click();
+  await expect(page.locator('.offline-vault-state')).toHaveText('Bloqueada');
+
+  // Keep the local Vite document reachable, but make every Supabase request fail.
+  await page.route(`${projectUrl}/**`, (route) => route.abort());
+  await page.reload();
+  await expect(page.locator('.connection-state')).toHaveText('Sin conexión');
+  await expect(page.locator('.offline-vault-state')).toHaveText('Bloqueada');
+  await expect(page.getByLabel('Frase de desbloqueo offline')).toBeVisible();
+  await expect(page.getByText(/No se pudo preparar tu perfil/)).toHaveCount(0);
+
+  await page.getByLabel('Frase de desbloqueo offline').fill('offline-reopen-passphrase-2026');
+  await page.getByRole('button', { name: 'Desbloquear bóveda' }).click();
+  await expect(page.locator('.offline-vault-state')).toHaveText('Desbloqueada');
+  await expect(page.locator('.offline-vault-queue')).toContainText(source);
+  await expect(page.locator('.offline-vault-panel'))
+    .toContainText('1 captura(s) cifrada(s) pendiente(s)');
+  await expect(page.getByRole('button', { name: 'Sincronizar ahora' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: /Grabar audio/ })).toBeDisabled();
+});
+
 test('mobile voice capture uploads a private original and leaves transcription pending', async ({ page }) => {
   await page.addInitScript(() => {
     const track = { stop: () => { window.__voiceMicrophoneTrackStopped = true; } };
