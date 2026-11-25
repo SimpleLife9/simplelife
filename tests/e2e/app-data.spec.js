@@ -4354,6 +4354,9 @@ test('offline reopen restores the same owner vault and encrypted queue without S
   await expect(page.locator('.offline-vault-state')).toHaveText('Bloqueada');
 
   // Keep the local Vite document reachable, but make every Supabase request fail.
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => false });
+  });
   await page.route(`${projectUrl}/**`, (route) => route.abort());
   await page.reload();
   await expect(page.locator('.connection-state')).toHaveText('Sin conexión');
