@@ -48,13 +48,11 @@ self.addEventListener('fetch', (event) => {
     || url.pathname.startsWith('/rest/')) return;
 
   if (request.mode === 'navigate') {
-    event.respondWith((async () => {
+    const navigationResponse = (async () => {
       let cachedDocument = null;
 
-      // Read the document while Cache Storage is known to be reachable,
-      // before attempting a network request. Keep the Response in memory so
-      // the offline branch does not need another Cache API operation after
-      // the network has failed or the browser has just restarted.
+      // Resolve the same-origin public document before any network operation.
+      // This response stays in memory for the entire navigation event.
       try {
         const cache = await caches.open(CACHE_NAME);
         cachedDocument = await cache.match(
@@ -68,12 +66,21 @@ self.addEventListener('fetch', (event) => {
         console.error('Offline app-shell lookup failed:', cacheError);
       }
 
+      // Do not even start a network fetch when the browser is offline.
+      // A cached document is enough to boot the already-precached app shell.
+      if (!self.navigator.onLine) {
+        if (cachedDocument) return cachedDocument;
+        return new Response('SimpleLife necesita abrirse online al menos una vez para preparar este dispositivo.', {
+          status: 503,
+          headers: { 'content-type': 'text/plain; charset=utf-8' },
+        });
+      }
+
       try {
         const response = await fetch(request);
         if (response.ok && (url.pathname === '/' || url.pathname === '/index.html')) {
           try {
             const cache = await caches.open(CACHE_NAME);
-            // Refresh both navigation aliases only after a successful response.
             await cache.put('/index.html', response.clone());
             await cache.put('/', response.clone());
           } catch (cacheError) {
@@ -90,7 +97,17 @@ self.addEventListener('fetch', (event) => {
           headers: { 'content-type': 'text/plain; charset=utf-8' },
         });
       }
-    })());
+    })().catch((navigationError) => {
+      // Never let an unexpected cache/worker exception reject respondWith()
+      // and surface to Chrome as ERR_FAILED.
+      console.error('SimpleLife navigation fallback failed:', navigationError);
+      return new Response('No se pudo recuperar el inicio offline de SimpleLife.', {
+        status: 503,
+        headers: { 'content-type': 'text/plain; charset=utf-8' },
+      });
+    });
+
+    event.respondWith(navigationResponse);
     return;
   }
 
