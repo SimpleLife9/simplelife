@@ -9,6 +9,7 @@
     "preview": "vite preview --host 0.0.0.0",
     "test": "node --test",
     "test:e2e": "playwright test",
+    "test:pwa": "playwright test --config playwright.pwa.config.js",
     "test:e2e:live": "playwright test --config playwright.live.config.js"
   },
   "dependencies": {
