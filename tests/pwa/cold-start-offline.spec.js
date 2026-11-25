@@ -7,7 +7,17 @@ const baseURL = process.env.PWA_BASE_URL || 'http://127.0.0.1:4173';
 const appURL = new URL('/', baseURL).toString();
 
 async function prepareOnlineShell(page) {
-  await page.goto(appURL, { waitUntil: 'load' });
+  const assetCacheControls = {};
+  const appOrigin = new URL(appURL).origin;
+
+  page.on('response', (response) => {
+    const responseUrl = new URL(response.url());
+    if (responseUrl.origin === appOrigin && responseUrl.pathname.startsWith('/assets/')) {
+      assetCacheControls[responseUrl.pathname] = response.headers()['cache-control'] || null;
+    }
+  });
+
+  const documentResponse = await page.goto(appURL, { waitUntil: 'load' });
   await page.evaluate(async () => {
     await navigator.serviceWorker.ready;
   });
@@ -23,7 +33,7 @@ async function prepareOnlineShell(page) {
   );
   await expect(page.locator('#root > :not(.offline-shell-status)')).toHaveCount(1);
 
-  return page.evaluate(async () => {
+  const cacheAudit = await page.evaluate(async () => {
     const cache = await caches.open('simplelife-shell-v2');
     const manifestResponse = await cache.match(
       new URL('/precache-manifest.json', window.location.origin).href,
@@ -52,6 +62,12 @@ async function prepareOnlineShell(page) {
       )),
     };
   });
+
+  return {
+    ...cacheAudit,
+    documentCacheControl: documentResponse?.headers()['cache-control'] || null,
+    assetCacheControls,
+  };
 }
 
 test('a cold app launch works offline after one successful online visit', async ({ browser }) => {
@@ -136,6 +152,67 @@ test('a cold app launch stays available offline after closing and reopening the 
     expect(response?.ok()).toBe(true);
     await expect(offlinePage.locator('#root > :not(.offline-shell-status)')).toHaveCount(1);
     expect(await offlinePage.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(true);
+    expect(pageErrors).toEqual([]);
+  } finally {
+    await context?.close();
+    await rm(userDataDir, { recursive: true, force: true });
+  }
+});
+
+test('hosted cold launch works from the browser HTTP cache even without a Service Worker', async () => {
+  test.skip(!process.env.PWA_BASE_URL, 'Requires the deployed Cloudflare Preview cache headers.');
+
+  const userDataDir = await mkdtemp(join(tmpdir(), 'simplelife-pwa-http-cache-'));
+  let context;
+
+  try {
+    context = await chromium.launchPersistentContext(userDataDir, {
+      headless: true,
+      serviceWorkers: 'allow',
+    });
+
+    const onlinePage = context.pages()[0] || await context.newPage();
+    const cacheAudit = await prepareOnlineShell(onlinePage);
+
+    expect(cacheAudit.documentCacheControl).toMatch(/max-age=604800/);
+    const jsCacheControl = Object.entries(cacheAudit.assetCacheControls)
+      .find(([path]) => path.endsWith('.js'))?.[1];
+    const cssCacheControl = Object.entries(cacheAudit.assetCacheControls)
+      .find(([path]) => path.endsWith('.css'))?.[1];
+    expect(jsCacheControl).toMatch(/max-age=31536000/);
+    expect(jsCacheControl).toMatch(/immutable/);
+    expect(cssCacheControl).toMatch(/max-age=31536000/);
+    expect(cssCacheControl).toMatch(/immutable/);
+
+    // Remove the registration in this disposable profile to prove that the
+    // browser HTTP cache alone can recover the shell and its hashed bundles.
+    const remainingRegistrations = await onlinePage.evaluate(async () => {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map((registration) => registration.unregister()));
+      return (await navigator.serviceWorker.getRegistrations()).length;
+    });
+    expect(remainingRegistrations).toBe(0);
+
+    await context.close();
+    context = undefined;
+
+    context = await chromium.launchPersistentContext(userDataDir, {
+      headless: true,
+      serviceWorkers: 'allow',
+    });
+    await context.setOffline(true);
+
+    const offlinePage = context.pages()[0] || await context.newPage();
+    const pageErrors = [];
+    offlinePage.on('pageerror', (error) => pageErrors.push(error.message));
+
+    const response = await offlinePage.goto(appURL, {
+      waitUntil: 'load',
+      timeout: 15_000,
+    });
+    expect(response?.ok()).toBe(true);
+    await expect(offlinePage.locator('#root > :not(.offline-shell-status)')).toHaveCount(1);
+    expect(await offlinePage.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(false);
     expect(pageErrors).toEqual([]);
   } finally {
     await context?.close();
