@@ -16,9 +16,11 @@ async function prepareOnlineShell(page) {
     await page.reload({ waitUntil: 'load' });
   }
 
-  await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller), {
-    timeout: 20_000,
-  });
+  await page.waitForFunction(
+    () => Boolean(navigator.serviceWorker.controller),
+    null,
+    { timeout: 20_000 },
+  );
   await expect(page.locator('#root > *')).toHaveCount(1);
 
   return page.evaluate(async () => {
