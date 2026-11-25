@@ -1,6 +1,6 @@
 # Phase 2 — Owner Acceptance (Desktop + Physical Android)
 
-**Authoritative status (updated 25 Nov 2026 AST):** Latest functional-code HEAD before this documentation-only closeout: `40eab5b944b0e957e32b796c5b803d15edd88c78`; CI #886 exact-SHA [SUCCESS](https://github.com/SimpleLife9/simplelife/actions/runs/45712399806). The owner-confirmed checks completed in this session are consolidated in Section 17: PC offline save + reconnect visibility, Android recovery-key renewal, and verification/finalization of all four private voice assets. This status-only documentation commit requires its own exact-SHA CI run before validation. The only Phase 2 technical blocker is a verified private speech-to-text route; current ARIA control-plane and declarative registries contain no registered `speech-to-text` capability. PR #97 remains OPEN / DRAFT / NOT MERGED; Preview/DEV only.
+**Authoritative status (updated 25 Nov 2026 AST):** Latest functional-code SHA remains `40eab5b944b0e957e32b796c5b803d15edd88c78`; CI #886 [SUCCESS](https://github.com/SimpleLife9/simplelife/actions/runs/45712399806). Owner-confirmed offline/Android/voice checks are consolidated in Section 17. Documentation-only SHA `d60c54ab9f32dbb262f7f82d17ca93ac729d3a55` passed CI #887 [SUCCESS](https://github.com/SimpleLife9/simplelife/actions/runs/45720231269): 48 required steps PASS, one conditional failure-artifact upload SKIPPED, zero failures. The current remaining Phase 2 technical gate is an approved speech-to-text/model route; current ARIA control-plane/declarative registry still has no registered `speech-to-text` capability. PR #97 remains OPEN / DRAFT / NOT MERGED; Preview/DEV only.
 **Target:** SimpleLife DEV deployment from the final exact PR #97 SHA.
 **Required evidence:** final deployed SHA, desktop browser/version, Android model + Android version + browser/PWA mode, date, and owner PASS/FAIL for each section.
 
@@ -226,3 +226,30 @@ These results do not change the release boundary: PR #97 remains OPEN / DRAFT / 
 - CI #886 remains the PASS for functional code SHA `40eab5b944b0e957e32b796c5b803d15edd88c78`. The documentation-only update containing this Section 17 must pass its own exact-SHA CI.
 - No production deploy, production migration, paid billing, provider request, audio download/listening, or real private-content transmission occurred.
 - Phase 2 is not 100% closed until the speech-to-text/provider gate is verified and the resulting DEV integration passes exact-SHA validation.
+
+
+## 18. Provider alternatives re-evaluated — 25 November 2026
+
+This section is a feasibility comparison only. No provider is enabled and no audio or private capture was transmitted.
+
+### Candidate A — Groq Whisper Large V3 Turbo
+
+- Official Groq docs expose a dedicated speech-to-text endpoint and model `whisper-large-v3-turbo`; supports multilingual input and the documented endpoint is `/openai/v1/audio/transcriptions`. Sources: [Speech to Text](https://console.groq.com/docs/speech-to-text) · [Model card](https://console.groq.com/docs/model/whisper-large-v3-turbo).
+- Groq Trust Center says it does not use customer data to train models; all customers may enable Zero Data Retention (ZDR) in the console. When ZDR is enabled, customer inputs/outputs are not retained for reliability/abuse monitoring. Sources: [Groq Trust Center FAQ](https://trust.groq.com/faq) · [Your Data](https://console.groq.com/docs/your-data).
+- Groq's published rate-limit page exposes a Free Plan tab. Its current Whisper row lists 20 RPM, 2,000 RPD, 7,200 audio seconds/hour and 28,800 audio seconds/day; Groq warns these are high-level limits and exact organization limits must be checked in the account console. Source: [Rate Limits](https://console.groq.com/docs/rate-limits).
+- **Cost caveat:** the model page also lists $0.04 per audio hour. The existence of Free Plan rate limits alone is not sufficient evidence that this specific account's usage will remain $0. Do not configure this route until the actual account plan, exact free allowance, billing state and spend cap are verified; never upgrade to Developer or attach paid billing for this task.
+- **Region caveat:** Groq Trust Center lists data centers in the US, Australia, Canada, Finland and Saudi Arabia. It says Enterprise customers can arrange regional API endpoints. A Free/non-Enterprise account cannot be assumed to pin inference to an approved region. The data-location statement about stored customer data in US GCP buckets is not proof of the inference region for a particular request.
+- **Current status:** technically promising, privacy controls promising, region/cost/account not yet cleared. Do not add to ARIA's active capability matrix or invoke it yet.
+
+### Candidate B — Cloudflare Workers AI Whisper Large V3 Turbo
+
+- Official model page confirms ASR/transcription, zero-data-retention model designation and 46.63 Neurons per audio minute: [Model card](https://developers.cloudflare.com/workers-ai/models/whisper-large-v3-turbo/).
+- Workers AI standard stateless inference has zero retention and Customer Content is not used to train models: [Data usage](https://developers.cloudflare.com/workers-ai/platform/data-usage/).
+- Workers Free includes 10,000 Neurons/day; on Workers Free, exceeding quota makes requests fail. Workers Paid may bill overage at the published rate. Exact remaining account quota was not checked. [Pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/).
+- **Region caveat remains OPEN:** Cloudflare Regional Services constrains the Worker hostname's request handling but does not constrain outgoing subrequests; placement controls the Worker handler, not published proof of the separate model inference backend's region. Sources: [Regional Services](https://developers.cloudflare.com/data-localization/how-to/workers/) · [Placement](https://developers.cloudflare.com/workers/configuration/placement/).
+
+### Decision
+
+Neither candidate currently satisfies every gate simultaneously. Groq looks stronger on explicit ZDR/no-training controls and provides a dedicated speech API, but a non-Enterprise region cannot be pinned and account-specific Free usage is not proven. Cloudflare offers an explicit zero-retention/no-training commitment and a Free neuron allowance, but the model inference region is not documented as pinned.
+
+Keep all four private audio assets in their verified waiting state. Do not send them to Groq, Cloudflare, Gemini Free or another unapproved provider. The next step is to reconcile ARIA's canonical routing after the planned recovery, confirm the acceptable region and account-specific $0 route, and only then perform a synthetic non-sensitive audio probe.
