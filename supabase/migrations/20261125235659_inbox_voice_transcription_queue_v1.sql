@@ -330,6 +330,7 @@ SET search_path = pg_catalog, public, private
 AS $function$
 DECLARE
   v_job private.inbox_voice_transcription_job%ROWTYPE;
+  v_asset public.capture_audio_asset%ROWTYPE;
   v_rows integer;
   v_evidence record;
 BEGIN
@@ -365,6 +366,30 @@ BEGIN
      OR v_job.lease_token IS DISTINCT FROM p_lease_token
      OR v_job.lease_expires_at IS NULL
      OR v_job.lease_expires_at<=clock_timestamp() THEN
+    RETURN false;
+  END IF;
+
+  -- Re-check the source asset under lock at the last database boundary before
+  -- a future provider request. A queued/leased job must never outlive its TTL.
+  SELECT * INTO v_asset
+  FROM public.capture_audio_asset AS aa
+  WHERE aa.id=p_asset_id AND aa.owner_user_id=v_job.owner_profile_id
+  FOR UPDATE;
+  IF NOT FOUND OR v_asset.status<>'uploaded'
+     OR v_asset.capture_id IS NOT NULL
+     OR v_asset.retention_until IS NULL
+     OR v_asset.retention_until<=clock_timestamp() THEN
+    UPDATE private.inbox_voice_transcription_attempt AS a
+    SET status='expired',finished_at=clock_timestamp(),
+        error_code='AUDIO_ASSET_NOT_ELIGIBLE'
+    WHERE a.asset_id=p_asset_id AND a.lease_token=p_lease_token
+      AND a.status='leased' AND a.request_started_at IS NULL
+      AND a.finished_at IS NULL;
+    UPDATE private.inbox_voice_transcription_job AS j
+    SET status='expired',lease_token=NULL,lease_expires_at=NULL,
+        last_error_code='AUDIO_ASSET_NOT_ELIGIBLE',updated_at=clock_timestamp()
+    WHERE j.asset_id=p_asset_id AND j.status='leased'
+      AND j.lease_token=p_lease_token;
     RETURN false;
   END IF;
 
