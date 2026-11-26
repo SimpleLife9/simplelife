@@ -1,6 +1,6 @@
 # Phase 2 — Owner Acceptance (Desktop + Physical Android)
 
-**Authoritative status (updated 25 Nov 2026 AST):** Latest functional-code SHA remains `40eab5b944b0e957e32b796c5b803d15edd88c78`; CI #886 [SUCCESS](https://github.com/SimpleLife9/simplelife/actions/runs/45712399806). Owner-confirmed offline/Android/voice checks are consolidated in Section 17. Documentation-only SHA `d60c54ab9f32dbb262f7f82d17ca93ac729d3a55` passed CI #887 [SUCCESS](https://github.com/SimpleLife9/simplelife/actions/runs/45720231269): 48 required steps PASS, one conditional failure-artifact upload SKIPPED, zero failures. The current remaining Phase 2 technical gate is an approved speech-to-text/model route; current ARIA control-plane/declarative registry still has no registered `speech-to-text` capability. PR #97 remains OPEN / DRAFT / NOT MERGED; Preview/DEV only.
+**Authoritative status (updated 25 Nov 2026 AST; CI timestamp 26 Nov UTC):** Current code HEAD is `1f871e9a16c3723aa7f0f694f337ba45a858a1f9`; CI #914 [SUCCESS](https://github.com/SimpleLife9/simplelife/actions/runs/45731058715), exact SHA, 49/49 required steps PASS, one conditional failure-artifact upload SKIPPED as expected, zero failed steps. This validates the local migrations/SQL suites, Deno, Edge Runtime, PWA offline cold-start and exact Cloudflare branch Preview restart. It does **not** close owner physical acceptance or authorize an STT provider. Section 19 supersedes older physical acceptance claims where they conflict: PC functional offline save/retry, Android recovery-key rotation/reopen and Android physical mic/control checks remain OPEN. Direct ARIA read-only audit finds 26 capability records, all `text_generation`, and no approved `speech_to_text` route. Four DEV private audio assets remain `uploaded`, untranscribed, with original TTL ending 2 Dec 2026 UTC. PR #97 remains OPEN / DRAFT / NOT MERGED; CI Preview only, no production deployment.
 **Target:** SimpleLife DEV deployment from the final exact PR #97 SHA.
 **Required evidence:** final deployed SHA, desktop browser/version, Android model + Android version + browser/PWA mode, date, and owner PASS/FAIL for each section.
 
@@ -253,3 +253,49 @@ This section is a feasibility comparison only. No provider is enabled and no aud
 Neither candidate currently satisfies every gate simultaneously. Groq looks stronger on explicit ZDR/no-training controls and provides a dedicated speech API, but a non-Enterprise region cannot be pinned and account-specific Free usage is not proven. Cloudflare offers an explicit zero-retention/no-training commitment and a Free neuron allowance, but the model inference region is not documented as pinned.
 
 Keep all four private audio assets in their verified waiting state. Do not send them to Groq, Cloudflare, Gemini Free or another unapproved provider. The next step is to reconcile ARIA's canonical routing after the planned recovery, confirm the acceptable region and account-specific $0 route, and only then perform a synthetic non-sensitive audio probe.
+
+## 19. Authoritative engineering and owner-gate closeout — 25 Nov 2026 AST (CI timestamps 26 Nov UTC)
+
+### Automated engineering — PASS
+
+- **Exact code HEAD:** `1f871e9a16c3723aa7f0f694f337ba45a858a1f9`.
+- **CI #914:** [SUCCESS](https://github.com/SimpleLife9/simplelife/actions/runs/45731058715), exact HEAD; **49/49 required steps PASS**, one conditional upload of failure artifacts SKIPPED as expected, zero failed steps.
+- Exact-SHA coverage: Node dependency/install; 55 browser/mobile Chromium tests; Deno 115/115 plus type-check; local RLS bootstrap; every migration including `20261125235659_inbox_voice_transcription_queue_v1.sql`; all Inbox ownership/provenance/search/retention/offline/voice SQL suites; durable voice queue SQL; scheduler Vault permissions; Event and Protected Time SQL concurrency/lifecycle suites; Agenda and Inbox actual local Edge Runtime checks; Event Create/Mutation and Protected Time Edge checks; production asset build; PWA offline cold-start; Cloudflare branch Preview synchronization to exact build; and cold launch after full browser restart.
+- **Voice worker actual Edge Runtime:** PASS. The secret-only worker started from its own folder-local `deno.json`, the `@supabase/server` import resolved, and the real local endpoint returned HTTP 503 with `accepted=false`, `status=disabled`, `reason=SPEECH_ROUTE_NOT_CONFIGURED`. It performed no queue claim, audio download or provider request because no verified route/adapter is configured.
+- The smoke then stopped the worker, restarted `inbox-voice-finalize`, and completed remaining owner-isolation and server-computed SHA-256 checks. This proves the fail-closed production boundary and local integration; it is not a transcription provider test.
+- Commits that resolved the Edge smoke: `10ae4f5` (serialize local Edge servers), `1dc2369` (secret-only function config), `ef3757e` (worker import map/lock), and `1f871e9` (correct scalar assertions for worker disabled response).
+- **Release boundary:** PR #97 remains OPEN / DRAFT / NOT MERGED. The run validated CI build and branch Preview; no production deployment or hosted migration is implied.
+
+### Owner physical acceptance — OPEN (latest owner report supersedes conflicting historic PASS)
+
+The PASS items below are only the independently confirmed checks. The following three completion items remain open.
+
+1. **PC — functional offline save and retry: OPEN.** The latest offline attempt returned “No hay conexión. Para guardar sin conexión, crea o desbloquea la bóveda privada primero.” No capture was saved. PWA shell cold-open offline and the corrected connectivity indicator remain PASS, but these do not prove an offline write. Required: create/unlock the PC vault while online; retain its recovery key outside the PC; leave it unlocked; go fully offline; save a synthetic capture; reconnect/sync; verify one server capture and one part; repeat an interrupted retry and verify no duplicate.
+2. **Android — recovery and cold reopen: OPEN.** The owner reports losing the Android recovery phrase and retaining only the PC phrase. PC and Android vaults are independent; a PC recovery key cannot recover Android. If the Android normal unlock passphrase is still known, unlock the existing vault, use “Renovar clave de recuperación”, save the replacement outside the phone, force-close the PWA, reopen in airplane mode and verify the same queued capture is readable/recoverable. Do not clear browser storage, uninstall/reset the PWA or replace the vault while existing ciphertext may remain. Never send a real passphrase/recovery key to ChatGPT.
+3. **Android — microphone and controls: OPEN.** On the physical phone, record a short non-sensitive test phrase; verify a private voice asset appears and that recording buttons/dialogs are usable at normal display scale. This confirms private capture/storage only, not transcription.
+
+**PASS retained:** PWA shell opens offline on PC and Android; connectivity indicator fix; Inbox core capture/review/search/filter/provenance checks; earlier Android encrypted text capture, background auto-lock and reconnect/sync flow. These do not replace the three open tests above.
+
+### ARIA speech-to-text provider gate — OPEN
+
+- Direct read-only audit of ARIA Supabase project `icuqsstxfdbvjytkhlog`: provider registry 5 rows; model registry 27; capability matrix 26; account registry 5; quota registry 6. All 26 capability rows are `text_generation`; there is no `speech_to_text`, `transcription` or `audio` capability. Current provider registry contains Google, `local_windows`, Mistral, OpenRouter and xAI; no Groq or Cloudflare provider route is registered.
+- The existing Google Gemini and OpenRouter routes are registered for text generation only. They are not eligible for speech-to-text by inference or model-family label.
+- Groq Whisper and Cloudflare Whisper remain only candidates, not routes. Groq account-level effective Free usage/spend, ZDR configuration, inference region and jurisdictional eligibility have not been verified. Cloudflare's Workers Free daily allocation and current remaining capacity have not been verified, and public regional documentation does not prove the model inference backend is pinned to an approved region. Gemini Free is not approved for private content under this project's privacy gate.
+- Therefore `inbox-voice-transcription-worker` must remain disabled/fail-closed until ARIA registers a verified STT capability, exact model/adapter/account, approved inference region, no-training/ZDR proof, actual Free quota, max billable USD $0, and no paid fallback. No speculative capability/route is to be inserted.
+- The current Inbox classifier remains `deterministic-rules`; its proposals are heuristics/advisory, not AI classification. Model-backed classification requires its own privacy/cost gate.
+
+### DEV private audio originals — read-only state / retention
+
+- Project `Simplelife_dev` (`iybnjrnysiikbtokyshg`) read-only aggregate audit: 4 assets total; 4 `uploaded`; 4 without `capture_id`; 0 transcript; 4 objects in `inbox-voice-private`; bucket is non-public and object limit remains 25 MiB.
+- The original retention window remains **2 Dec 2026 02:03–22:13 UTC** across the four uploads. No TTL was extended. No audio bytes were read/downloaded/played and no provider received any of the files.
+- Do not re-record or re-upload these originals. Keep them waiting for a genuinely approved STT route; if the gate remains open near TTL expiry, owner must decide whether the originals may expire or provide another approved retention instruction.
+
+### Final status and allowed next action
+
+- Automated code/CI/Preview verification for SHA `1f871e9a16c3723aa7f0f694f337ba45a858a1f9`: **PASS**.
+- Owner physical acceptance: **OPEN — 3 checks above**.
+- ARIA STT capability/provider gate: **OPEN — no canonical route exists**.
+- Supabase hosted DEV/schema/data/secrets: unchanged in this work; no hosted migration applied.
+- No external provider request, audio download/listen, paid billing, production deployment or merge occurred.
+- **Do not declare Phase 2 100% CLOSED or start Phase 3** until the three owner checks and approved STT route are addressed (or the owner explicitly changes the scope/acceptance requirement). The next technical action is to keep the provider worker fail-closed and to resolve the approved STT capability/account/region/cost evidence without transmitting private data.
+
