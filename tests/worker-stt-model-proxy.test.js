@@ -1,88 +1,118 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { proxyWhisperModelFile } from '../src/worker.js';
+import { proxyWhisperCppModelFile } from '../src/worker.js';
 
 const ORIGIN = 'https://simplelife-preview.example';
-const REVISION = 'ff4177021cc41f7db950912b73ea4fdf7d01d8e7';
-const MODEL_PATH = 'onnx-community/whisper-tiny/resolve/' + REVISION + '/';
+const REVISION = '0b364b566045a405be7225ee1e415a073e04da77';
+const MODEL_PATH = 'ggerganov/whisper.cpp/resolve/' + REVISION + '/ggml-tiny-q5_1.bin';
+const MODEL_URL = ORIGIN + '/__stt-whisper/' + MODEL_PATH;
 
-test('Whisper proxy fetches only the pinned config and streams the upstream body', async () => {
+test('Whisper.cpp proxy streams only the pinned multilingual q5_1 model', async () => {
   let requestedUrl;
   let requestedInit;
-  const response = await proxyWhisperModelFile(
-    new Request(ORIGIN + '/__stt-model/' + MODEL_PATH + 'config.json'),
+  const body = new Uint8Array([1, 2, 3, 4]);
+  const response = await proxyWhisperCppModelFile(
+    new Request(MODEL_URL),
     async (url, init) => {
       requestedUrl = String(url);
       requestedInit = init;
-      return new Response('{"model_type":"whisper"}', {
+      return new Response(body, {
         status: 200,
-        headers: { 'content-type': 'application/json', 'etag': '"fixture"' },
+        headers: { 'content-type': 'application/octet-stream', 'content-length': '4' },
       });
     },
   );
 
-  assert.equal(requestedUrl, 'https://huggingface.co/' + MODEL_PATH + 'config.json');
+  assert.equal(requestedUrl, 'https://huggingface.co/' + MODEL_PATH);
   assert.equal(requestedInit.method, 'GET');
   assert.equal(requestedInit.redirect, 'follow');
   assert.equal(response.status, 200);
-  assert.match(response.headers.get('cache-control'), /max-age=86400/);
-  assert.equal(await response.text(), '{"model_type":"whisper"}');
+  assert.match(response.headers.get('cache-control'), /max-age=31536000/);
+  assert.deepEqual(new Uint8Array(await response.arrayBuffer()), body);
 });
 
-test('Whisper proxy forwards byte-range headers for large ONNX files', async () => {
+test('Whisper.cpp proxy preserves byte ranges for the 32 MB model', async () => {
   let observedRange;
-  const response = await proxyWhisperModelFile(
-    new Request(
-      ORIGIN + '/__stt-model/' + MODEL_PATH + 'onnx/decoder_model_merged_quantized.onnx',
-      { headers: { range: 'bytes=0-0' } },
-    ),
+  const response = await proxyWhisperCppModelFile(
+    new Request(MODEL_URL, { headers: { range: 'bytes=0-63' } }),
     async (_url, init) => {
       observedRange = init.headers.get('range');
-      return new Response(new Uint8Array([0]), {
+      return new Response(new Uint8Array(64), {
         status: 206,
-        headers: { 'content-range': 'bytes 0-0/32100000', 'accept-ranges': 'bytes' },
+        headers: {
+          'content-range': 'bytes 0-63/32200000',
+          'accept-ranges': 'bytes',
+        },
       });
     },
   );
 
-  assert.equal(observedRange, 'bytes=0-0');
+  assert.equal(observedRange, 'bytes=0-63');
   assert.equal(response.status, 206);
-  assert.equal(response.headers.get('content-range'), 'bytes 0-0/32100000');
+  assert.equal(response.headers.get('content-range'), 'bytes 0-63/32200000');
+  assert.equal((await response.arrayBuffer()).byteLength, 64);
 });
 
-test('Whisper proxy rejects writes, arbitrary snapshots, query strings and unknown model files', async () => {
+test('Whisper.cpp proxy permits HEAD and forwards conditional headers', async () => {
+  let requestedMethod;
+  let observedRange;
+  let observedIfRange;
+  const response = await proxyWhisperCppModelFile(
+    new Request(MODEL_URL, {
+      method: 'HEAD',
+      headers: { range: 'bytes=0-0', 'if-range': '"model-etag"' },
+    }),
+    async (_url, init) => {
+      requestedMethod = init.method;
+      observedRange = init.headers.get('range');
+      observedIfRange = init.headers.get('if-range');
+      return new Response(null, {
+        status: 200,
+        headers: { 'content-length': '32200000' },
+      });
+    },
+  );
+
+  assert.equal(requestedMethod, 'HEAD');
+  assert.equal(observedRange, 'bytes=0-0');
+  assert.equal(observedIfRange, '"model-etag"');
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('content-length'), '32200000');
+});
+
+test('Whisper.cpp proxy rejects writes, arbitrary revisions, other files and query strings', async () => {
   const shouldNotFetch = async () => {
     throw new Error('Upstream must not be called for rejected input.');
   };
-  const write = await proxyWhisperModelFile(
-    new Request(ORIGIN + '/__stt-model/' + MODEL_PATH + 'config.json', { method: 'POST' }),
+  const write = await proxyWhisperCppModelFile(
+    new Request(MODEL_URL, { method: 'POST' }),
     shouldNotFetch,
   );
-  const differentRevision = await proxyWhisperModelFile(
-    new Request(ORIGIN + '/__stt-model/onnx-community/whisper-tiny/resolve/main/config.json'),
+  const mutableRevision = await proxyWhisperCppModelFile(
+    new Request(ORIGIN + '/__stt-whisper/ggerganov/whisper.cpp/resolve/main/ggml-tiny-q5_1.bin'),
     shouldNotFetch,
   );
-  const unknownFile = await proxyWhisperModelFile(
-    new Request(ORIGIN + '/__stt-model/' + MODEL_PATH + 'private.txt'),
+  const otherFile = await proxyWhisperCppModelFile(
+    new Request(ORIGIN + '/__stt-whisper/' + MODEL_PATH.replace('ggml-tiny-q5_1.bin', 'ggml-tiny.bin')),
     shouldNotFetch,
   );
-  const query = await proxyWhisperModelFile(
-    new Request(ORIGIN + '/__stt-model/' + MODEL_PATH + 'config.json?token=anything'),
+  const query = await proxyWhisperCppModelFile(
+    new Request(MODEL_URL + '?token=anything'),
     shouldNotFetch,
   );
 
   assert.equal(write.status, 405);
-  assert.equal(differentRevision.status, 404);
-  assert.equal(unknownFile.status, 404);
+  assert.equal(mutableRevision.status, 404);
+  assert.equal(otherFile.status, 404);
   assert.equal(query.status, 400);
 });
 
-test('Whisper proxy rejects upstream redirects to hosts outside the explicit allowlist', async () => {
-  const response = await proxyWhisperModelFile(
-    new Request(ORIGIN + '/__stt-model/' + MODEL_PATH + 'config.json'),
+test('Whisper.cpp proxy rejects redirects outside the explicit Hugging Face CDN allowlist', async () => {
+  const response = await proxyWhisperCppModelFile(
+    new Request(MODEL_URL),
     async () => {
-      const upstream = new Response('{"model_type":"whisper"}');
-      Object.defineProperty(upstream, 'url', { value: 'https://unexpected.example/config.json' });
+      const upstream = new Response('unexpected');
+      Object.defineProperty(upstream, 'url', { value: 'https://unexpected.example/model.bin' });
       return upstream;
     },
   );
