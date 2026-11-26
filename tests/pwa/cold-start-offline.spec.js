@@ -34,7 +34,7 @@ async function prepareOnlineShell(page) {
   await expect(page.locator('#root > :not(.offline-shell-status)')).toHaveCount(1);
 
   const cacheAudit = await page.evaluate(async () => {
-    const cache = await caches.open('simplelife-shell-v3');
+    const cache = await caches.open('simplelife-shell-v4');
     const manifestResponse = await cache.match(
       new URL('/precache-manifest.json', window.location.origin).href,
       { ignoreVary: true },
@@ -232,6 +232,59 @@ test('hosted cold launch works from the browser HTTP cache even without a Servic
 });
 
 
+
+
+test('a new Service Worker cache version replaces stale cached STT lab code', async ({ browser }) => {
+  const context = await browser.newContext({ serviceWorkers: 'allow' });
+  try {
+    const page = await context.newPage();
+    await page.goto(new URL('/leaf.svg', baseURL).toString(), { waitUntil: 'load' });
+    await page.evaluate(async () => {
+      const legacy = await caches.open('simplelife-shell-v3');
+      await legacy.put(
+        new URL('/experiments/stt-local/app.js', window.location.origin),
+        new Response('/* stale STT lab script from the previous deployment */', {
+          status: 200,
+          headers: { 'content-type': 'text/javascript' },
+        }),
+      );
+    });
+
+    await page.goto(appURL, { waitUntil: 'load' });
+    await page.evaluate(() => navigator.serviceWorker.ready);
+    if (!await page.evaluate(() => Boolean(navigator.serviceWorker.controller))) {
+      await page.reload({ waitUntil: 'load' });
+    }
+    await page.waitForFunction(
+      () => Boolean(navigator.serviceWorker.controller),
+      null,
+      { timeout: 20_000 },
+    );
+
+    const result = await page.evaluate(async () => {
+      const names = await caches.keys();
+      const cache = await caches.open('simplelife-shell-v4');
+      const script = await cache.match(
+        new URL('/experiments/stt-local/app.js', window.location.origin),
+        { ignoreVary: true },
+      );
+      return {
+        names,
+        scriptText: script ? await script.text() : null,
+        scriptStatus: script?.status ?? null,
+      };
+    });
+
+    expect(result.names).toContain('simplelife-shell-v4');
+    expect(result.names).not.toContain('simplelife-shell-v3');
+    expect(result.scriptStatus).toBe(200);
+    expect(result.scriptText).toContain('STT_RUNTIME_IMPORT_FAILED [cdn.jsdelivr.net]');
+    expect(result.scriptText).toContain('STT_MODEL_OR_WASM_LOAD_FAILED:');
+  } finally {
+    await context.close();
+  }
+});
+
 test('isolated local STT lab reopens from the service-worker cache while offline', async ({ browser }) => {
   const context = await browser.newContext({ serviceWorkers: 'allow' });
   try {
@@ -253,7 +306,7 @@ test('isolated local STT lab reopens from the service-worker cache while offline
     await expect(onlinePage.getByRole('button', { name: 'Descargar y preparar modelo' })).toBeEnabled();
 
     const cachedLab = await onlinePage.evaluate(async () => {
-      const cache = await caches.open('simplelife-shell-v3');
+      const cache = await caches.open('simplelife-shell-v4');
       const origin = window.location.origin;
       const documentResponse = await cache.match(new URL('/experiments/stt-local/index.html', origin));
       const scriptResponse = await cache.match(new URL('/experiments/stt-local/app.js', origin));
