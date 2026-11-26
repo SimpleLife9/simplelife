@@ -280,6 +280,9 @@ test('a new Service Worker cache version replaces stale cached STT lab code', as
     expect(result.scriptStatus).toBe(200);
     expect(result.scriptText).toContain('STT_RUNTIME_IMPORT_FAILED [cdn.jsdelivr.net]');
     expect(result.scriptText).toContain('STT_MODEL_OR_WASM_LOAD_FAILED:');
+    expect(result.scriptText).toContain('const MODEL_REMOTE_PATH_TEMPLATE = "{model}/resolve/" + MODEL_REVISION + "/";');
+    expect(result.scriptText).toContain('env.remotePathTemplate = MODEL_REMOTE_PATH_TEMPLATE;');
+    expect(result.scriptText).not.toContain('/resolve/main/');
   } finally {
     await context.close();
   }
