@@ -332,3 +332,10 @@ The PASS items below are only the independently confirmed checks. The following 
 - Combined Android owner acceptance now PASS for: replacement recovery key, offline cold-reopen, actual recovery while preserving pending captures, synthetic microphone recording/private-storage save, and navigation visibility.
 - Still OPEN: PC fully-offline vault save, reconnect/sync, and interrupted retry without duplicates; ARIA speech-to-text provider approval remains a separate technical gate.
 
+## 23. PC offline capture and reconnect — owner-confirmed PASS (25 November 2026 AST)
+
+- Roberto confirms the full synthetic PC offline-write flow completed correctly in the SimpleLife Preview: the PC vault was created/unlocked while online, the vault remained unlocked offline, and the synthetic Inbox capture saved locally without network access.
+- After reconnecting, the capture synchronized and appeared correctly. The owner reported the complete requested check as “todo correcto”; record this as owner-confirmed PASS for offline save and reconnect/sync, with no duplicate visible in the tested result.
+- This PASS is limited to the offline save and reconnect path exercised. A separate deliberately interrupted retry/recovery test was not performed in this step and remains OPEN; do not infer retry idempotency from a normal successful sync.
+- No production deployment, merge, hosted migration, billing change or provider request is implied. PR #97 remains subject to its existing release boundary.
+
