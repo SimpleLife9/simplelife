@@ -105,11 +105,14 @@ export default {
     const isHashedBuildAsset = request.method === "GET"
       && url.pathname.startsWith("/assets/")
       && response.ok;
-    const isSttLabAsset = request.method === "GET"
+    const isSttLabDocument = request.method === "GET"
       && response.ok
       && (url.pathname === "/experiments/stt-local"
         || url.pathname === "/experiments/stt-local/"
-        || url.pathname === "/experiments/stt-local/index.html"
+        || url.pathname === "/experiments/stt-local/index.html");
+    const isSttLabAsset = request.method === "GET"
+      && response.ok
+      && (isSttLabDocument
         || url.pathname === "/experiments/stt-local/app.js");
 
     if (!isAppNavigation && !isHashedBuildAsset && !isSttLabAsset) return response;
@@ -123,6 +126,15 @@ export default {
       headers.set("Cache-Control", "no-store");
     } else {
       headers.set("Cache-Control", "public, max-age=31536000, immutable");
+    }
+
+    // The isolated STT lab can be opened directly or precached by the service
+    // worker using a non-navigation GET. _headers alone is not consistently
+    // applied to Worker asset responses, so set isolation here on every HTML
+    // document response, including the copy later served from Cache Storage.
+    if (isAppNavigation || isSttLabDocument) {
+      headers.set("Cross-Origin-Opener-Policy", "same-origin");
+      headers.set("Cross-Origin-Embedder-Policy", "credentialless");
     }
 
     return new Response(response.body, {
