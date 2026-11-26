@@ -17,6 +17,9 @@ const ALLOWED_DOWNLOAD_HOSTS = new Set([
 ]);
 const MODEL_ID = "onnx-community/whisper-tiny";
 const MODEL_REVISION = "ff4177021cc41f7db950912b73ea4fdf7d01d8e7";
+// Transformers.js 4.3.2 performs a metadata preflight without forwarding `revision`.
+// Pin the shared URL template as well so every request, including that preflight, uses this exact commit.
+const MODEL_REMOTE_PATH_TEMPLATE = "{model}/resolve/" + MODEL_REVISION + "/";
 const SAMPLE_RATE = 16_000;
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 const MAX_DURATION_SECONDS = 180;
@@ -142,6 +145,7 @@ $("load-model").addEventListener("click", async () => {
     }
     const { env, pipeline } = runtime;
     setStatus("Runtime listo. Descargando modelo y archivos WASM desde los hosts estáticos permitidos…");
+    env.remotePathTemplate = MODEL_REMOTE_PATH_TEMPLATE;
     env.useBrowserCache = true;
     env.useWasmCache = true;
     env.cacheKey = "simplelife-local-stt-whisper-tiny-v1";
