@@ -339,3 +339,11 @@ The PASS items below are only the independently confirmed checks. The following 
 - This PASS is limited to the offline save and reconnect path exercised. A separate deliberately interrupted retry/recovery test was not performed in this step and remains OPEN; do not infer retry idempotency from a normal successful sync.
 - No production deployment, merge, hosted migration, billing change or provider request is implied. PR #97 remains subject to its existing release boundary.
 
+## 24. Offline sync — ambiguous response after server commit regression (26 November 2026 UTC)
+
+- Added a focused unit regression in `tests/inbox-offline-vault.test.js` for the failure window where the server has committed the capture and its initial part, but the HTTP response is lost before the client receives acknowledgement.
+- The first attempt verifies that local encrypted ciphertext remains queued after the ambiguous failure. The retry reuses the exact same UUIDv7 capture and part IDs, receives an idempotent replay acknowledgement, and only then removes the local ciphertext.
+- The simulated server asserts one capture and one initial part after both attempts; a further sync performs no third RPC. The existing ephemeral PostgreSQL test `scripts/sql/inbox-offline-sync.test.sql` independently verifies that the real RPC replays the same persisted IDs and rejects changed source content.
+- This is automated regression coverage, not a claim that a physical PC network interruption was manually induced. The owner-confirmed offline save/reconnect remains PASS; the distinct physical interruption test remains OPEN unless separately performed.
+- Exact-SHA CI for the commit containing this test is required before marking the regression suite PASS. No hosted DB, production, billing, or provider state is changed.
+

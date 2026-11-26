@@ -189,3 +189,81 @@ test('offline vault rotates a lost recovery key only after current-passphrase ve
   const [afterPassphraseUnlock] = await vault.listQueuedCaptures();
   assert.equal(afterPassphraseUnlock.captureId, saved.captureId);
 });
+
+test('offline sync replays a server-committed capture after its response is lost without creating duplicates', async () => {
+  const storage = createMemoryStorage();
+  const vault = createVault(storage);
+  await vault.create('ambiguous-response-passphrase-2026');
+  const saved = await vault.saveTextCapture({
+    contentOriginal: 'Confirmar la cita del jueves.',
+    captureId: '019b7000-0000-7000-8000-000000000501',
+    partId: '019b7000-0000-7000-8000-000000000502',
+    capturedAt: '2026-11-25T18:45:00.000Z',
+  });
+
+  // Model the RPC transaction committing both rows, followed by a lost HTTP
+  // response. The client must keep its encrypted local record until an
+  // idempotent replay acknowledgement arrives on the next attempt.
+  const serverCaptures = new Map();
+  const serverParts = new Map();
+  let attempts = 0;
+  let loseFirstResponse = true;
+
+  const simulatedServerRpc = async (capture) => {
+    attempts += 1;
+    const existingCapture = serverCaptures.get(capture.captureId);
+    const replayed = Boolean(existingCapture);
+
+    if (existingCapture) {
+      assert.equal(existingCapture.contentOriginal, capture.contentOriginal);
+      assert.equal(existingCapture.partId, capture.partId);
+    } else {
+      serverCaptures.set(capture.captureId, {
+        contentOriginal: capture.contentOriginal,
+        partId: capture.partId,
+      });
+    }
+
+    const partKey = capture.captureId + ':0';
+    const existingPart = serverParts.get(partKey);
+    if (existingPart) {
+      assert.equal(existingPart.partId, capture.partId);
+      assert.equal(existingPart.originalFragment, capture.contentOriginal);
+    } else {
+      serverParts.set(partKey, {
+        partId: capture.partId,
+        originalFragment: capture.contentOriginal,
+      });
+    }
+
+    if (loseFirstResponse) {
+      loseFirstResponse = false;
+      throw new Error('NETWORK_RESPONSE_LOST_AFTER_SERVER_COMMIT');
+    }
+
+    return { synced: true, replayed };
+  };
+
+  const firstAttempt = await vault.syncPending(simulatedServerRpc);
+  assert.deepEqual(firstAttempt, { synced: 0, failed: 1 });
+  assert.equal(serverCaptures.size, 1);
+  assert.equal(serverParts.size, 1);
+  assert.ok(storage.captures.has(saved.captureId));
+
+  const [stillQueued] = await vault.listQueuedCaptures();
+  assert.equal(stillQueued.captureId, saved.captureId);
+  assert.equal(stillQueued.partId, saved.partId);
+  assert.equal(stillQueued.contentOriginal, 'Confirmar la cita del jueves.');
+
+  const retry = await vault.syncPending(simulatedServerRpc);
+  assert.deepEqual(retry, { synced: 1, failed: 0 });
+  assert.equal(attempts, 2);
+  assert.equal(serverCaptures.size, 1);
+  assert.equal(serverParts.size, 1);
+  assert.equal(storage.captures.has(saved.captureId), false);
+
+  const emptyRetry = await vault.syncPending(simulatedServerRpc);
+  assert.deepEqual(emptyRetry, { synced: 0, failed: 0 });
+  assert.equal(attempts, 2);
+});
+
