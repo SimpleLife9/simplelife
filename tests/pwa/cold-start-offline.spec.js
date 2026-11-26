@@ -33,8 +33,14 @@ async function prepareOnlineShell(page) {
   );
   await expect(page.locator('#root > :not(.offline-shell-status)')).toHaveCount(1);
 
+  const isolation = await page.evaluate(() => ({
+    isolated: globalThis.crossOriginIsolated === true,
+    sharedMemory: typeof globalThis.SharedArrayBuffer === 'function',
+  }));
+  expect(isolation).toEqual({ isolated: true, sharedMemory: true });
+
   const cacheAudit = await page.evaluate(async () => {
-    const cache = await caches.open('simplelife-shell-v9');
+    const cache = await caches.open('simplelife-shell-v10');
     const manifestResponse = await cache.match(
       new URL('/precache-manifest.json', window.location.origin).href,
       { ignoreVary: true },
@@ -207,13 +213,13 @@ test('hosted app document bypasses HTTP cache while hashed bundles remain immuta
 
 
 
-test('PWA shell v9 replaces v8 cached application and STT lab assets', async ({ browser }) => {
+test('PWA shell v10 replaces v9 cached application and STT lab assets', async ({ browser }) => {
   const context = await browser.newContext({ serviceWorkers: 'allow' });
   try {
     const page = await context.newPage();
     await page.goto(new URL('/experiments/stt-local/index.html', baseURL).toString(), { waitUntil: 'load' });
     await page.evaluate(async () => {
-      const legacy = await caches.open('simplelife-shell-v8');
+      const legacy = await caches.open('simplelife-shell-v9');
       await legacy.put(
         new URL('/experiments/stt-local/app.js', window.location.origin),
         new Response('/* stale STT lab script from the previous deployment */', {
@@ -236,7 +242,7 @@ test('PWA shell v9 replaces v8 cached application and STT lab assets', async ({ 
 
     const result = await page.evaluate(async () => {
       const names = await caches.keys();
-      const cache = await caches.open('simplelife-shell-v9');
+      const cache = await caches.open('simplelife-shell-v10');
       const document = await cache.match(
         new URL('/experiments/stt-local/index.html', window.location.origin),
         { ignoreVary: true },
@@ -253,8 +259,8 @@ test('PWA shell v9 replaces v8 cached application and STT lab assets', async ({ 
       };
     });
 
-    expect(result.names).toContain('simplelife-shell-v9');
-    expect(result.names).not.toContain('simplelife-shell-v8');
+    expect(result.names).toContain('simplelife-shell-v10');
+    expect(result.names).not.toContain('simplelife-shell-v9');
     expect(result.scriptStatus).toBe(200);
     expect(result.scriptText).toContain('STT_RUNTIME_IMPORT_FAILED [cdn.jsdelivr.net]');
     expect(result.scriptText).toContain('STT_MODEL_CHECKSUM_MISMATCH');
@@ -307,7 +313,7 @@ test('isolated local STT lab reopens from the service-worker cache while offline
     await expect(onlinePage.getByRole('button', { name: 'Descargar y preparar motor' })).toBeEnabled();
 
     const cachedLab = await onlinePage.evaluate(async () => {
-      const cache = await caches.open('simplelife-shell-v9');
+      const cache = await caches.open('simplelife-shell-v10');
       const origin = window.location.origin;
       const documentResponse = await cache.match(new URL('/experiments/stt-local/index.html', origin));
       const scriptResponse = await cache.match(new URL('/experiments/stt-local/app.js', origin));
@@ -368,4 +374,53 @@ test('isolated local STT lab reopens from the service-worker cache while offline
   } finally {
     await context.close();
   }
+});
+
+
+function createSilentWavBuffer(durationSeconds = 1) {
+  const sampleRate = 16_000;
+  const channels = 1;
+  const bitsPerSample = 16;
+  const dataBytes = Math.round(sampleRate * durationSeconds) * channels * bitsPerSample / 8;
+  const buffer = Buffer.alloc(44 + dataBytes);
+  buffer.write('RIFF', 0, 'ascii');
+  buffer.writeUInt32LE(36 + dataBytes, 4);
+  buffer.write('WAVE', 8, 'ascii');
+  buffer.write('fmt ', 12, 'ascii');
+  buffer.writeUInt32LE(16, 16);
+  buffer.writeUInt16LE(1, 20);
+  buffer.writeUInt16LE(channels, 22);
+  buffer.writeUInt32LE(sampleRate, 24);
+  buffer.writeUInt32LE(sampleRate * channels * bitsPerSample / 8, 28);
+  buffer.writeUInt16LE(channels * bitsPerSample / 8, 32);
+  buffer.writeUInt16LE(bitsPerSample, 34);
+  buffer.write('data', 36, 'ascii');
+  buffer.writeUInt32LE(dataBytes, 40);
+  return buffer;
+}
+
+test('hosted Preview initializes Whisper.cpp and completes synthetic-audio inference locally', async ({ page }) => {
+  test.skip(!process.env.PWA_BASE_URL, 'Runs once against the hosted Preview to verify the actual WASM runtime.');
+  test.setTimeout(360_000);
+  const pageErrors = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+
+  await page.goto(new URL('/experiments/stt-local/index.html', baseURL).toString(), { waitUntil: 'load' });
+  const isolation = await page.evaluate(() => ({
+    isolated: globalThis.crossOriginIsolated === true,
+    sharedMemory: typeof globalThis.SharedArrayBuffer === 'function',
+  }));
+  expect(isolation).toEqual({ isolated: true, sharedMemory: true });
+
+  await page.getByRole('button', { name: 'Descargar y preparar motor' }).click();
+  await expect(page.locator('#status')).toContainText('Modelo listo y verificado', { timeout: 240_000 });
+
+  await page.locator('#audio-file').setInputFiles({
+    name: 'simplelife-synthetic-silence.wav',
+    mimeType: 'audio/wav',
+    buffer: createSilentWavBuffer(),
+  });
+  await page.getByRole('button', { name: 'Transcribir localmente' }).click();
+  await expect(page.locator('#status')).toContainText('Prueba terminada en el dispositivo', { timeout: 120_000 });
+  expect(pageErrors).toEqual([]);
 });

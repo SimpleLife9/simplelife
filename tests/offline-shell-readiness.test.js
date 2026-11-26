@@ -12,6 +12,20 @@ test('the app readiness check uses the active Service Worker cache namespace', a
   assert.ok(worker.includes(`const CACHE_NAME = '${OFFLINE_SHELL_CACHE_NAME}';`));
 });
 
+test('the app and isolated Whisper pages receive cross-origin isolation headers', async () => {
+  const headers = await readFile(new URL('../public/_headers', import.meta.url), 'utf8');
+  const blocks = headers.trim().split(/\n(?=\/)/);
+  for (const route of ['/', '/index.html', '/experiments/stt-local/index.html']) {
+    const section = blocks.find((value) => value.split('\n')[0] === route);
+    assert.ok(section, 'Missing response header section for ' + route);
+    assert.match(section, /Cross-Origin-Opener-Policy: same-origin/);
+    assert.match(section, /Cross-Origin-Embedder-Policy: credentialless/);
+  }
+
+  const vite = await readFile(new URL('../vite.config.js', import.meta.url), 'utf8');
+  assert.match(vite, /server:\s*\{[\s\S]*?headers:\s*crossOriginIsolationHeaders/);
+  assert.match(vite, /preview:\s*\{\s*headers:\s*crossOriginIsolationHeaders/);
+});
 test('a verified offline-ready shell has no persistent banner', () => {
   assert.equal(getOfflineShellStatusMessage('ready', false), null);
   assert.equal(getOfflineShellStatusMessage('checking', false), null);
