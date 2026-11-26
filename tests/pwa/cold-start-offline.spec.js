@@ -34,7 +34,7 @@ async function prepareOnlineShell(page) {
   await expect(page.locator('#root > :not(.offline-shell-status)')).toHaveCount(1);
 
   const cacheAudit = await page.evaluate(async () => {
-    const cache = await caches.open('simplelife-shell-v8');
+    const cache = await caches.open('simplelife-shell-v9');
     const manifestResponse = await cache.match(
       new URL('/precache-manifest.json', window.location.origin).href,
       { ignoreVary: true },
@@ -207,13 +207,13 @@ test('hosted app document bypasses HTTP cache while hashed bundles remain immuta
 
 
 
-test('PWA shell v8 replaces v7 cached application and STT lab assets', async ({ browser }) => {
+test('PWA shell v9 replaces v8 cached application and STT lab assets', async ({ browser }) => {
   const context = await browser.newContext({ serviceWorkers: 'allow' });
   try {
     const page = await context.newPage();
     await page.goto(new URL('/experiments/stt-local/index.html', baseURL).toString(), { waitUntil: 'load' });
     await page.evaluate(async () => {
-      const legacy = await caches.open('simplelife-shell-v7');
+      const legacy = await caches.open('simplelife-shell-v8');
       await legacy.put(
         new URL('/experiments/stt-local/app.js', window.location.origin),
         new Response('/* stale STT lab script from the previous deployment */', {
@@ -236,7 +236,7 @@ test('PWA shell v8 replaces v7 cached application and STT lab assets', async ({ 
 
     const result = await page.evaluate(async () => {
       const names = await caches.keys();
-      const cache = await caches.open('simplelife-shell-v8');
+      const cache = await caches.open('simplelife-shell-v9');
       const document = await cache.match(
         new URL('/experiments/stt-local/index.html', window.location.origin),
         { ignoreVary: true },
@@ -253,8 +253,8 @@ test('PWA shell v8 replaces v7 cached application and STT lab assets', async ({ 
       };
     });
 
-    expect(result.names).toContain('simplelife-shell-v8');
-    expect(result.names).not.toContain('simplelife-shell-v7');
+    expect(result.names).toContain('simplelife-shell-v9');
+    expect(result.names).not.toContain('simplelife-shell-v8');
     expect(result.scriptStatus).toBe(200);
     expect(result.scriptText).toContain('STT_RUNTIME_IMPORT_FAILED [cdn.jsdelivr.net]');
     expect(result.scriptText).toContain('STT_MODEL_CHECKSUM_MISMATCH');
@@ -307,7 +307,7 @@ test('isolated local STT lab reopens from the service-worker cache while offline
     await expect(onlinePage.getByRole('button', { name: 'Descargar y preparar motor' })).toBeEnabled();
 
     const cachedLab = await onlinePage.evaluate(async () => {
-      const cache = await caches.open('simplelife-shell-v8');
+      const cache = await caches.open('simplelife-shell-v9');
       const origin = window.location.origin;
       const documentResponse = await cache.match(new URL('/experiments/stt-local/index.html', origin));
       const scriptResponse = await cache.match(new URL('/experiments/stt-local/app.js', origin));
