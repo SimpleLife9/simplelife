@@ -4628,3 +4628,30 @@ test('mobile voice capture uploads a private original and leaves transcription p
   expect(voiceFinalizeRequests[0]).toEqual({ assetId: asset.id });
   expect(await page.evaluate(() => window.__voiceMicrophoneTrackStopped)).toBe(true);
 });
+
+
+test('Inbox local voice transcription test selects audio without uploading or saving it', async ({ page }) => {
+  const { insertedVoiceAssets, uploadedVoiceObjects, voiceFinalizeRequests } =
+    await mockSupabaseSession(page);
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  const voicePanel = page.getByRole('region', { name: 'Captura de voz privada' });
+  const audioInput = voicePanel.getByLabel('Audio de prueba');
+  await audioInput.setInputFiles({
+    name: 'simplelife-synthetic-test.wav',
+    mimeType: 'audio/wav',
+    buffer: Buffer.from('synthetic audio fixture only'),
+  });
+
+  await expect(voicePanel).toContainText('Archivo seleccionado localmente: simplelife-synthetic-test.wav');
+  await expect(voicePanel.getByRole('button', { name: 'Transcribir en este dispositivo' })).toBeEnabled();
+  await expect(voicePanel).toContainText('no se sube, no se guarda y no crea una captura');
+
+  expect(insertedVoiceAssets).toHaveLength(0);
+  expect(uploadedVoiceObjects).toHaveLength(0);
+  expect(voiceFinalizeRequests).toHaveLength(0);
+});
