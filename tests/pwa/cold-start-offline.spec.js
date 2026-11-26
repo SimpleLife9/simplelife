@@ -282,7 +282,9 @@ test('a new Service Worker cache version replaces stale cached STT lab code', as
     expect(result.scriptText).toContain('STT_MODEL_OR_WASM_LOAD_FAILED:');
     expect(result.scriptText).toContain('const MODEL_REMOTE_PATH_TEMPLATE = "{model}/resolve/" + MODEL_REVISION + "/";');
     expect(result.scriptText).toContain('function pinModelRevisionUrl(url)');
-    expect(result.scriptText).toContain('"/" + MODEL_ID + "/resolve/" + MODEL_REVISION + "/"');
+    expect(result.scriptText).toContain('const proxyPrefix = "/__stt-model/" + MODEL_ID + "/resolve/";');
+    expect(result.scriptText).toContain('proxyPrefix + MODEL_REVISION + "/" + filePath');
+    expect(result.scriptText).toContain('env.remoteHost = new URL("/__stt-model/", location.origin).href;');
     expect(result.scriptText).toContain('env.remotePathTemplate = MODEL_REMOTE_PATH_TEMPLATE;');
   } finally {
     await context.close();
