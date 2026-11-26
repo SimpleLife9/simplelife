@@ -365,6 +365,11 @@ test('isolated local STT lab reopens from the service-worker cache while offline
     const response = await offlinePage.goto(labURL, { waitUntil: 'load', timeout: 15_000 });
     expect(response?.ok()).toBe(true);
     expect(response?.fromServiceWorker()).toBe(true);
+    const offlineIsolation = await offlinePage.evaluate(() => ({
+      isolated: globalThis.crossOriginIsolated,
+      sharedMemory: typeof globalThis.SharedArrayBuffer === 'function',
+    }));
+    expect(offlineIsolation).toEqual({ isolated: true, sharedMemory: true });
     await expect(offlinePage.getByRole('heading', { name: 'Transcripción local de voz' })).toBeVisible();
     await expect(offlinePage.getByRole('button', { name: 'Descargar y preparar motor' })).toBeEnabled();
     await expect(offlinePage.locator('#status')).toContainText('Motor sin cargar');
