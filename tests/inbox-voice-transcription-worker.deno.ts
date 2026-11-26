@@ -65,13 +65,14 @@ async function context({
   authMode = "secret",
   rpcOverrides = {},
   bytes = AUDIO,
-  hash = await AUDIO_HASH_PROMISE,
+  hash,
 }: {
   authMode?: string;
   rpcOverrides?: Record<string, { data: unknown; error?: unknown }>;
   bytes?: Uint8Array;
   hash?: string;
 } = {}) {
+  const resolvedHash = hash ?? await AUDIO_HASH_PROMISE;
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
   const blob = new Blob([bytes], { type: "audio/webm" });
   const claim = {
@@ -81,7 +82,7 @@ async function context({
     object_path: `${OWNER}/${ASSET}/source.webm`,
     mime_type: "audio/webm",
     file_size_bytes: bytes.byteLength,
-    sha256_hex: hash,
+    sha256_hex: resolvedHash,
     attempt_number: 1,
     lease_token: LEASE,
     lease_expires_at: new Date(Date.now() + 120_000).toISOString(),
