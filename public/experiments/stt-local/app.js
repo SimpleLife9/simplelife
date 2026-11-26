@@ -1,29 +1,34 @@
-const TRANSFORMERS_MODULE = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2";
-const ALLOWED_DOWNLOAD_HOSTS = new Set([
-  location.hostname,
-  "cdn.jsdelivr.net",
-]);
-const MODEL_ID = "onnx-community/whisper-tiny";
-const MODEL_REVISION = "ff4177021cc41f7db950912b73ea4fdf7d01d8e7";
-// Transformers.js 4.3.2 performs a metadata preflight without forwarding `revision`.
-// Pin the shared URL template as well so every request, including that preflight, uses this exact commit.
-const MODEL_REMOTE_PATH_TEMPLATE = "{model}/resolve/" + MODEL_REVISION + "/";
+const WHISPER_WASM_MODULE = "https://cdn.jsdelivr.net/npm/@timur00kh/whisper.wasm@0.1.1/+esm";
+const MODEL_REVISION = "0b364b566045a405be7225ee1e415a073e04da77";
+const MODEL_PATH = "ggerganov/whisper.cpp/resolve/" + MODEL_REVISION + "/ggml-tiny-q5_1.bin";
+const WHISPER_CPP_MODEL_URL = "/__stt-whisper/" + MODEL_PATH;
+const MODEL_SHA256 = "818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7";
+const MODEL_SIZE_LABEL = "32.2 MB";
 const SAMPLE_RATE = 16_000;
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
-const MAX_DURATION_SECONDS = 180;
+const MAX_DURATION_SECONDS = 120;
+const ALLOWED_FETCH_HOSTS = new Set([location.hostname, "cdn.jsdelivr.net"]);
 
 const $ = (id) => document.getElementById(id);
-const state = { pipeline: null, loading: false, transcribing: false };
+const state = {
+  whisper: null,
+  modelManager: null,
+  session: null,
+  loading: false,
+  transcribing: false,
+};
 
 function setStatus(message) {
   $("status").textContent = message;
 }
+
 function formatBytes(value) {
   if (!Number.isFinite(value)) return "—";
   return value >= 1024 * 1024
     ? (value / (1024 * 1024)).toFixed(1) + " MiB"
     : (value / 1024).toFixed(1) + " KiB";
 }
+
 function refreshMetrics() {
   const memory = navigator.deviceMemory;
   $("device-memory").textContent = Number.isFinite(memory) ? memory + " GiB" : "No expuesta";
@@ -34,14 +39,18 @@ function refreshMetrics() {
       $("storage").textContent = Number.isFinite(estimate.usage)
         ? formatBytes(estimate.usage) + " / " + formatBytes(estimate.quota)
         : "No disponible";
-    }).catch(() => { $("storage").textContent = "No disponible"; });
+    }).catch(() => {
+      $("storage").textContent = "No disponible";
+    });
   }
 }
+
 function normalizeWords(value) {
   return String(value || "").toLocaleLowerCase("es")
     .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .replace(/[^\p{L}\p{N}]+/gu, " ").trim().split(/\s+/).filter(Boolean);
 }
+
 function wordErrorRate(reference, hypothesis) {
   const a = normalizeWords(reference);
   const b = normalizeWords(hypothesis);
@@ -62,13 +71,14 @@ function wordErrorRate(reference, hypothesis) {
   }
   return row[b.length] / a.length;
 }
+
 async function decodeMono16k(file) {
   const context = new AudioContext();
   try {
     const decoded = await context.decodeAudioData(await file.arrayBuffer());
     if (!Number.isFinite(decoded.duration) || decoded.duration <= 0
       || decoded.duration > MAX_DURATION_SECONDS) {
-      throw new Error("El audio debe durar entre 1 segundo y 3 minutos.");
+      throw new Error("El audio debe durar entre 1 segundo y 2 minutos.");
     }
     const frames = Math.ceil(decoded.duration * SAMPLE_RATE);
     const offline = new OfflineAudioContext(1, frames, SAMPLE_RATE);
@@ -82,61 +92,43 @@ async function decodeMono16k(file) {
     await context.close().catch(() => {});
   }
 }
+
 function setBusy(busy) {
-  $("load-model").disabled = busy || Boolean(state.pipeline);
-  $("release-model").disabled = busy || !state.pipeline;
-  $("audio-file").disabled = busy || !state.pipeline;
-  $("transcribe").disabled = busy || !state.pipeline || !$("audio-file").files?.length;
-}
-function pinModelRevisionUrl(url) {
-  const hubPrefix = "/" + MODEL_ID + "/resolve/";
-  const proxyPrefix = "/__stt-model/" + MODEL_ID + "/resolve/";
-  let suffix = null;
-
-  if (url.origin === "https://huggingface.co" && url.pathname.startsWith(hubPrefix)) {
-    suffix = url.pathname.slice(hubPrefix.length);
-  } else if (url.origin === location.origin && url.pathname.startsWith(proxyPrefix)) {
-    suffix = url.pathname.slice(proxyPrefix.length);
-  } else {
-    return url;
-  }
-
-  const separator = suffix.indexOf("/");
-  if (separator < 1) return url;
-  const requestedRevision = suffix.slice(0, separator);
-  const filePath = suffix.slice(separator + 1);
-  if (!["main", MODEL_REVISION].includes(requestedRevision)
-    || !filePath || filePath.includes("..")) {
-    return url;
-  }
-  return new URL(
-    proxyPrefix + MODEL_REVISION + "/" + filePath,
-    location.origin,
-  );
+  $("load-model").disabled = busy || Boolean(state.whisper);
+  $("release-model").disabled = busy || !state.whisper;
+  $("audio-file").disabled = busy || !state.whisper;
+  $("transcribe").disabled = busy || !state.whisper || !$("audio-file").files?.length;
 }
 
-function installFetchWriteGuard() {
-  if (window.__simpleLifeSttFetchGuardInstalled) return;
+function installReadOnlyFetchGuard() {
+  if (window.__simpleLifeWhisperFetchGuardInstalled) return;
   const nativeFetch = window.fetch.bind(window);
   window.fetch = async (input, init = {}) => {
-    const method = String(init.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
-    if (!["GET", "HEAD"].includes(method)) {
+    const method = String(
+      init.method || (input instanceof Request ? input.method : "GET"),
+    ).toUpperCase();
+    if (method !== "GET" && method !== "HEAD") {
       throw new Error("STT_NETWORK_WRITE_BLOCKED");
     }
-    const originalUrl = new URL(input instanceof Request ? input.url : input, location.href);
-    // Route every Whisper Hub request through the same-origin read-only Worker.
-    // The proxy validates the immutable snapshot and only serves allowlisted files.
-    const url = pinModelRevisionUrl(originalUrl);
-    if (!ALLOWED_DOWNLOAD_HOSTS.has(url.hostname)) {
-      throw new Error("STT_REMOTE_HOST_NOT_ALLOWLISTED: " + url.hostname);
+
+    const originalUrl = new URL(
+      input instanceof Request ? input.url : input,
+      location.href,
+    );
+    const isModelProxy = originalUrl.origin === location.origin
+      && originalUrl.pathname === WHISPER_CPP_MODEL_URL;
+    const isRuntimeAsset = originalUrl.hostname === "cdn.jsdelivr.net"
+      && originalUrl.protocol === "https:";
+    if (!isModelProxy && !isRuntimeAsset) {
+      throw new Error("STT_REMOTE_HOST_NOT_ALLOWLISTED: " + originalUrl.hostname);
     }
-    const fetchInput = url.href !== originalUrl.href
-      ? (input instanceof Request ? new Request(url.href, input) : url.href)
-      : input;
+
     try {
-      const response = await nativeFetch(fetchInput, init);
-      const finalUrl = response.url ? new URL(response.url) : url;
-      if (!ALLOWED_DOWNLOAD_HOSTS.has(finalUrl.hostname)) {
+      const response = await nativeFetch(input, init);
+      const finalUrl = response.url ? new URL(response.url) : originalUrl;
+      const finalAllowed = finalUrl.origin === location.origin
+        || (finalUrl.protocol === "https:" && ALLOWED_FETCH_HOSTS.has(finalUrl.hostname));
+      if (!finalAllowed) {
         throw new Error("STT_REDIRECT_HOST_NOT_ALLOWLISTED: " + finalUrl.hostname);
       }
       return response;
@@ -144,58 +136,88 @@ function installFetchWriteGuard() {
       const message = String(error?.message || error);
       if (message.startsWith("STT_")) throw error;
       throw new Error(
-        "STT_FETCH_FAILED: " + url.hostname + url.pathname + " (" + message.slice(0, 120) + ")",
+        "STT_FETCH_FAILED: " + originalUrl.hostname + originalUrl.pathname
+          + " (" + message.slice(0, 120) + ")",
       );
     }
   };
-  window.__simpleLifeSttFetchGuardInstalled = true;
+  window.__simpleLifeWhisperFetchGuardInstalled = true;
+}
+
+async function sha256Hex(bytes) {
+  if (!crypto?.subtle) throw new Error("STT_SHA256_UNAVAILABLE");
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
 }
 
 $("load-model").addEventListener("click", async () => {
-  if (state.loading || state.pipeline) return;
+  if (state.loading || state.whisper) return;
   state.loading = true;
   setBusy(true);
-  setStatus("Descargando runtime Transformers.js 4.3.2 desde cdn.jsdelivr.net…");
-  installFetchWriteGuard();
+  setStatus("Preparando whisper.cpp WASM. La inferencia se ejecutará localmente en este dispositivo…");
+  installReadOnlyFetchGuard();
+
   try {
     let runtime;
     try {
-      runtime = await import(TRANSFORMERS_MODULE);
+      runtime = await import(WHISPER_WASM_MODULE);
     } catch (error) {
-      throw new Error("STT_RUNTIME_IMPORT_FAILED [cdn.jsdelivr.net]: " + String(error?.message || error).slice(0, 180));
+      throw new Error(
+        "STT_RUNTIME_IMPORT_FAILED [cdn.jsdelivr.net]: "
+          + String(error?.message || error).slice(0, 180),
+      );
     }
-    const { env, pipeline } = runtime;
-    setStatus("Runtime listo. Descargando modelo y archivos WASM desde los hosts estáticos permitidos…");
-    env.remoteHost = new URL("/__stt-model/", location.origin).href;
-    env.remotePathTemplate = MODEL_REMOTE_PATH_TEMPLATE;
-    env.useBrowserCache = true;
-    env.useWasmCache = true;
-    env.cacheKey = "simplelife-local-stt-whisper-tiny-v1";
-    env.allowRemoteModels = true;
-    env.allowLocalModels = false;
-    env.backends.onnx.wasm.numThreads = 1;
+
+    const { WhisperWasmService, ModelManager } = runtime;
+    if (typeof WhisperWasmService !== "function" || typeof ModelManager !== "function") {
+      throw new Error("STT_RUNTIME_EXPORTS_INVALID");
+    }
+
+    const whisper = new WhisperWasmService({ logLevel: 0 });
+    if (!await whisper.checkWasmSupport()) {
+      throw new Error("Este navegador no ofrece WebAssembly SIMD, necesario para este motor.");
+    }
+
     const persistent = navigator.storage?.persist
       ? await navigator.storage.persist().catch(() => false)
       : false;
-    $("storage").textContent = persistent ? "Persistente concedida" : "Caché del navegador";
-    try {
-      state.pipeline = await pipeline("automatic-speech-recognition", MODEL_ID, {
-        device: "wasm",
-        dtype: "q8",
-        revision: MODEL_REVISION,
-        progress_callback: (event) => {
-          const name = typeof event.file === "string" ? event.file.split("/").pop() : "archivo del modelo";
-          const progress = Number.isFinite(event.progress) ? " · " + event.progress.toFixed(0) + "%" : "";
-          setStatus("Preparando " + name + progress);
-        },
-      });
-    } catch (error) {
-      throw new Error("STT_MODEL_OR_WASM_LOAD_FAILED: " + String(error?.message || error).slice(0, 200));
+    $("storage").textContent = persistent
+      ? "Almacenamiento persistente concedido"
+      : "Caché IndexedDB del navegador";
+
+    const modelManager = new ModelManager({ logLevel: 0 });
+    setStatus("Descargando o recuperando el modelo multilingüe tiny-q5_1 (" + MODEL_SIZE_LABEL + ")…");
+    let lastProgress = -1;
+    const modelBytes = await modelManager.loadModelByUrl(
+      new URL(WHISPER_CPP_MODEL_URL, location.origin).href,
+      (progress) => {
+        const rounded = Math.max(0, Math.min(100, Math.round(progress)));
+        if (rounded === lastProgress) return;
+        lastProgress = rounded;
+        setStatus("Modelo tiny-q5_1: " + rounded + "% · " + MODEL_SIZE_LABEL
+          + " · guardado localmente en IndexedDB.");
+      },
+    );
+
+    setStatus("Verificando SHA-256 del modelo descargado…");
+    const actualHash = await sha256Hex(modelBytes);
+    if (actualHash !== MODEL_SHA256) {
+      await modelManager.clearCache().catch(() => {});
+      throw new Error("STT_MODEL_CHECKSUM_MISMATCH: el archivo descargado no coincide con el modelo oficial.");
     }
-    setStatus("Modelo listo. Ya puedes elegir un audio de prueba; no se ha accedido a micrófono ni a Storage privado.");
+
+    setStatus("Inicializando whisper.cpp en WebAssembly…");
+    await whisper.initModel(modelBytes);
+
+    state.modelManager = modelManager;
+    state.whisper = whisper;
+    state.session = whisper.createSession();
+    setStatus("Modelo listo y verificado. Las próximas aperturas lo recuperarán de IndexedDB; no hay cuota por transcripción.");
   } catch (error) {
-    state.pipeline = null;
-    setStatus("No se pudo preparar el modelo: " + String(error?.message || error).slice(0, 220));
+    state.whisper = null;
+    state.modelManager = null;
+    state.session = null;
+    setStatus("No se pudo preparar el motor: " + String(error?.message || error).slice(0, 240));
   } finally {
     state.loading = false;
     setBusy(false);
@@ -205,7 +227,7 @@ $("load-model").addEventListener("click", async () => {
 
 $("audio-file").addEventListener("change", () => {
   const file = $("audio-file").files?.[0];
-  $("transcribe").disabled = !state.pipeline || !file || file.size < 1 || file.size > MAX_AUDIO_BYTES;
+  $("transcribe").disabled = !state.whisper || !file || file.size < 1 || file.size > MAX_AUDIO_BYTES;
   $("transcription").textContent = file
     ? "Archivo seleccionado localmente: " + file.name + " (" + formatBytes(file.size) + "). No se ha enviado."
     : "La transcripción aparecerá aquí.";
@@ -216,25 +238,35 @@ $("audio-file").addEventListener("change", () => {
 
 $("transcribe").addEventListener("click", async () => {
   const file = $("audio-file").files?.[0];
-  if (!state.pipeline || !file || state.transcribing) return;
+  if (!state.session || !file || state.transcribing) return;
   if (file.size > MAX_AUDIO_BYTES) {
     setStatus("El archivo supera 25 MiB.");
     return;
   }
+
   state.transcribing = true;
   setBusy(true);
-  $("transcription").textContent = "Decodificando y transcribiendo localmente…";
+  $("transcription").textContent = "Decodificando audio y ejecutando Whisper en el dispositivo…";
   const started = performance.now();
+
   try {
     const { samples, duration } = await decodeMono16k(file);
-    const result = await state.pipeline(samples, {
-      sampling_rate: SAMPLE_RATE,
-      language: "spanish",
-      task: "transcribe",
-      chunk_length_s: 30,
-      stride_length_s: 5,
+    const segments = [];
+    const stream = state.session.streaming(samples, {
+      language: "es",
+      threads: 2,
+      translate: false,
+      timeoutMs: 300_000,
+      sleepMsBetweenChunks: 80,
     });
-    const text = String(result?.text || "").trim();
+
+    for await (const segment of stream) {
+      if (segment?.text) segments.push(String(segment.text).trim());
+      $("transcription").textContent = segments.join(" ").replace(/\s+/g, " ").trim()
+        || "Whisper está procesando el audio…";
+    }
+
+    const text = segments.join(" ").replace(/\s+/g, " ").trim();
     $("transcription").textContent = text || "El motor no devolvió texto.";
     $("duration").textContent = duration.toFixed(1) + " s";
     $("elapsed").textContent = ((performance.now() - started) / 1000).toFixed(1) + " s";
@@ -252,15 +284,14 @@ $("transcribe").addEventListener("click", async () => {
   }
 });
 
-$("release-model").addEventListener("click", async () => {
-  if (!state.pipeline || state.loading || state.transcribing) return;
-  try {
-    await state.pipeline.dispose?.();
-  } catch { /* best-effort release */ }
-  state.pipeline = null;
+$("release-model").addEventListener("click", () => {
+  if (!state.whisper || state.loading || state.transcribing) return;
+  state.session = null;
+  state.whisper = null;
+  state.modelManager = null;
   $("audio-file").value = "";
-  $("transcription").textContent = "Motor liberado.";
-  setStatus("Se liberó la instancia del modelo. Los pesos permanecen en caché hasta que el navegador los elimine.");
+  $("transcription").textContent = "Se soltó la instancia del motor. El navegador recuperará la memoria cuando ejecute su limpieza interna.";
+  setStatus("Motor desconectado. El modelo verificado permanece en IndexedDB para evitar otra descarga.");
   setBusy(false);
   refreshMetrics();
 });
