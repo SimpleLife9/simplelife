@@ -34,7 +34,7 @@ async function prepareOnlineShell(page) {
   await expect(page.locator('#root > :not(.offline-shell-status)')).toHaveCount(1);
 
   const cacheAudit = await page.evaluate(async () => {
-    const cache = await caches.open('simplelife-shell-v6');
+    const cache = await caches.open('simplelife-shell-v7');
     const manifestResponse = await cache.match(
       new URL('/precache-manifest.json', window.location.origin).href,
       { ignoreVary: true },
@@ -170,7 +170,7 @@ test('a cold app launch stays available offline after closing and reopening the 
   }
 });
 
-test('hosted cold launch works from the browser HTTP cache even without a Service Worker', async () => {
+test('hosted app document bypasses HTTP cache while hashed bundles remain immutable', async () => {
   test.skip(!process.env.PWA_BASE_URL, 'Requires the deployed Cloudflare Preview cache headers.');
 
   const userDataDir = await mkdtemp(join(tmpdir(), 'simplelife-pwa-http-cache-'));
@@ -185,7 +185,7 @@ test('hosted cold launch works from the browser HTTP cache even without a Servic
     const onlinePage = context.pages()[0] || await context.newPage();
     const cacheAudit = await prepareOnlineShell(onlinePage);
 
-    expect(cacheAudit.documentCacheControl).toMatch(/max-age=604800/);
+    expect(cacheAudit.documentCacheControl).toMatch(/no-store/i);
     const jsCacheControl = Object.entries(cacheAudit.assetCacheControls)
       .find(([path]) => path.endsWith('.js'))?.[1];
     const cssCacheControl = Object.entries(cacheAudit.assetCacheControls)
@@ -195,36 +195,9 @@ test('hosted cold launch works from the browser HTTP cache even without a Servic
     expect(cssCacheControl).toMatch(/max-age=31536000/);
     expect(cssCacheControl).toMatch(/immutable/);
 
-    // Remove the registration in this disposable profile to prove that the
-    // browser HTTP cache alone can recover the shell and its hashed bundles.
-    const remainingRegistrations = await onlinePage.evaluate(async () => {
-      const registrations = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(registrations.map((registration) => registration.unregister()));
-      return (await navigator.serviceWorker.getRegistrations()).length;
-    });
-    expect(remainingRegistrations).toBe(0);
-
-    await context.close();
-    context = undefined;
-
-    context = await chromium.launchPersistentContext(userDataDir, {
-      headless: true,
-      serviceWorkers: 'allow',
-    });
-    await context.setOffline(true);
-
-    const offlinePage = context.pages()[0] || await context.newPage();
-    const pageErrors = [];
-    offlinePage.on('pageerror', (error) => pageErrors.push(error.message));
-
-    const response = await offlinePage.goto(appURL, {
-      waitUntil: 'load',
-      timeout: 15_000,
-    });
-    expect(response?.ok()).toBe(true);
-    await expect(offlinePage.locator('#root > :not(.offline-shell-status)')).toHaveCount(1);
-    expect(await offlinePage.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(false);
-    expect(pageErrors).toEqual([]);
+    // App HTML is intentionally not retained by the browser HTTP cache.
+    // Offline launch is the Service Worker's responsibility, not a stale
+    // seven-day HTML response. The compiled bundles remain immutable.
   } finally {
     await context?.close();
     await rm(userDataDir, { recursive: true, force: true });
@@ -234,13 +207,13 @@ test('hosted cold launch works from the browser HTTP cache even without a Servic
 
 
 
-test('a new Service Worker cache version replaces stale cached STT lab code', async ({ browser }) => {
+test('PWA shell v7 replaces v6 cached application and STT lab assets', async ({ browser }) => {
   const context = await browser.newContext({ serviceWorkers: 'allow' });
   try {
     const page = await context.newPage();
     await page.goto(new URL('/experiments/stt-local/index.html', baseURL).toString(), { waitUntil: 'load' });
     await page.evaluate(async () => {
-      const legacy = await caches.open('simplelife-shell-v5');
+      const legacy = await caches.open('simplelife-shell-v6');
       await legacy.put(
         new URL('/experiments/stt-local/app.js', window.location.origin),
         new Response('/* stale STT lab script from the previous deployment */', {
@@ -263,7 +236,7 @@ test('a new Service Worker cache version replaces stale cached STT lab code', as
 
     const result = await page.evaluate(async () => {
       const names = await caches.keys();
-      const cache = await caches.open('simplelife-shell-v6');
+      const cache = await caches.open('simplelife-shell-v7');
       const document = await cache.match(
         new URL('/experiments/stt-local/index.html', window.location.origin),
         { ignoreVary: true },
@@ -280,8 +253,8 @@ test('a new Service Worker cache version replaces stale cached STT lab code', as
       };
     });
 
-    expect(result.names).toContain('simplelife-shell-v6');
-    expect(result.names).not.toContain('simplelife-shell-v5');
+    expect(result.names).toContain('simplelife-shell-v7');
+    expect(result.names).not.toContain('simplelife-shell-v6');
     expect(result.scriptStatus).toBe(200);
     expect(result.scriptText).toContain('STT_RUNTIME_IMPORT_FAILED [cdn.jsdelivr.net]');
     expect(result.scriptText).toContain('STT_MODEL_CHECKSUM_MISMATCH');
@@ -334,7 +307,7 @@ test('isolated local STT lab reopens from the service-worker cache while offline
     await expect(onlinePage.getByRole('button', { name: 'Descargar y preparar motor' })).toBeEnabled();
 
     const cachedLab = await onlinePage.evaluate(async () => {
-      const cache = await caches.open('simplelife-shell-v6');
+      const cache = await caches.open('simplelife-shell-v7');
       const origin = window.location.origin;
       const documentResponse = await cache.match(new URL('/experiments/stt-local/index.html', origin));
       const scriptResponse = await cache.match(new URL('/experiments/stt-local/app.js', origin));
