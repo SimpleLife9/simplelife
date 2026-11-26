@@ -238,7 +238,7 @@ test('a new Service Worker cache version replaces stale cached STT lab code', as
   const context = await browser.newContext({ serviceWorkers: 'allow' });
   try {
     const page = await context.newPage();
-    await page.goto(new URL('/leaf.svg', baseURL).toString(), { waitUntil: 'load' });
+    await page.goto(new URL('/experiments/stt-local/index.html', baseURL).toString(), { waitUntil: 'load' });
     await page.evaluate(async () => {
       const legacy = await caches.open('simplelife-shell-v3');
       await legacy.put(
