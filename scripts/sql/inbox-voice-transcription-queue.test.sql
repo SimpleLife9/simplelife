@@ -183,7 +183,6 @@ SET LOCAL ROLE service_role;
 DO $test$
 DECLARE
   v_claim record;
-  v_state text;
 BEGIN
   SELECT * INTO v_claim
   FROM public.claim_inbox_voice_transcription_job(
@@ -193,14 +192,23 @@ BEGIN
   IF FOUND THEN
     RAISE EXCEPTION 'Ambiguous provider outcome was automatically retried';
   END IF;
-  SELECT status INTO v_state FROM private.inbox_voice_transcription_job
-  WHERE asset_id='019b7300-0000-7000-8000-000000000101';
+END;
+$test$;
+RESET ROLE;
+
+-- Inspect private queue state as the database test owner, not service_role.
+DO $test$
+DECLARE
+  v_state text;
+BEGIN
+  SELECT j.status INTO v_state
+  FROM private.inbox_voice_transcription_job AS j
+  WHERE j.asset_id='019b7300-0000-7000-8000-000000000101';
   IF v_state<>'manual_review' THEN
     RAISE EXCEPTION 'Expired post-request lease did not enter manual_review';
   END IF;
 END;
 $test$;
-RESET ROLE;
 
 -- Release asset 2 first so its expected claim order is deterministic.
 UPDATE public.capture_audio_asset
