@@ -331,7 +331,7 @@ test('isolated local STT lab reopens from the service-worker cache while offline
     const labURL = new URL('/experiments/stt-local/index.html', baseURL).toString();
     await onlinePage.goto(labURL, { waitUntil: 'load' });
     await expect(onlinePage.getByRole('heading', { name: 'Transcripción local de voz' })).toBeVisible();
-    await expect(onlinePage.getByRole('button', { name: 'Descargar y preparar modelo' })).toBeEnabled();
+    await expect(onlinePage.getByRole('button', { name: 'Descargar y preparar motor' })).toBeEnabled();
 
     const cachedLab = await onlinePage.evaluate(async () => {
       const cache = await caches.open('simplelife-shell-v6');
@@ -387,7 +387,7 @@ test('isolated local STT lab reopens from the service-worker cache while offline
     expect(response?.ok()).toBe(true);
     expect(response?.fromServiceWorker()).toBe(true);
     await expect(offlinePage.getByRole('heading', { name: 'Transcripción local de voz' })).toBeVisible();
-    await expect(offlinePage.getByRole('button', { name: 'Descargar y preparar modelo' })).toBeEnabled();
+    await expect(offlinePage.getByRole('button', { name: 'Descargar y preparar motor' })).toBeEnabled();
     await expect(offlinePage.locator('#status')).toContainText('Motor sin cargar');
     expect(sttScriptResponses).toContain(true);
     expect(externalRequests).toEqual([]);
