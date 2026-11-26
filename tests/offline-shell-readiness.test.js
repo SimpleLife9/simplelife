@@ -6,6 +6,7 @@ import {
   getOfflineShellStatusMessage,
 } from '../src/lib/offline-shell-readiness.js';
 
+
 test('the app readiness check uses the active Service Worker cache namespace', async () => {
   const worker = await readFile(new URL('../public/sw.js', import.meta.url), 'utf8');
   assert.ok(worker.includes(`const CACHE_NAME = '${OFFLINE_SHELL_CACHE_NAME}';`));
@@ -39,4 +40,12 @@ test('the status notice stays in document flow instead of covering mobile naviga
   const styles = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
   assert.match(styles, /\.offline-shell-status\{position:relative;/);
   assert.doesNotMatch(styles, /\.offline-shell-status\{position:fixed;/);
+});
+
+
+test('the authenticated application shell does not mount the preparation banner above mobile navigation', async () => {
+  const app = await readFile(new URL('../src/App.jsx', import.meta.url), 'utf8');
+  const authenticatedBranch = app.slice(app.indexOf('const title = getPageTitle'));
+  assert.match(authenticatedBranch, /<AppShell/);
+  assert.doesNotMatch(authenticatedBranch, /<OfflinePreparationStatus\s*\/>/);
 });

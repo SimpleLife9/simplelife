@@ -3,6 +3,7 @@ import { supabase } from '../../../lib/supabase.js';
 import { uuidv7 } from '../../../lib/uuidv7.js';
 
 import { canAppendAudioChunk, MAX_AUDIO_BYTES } from '../domain/voice-capture-policy.js';
+import { getVoiceCaptureSaveErrorMessage } from '../domain/voice-capture-save-errors.js';
 const MIME_CANDIDATES = [
   'audio/webm;codecs=opus',
   'audio/webm',
@@ -62,47 +63,65 @@ export function VoiceCapture({ profile, busy = false, runAction }) {
   }, []);
 
   const savePrivateAudio = async (blob) => {
-    if (!profile?.id || !supabase) throw new Error('VOICE_CAPTURE_REQUIRES_SIGNED_IN_OWNER');
-    if (!blob.size || blob.size > MAX_AUDIO_BYTES) {
-      throw new Error('La grabación supera el límite privado de 25 MiB.');
+    let stage = 'owner';
+    try {
+      if (!profile?.id || !supabase) throw new Error('VOICE_CAPTURE_REQUIRES_SIGNED_IN_OWNER');
+
+      stage = 'validation';
+      if (!blob.size || blob.size > MAX_AUDIO_BYTES) {
+        throw new Error('La grabación supera el límite privado de 25 MiB.');
+      }
+
+      const mimeType = (blob.type || 'audio/webm').split(';')[0].toLowerCase();
+      if (!['audio/webm','audio/ogg','audio/mp4','audio/wav','audio/mpeg'].includes(mimeType)) {
+        throw new Error('El formato de audio del navegador no está permitido: ' + mimeType);
+      }
+
+      stage = 'local_integrity';
+      const assetId = uuidv7();
+      const objectPath = profile.id + '/' + assetId + '/source.' + fileExtension(mimeType);
+      const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
+      const sha256Hex = toHex(digest);
+
+      stage = 'metadata';
+      const { error: metadataError } = await supabase.from('capture_audio_asset').insert({
+        id: assetId,
+        owner_user_id: profile.id,
+        created_by_user_id: profile.id,
+        bucket_id: 'inbox-voice-private',
+        object_path: objectPath,
+        mime_type: mimeType,
+        file_size_bytes: blob.size,
+        sha256_hex: sha256Hex,
+        status: 'uploading',
+      });
+      if (metadataError) throw metadataError;
+
+      stage = 'storage';
+      const { error: uploadError } = await supabase.storage
+        .from('inbox-voice-private')
+        .upload(objectPath, blob, { contentType: mimeType, upsert: false, cacheControl: '0' });
+      if (uploadError) throw uploadError;
+
+      stage = 'server_verification';
+      const { data, error: finalizeError } = await supabase.functions.invoke('inbox-voice-finalize', {
+        body: { assetId },
+      });
+      if (finalizeError) throw finalizeError;
+      if (data?.verified !== true || data?.assetId !== assetId) {
+        const finalizationError = new Error(data?.error || 'VOICE_UPLOAD_FINALIZATION_NOT_CONFIRMED');
+        finalizationError.code = data?.error || 'VOICE_UPLOAD_FINALIZATION_NOT_CONFIRMED';
+        throw finalizationError;
+      }
+      return assetId;
+    } catch (failure) {
+      const stagedError = new Error(failure?.message || 'VOICE_CAPTURE_SAVE_FAILED');
+      stagedError.name = 'VoiceCaptureSaveError';
+      stagedError.voiceCaptureStage = stage;
+      stagedError.code = typeof failure?.code === 'string' ? failure.code : undefined;
+      stagedError.status = Number.isInteger(failure?.status) ? failure.status : undefined;
+      throw stagedError;
     }
-
-    const mimeType = (blob.type || 'audio/webm').split(';')[0].toLowerCase();
-    if (!['audio/webm','audio/ogg','audio/mp4','audio/wav','audio/mpeg'].includes(mimeType)) {
-      throw new Error('El formato de audio del navegador no está permitido.');
-    }
-
-    const assetId = uuidv7();
-    const objectPath = profile.id + '/' + assetId + '/source.' + fileExtension(mimeType);
-    const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
-    const sha256Hex = toHex(digest);
-
-    const { error: metadataError } = await supabase.from('capture_audio_asset').insert({
-      id: assetId,
-      owner_user_id: profile.id,
-      created_by_user_id: profile.id,
-      bucket_id: 'inbox-voice-private',
-      object_path: objectPath,
-      mime_type: mimeType,
-      file_size_bytes: blob.size,
-      sha256_hex: sha256Hex,
-      status: 'uploading',
-    });
-    if (metadataError) throw metadataError;
-
-    const { error: uploadError } = await supabase.storage
-      .from('inbox-voice-private')
-      .upload(objectPath, blob, { contentType: mimeType, upsert: false, cacheControl: '0' });
-    if (uploadError) throw uploadError;
-
-    const { data, error: finalizeError } = await supabase.functions.invoke('inbox-voice-finalize', {
-      body: { assetId },
-    });
-    if (finalizeError) throw finalizeError;
-    if (data?.verified !== true || data?.assetId !== assetId) {
-      throw new Error('VOICE_UPLOAD_FINALIZATION_NOT_CONFIRMED');
-    }
-    return assetId;
   };
 
   const handleStop = () => {
@@ -182,21 +201,28 @@ export function VoiceCapture({ profile, busy = false, runAction }) {
         }
         setUploading(true);
         const operation = async () => {
-          const assetId = await savePrivateAudio(blob);
-          setNotice('Audio original guardado en almacenamiento privado. La transcripción permanece pendiente hasta configurar un proveedor aprobado.');
-          return assetId;
+          try {
+            const assetId = await savePrivateAudio(blob);
+            setNotice('Audio original guardado en almacenamiento privado. La transcripción permanece pendiente hasta configurar un proveedor aprobado.');
+            return assetId;
+          } catch (failure) {
+            throw new Error(getVoiceCaptureSaveErrorMessage(failure));
+          }
         };
         const save = async () => {
           if (runAction) {
-            const succeeded = await runAction(operation, 'Audio guardado de forma privada.');
-            if (!succeeded) setError('No se pudo guardar el audio privado. El registro permanece en estado temporal y expirará automáticamente.');
+            await runAction(operation, 'Audio guardado de forma privada.', {
+              onError: (failure) => setError(failure?.message || 'No se pudo guardar el audio privado.'),
+            });
             return;
           }
-          await operation();
+          try {
+            await operation();
+          } catch (failure) {
+            setError(failure?.message || 'No se pudo guardar el audio privado.');
+          }
         };
-        void save()
-          .catch((uploadFailure) => setError(uploadFailure?.message || 'No se pudo guardar el audio privado.'))
-          .finally(() => setUploading(false));
+        void save().finally(() => setUploading(false));
       };
       recorder.start(1000);
       recorderRef.current = recorder;

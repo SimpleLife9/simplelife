@@ -183,7 +183,6 @@ function App() {
 
   return (
     <>
-      <OfflinePreparationStatus />
       <AppShell
         profile={profile}
         email={session.user.email}
