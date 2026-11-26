@@ -230,3 +230,67 @@ test('hosted cold launch works from the browser HTTP cache even without a Servic
     await rm(userDataDir, { recursive: true, force: true });
   }
 });
+
+
+test('isolated local STT lab reopens from the service-worker cache while offline', async ({ browser }) => {
+  const context = await browser.newContext({ serviceWorkers: 'allow' });
+  try {
+    const onlinePage = await context.newPage();
+    await onlinePage.goto(appURL, { waitUntil: 'load' });
+    await onlinePage.evaluate(() => navigator.serviceWorker.ready);
+    if (!await onlinePage.evaluate(() => Boolean(navigator.serviceWorker.controller))) {
+      await onlinePage.reload({ waitUntil: 'load' });
+    }
+    await onlinePage.waitForFunction(
+      () => Boolean(navigator.serviceWorker.controller),
+      null,
+      { timeout: 20_000 },
+    );
+
+    const labURL = new URL('/experiments/stt-local/index.html', baseURL).toString();
+    await onlinePage.goto(labURL, { waitUntil: 'load' });
+    await expect(onlinePage.getByRole('heading', { name: 'Transcripción local de voz' })).toBeVisible();
+    await expect(onlinePage.getByRole('button', { name: 'Descargar y preparar modelo' })).toBeEnabled();
+
+    const cachedLab = await onlinePage.evaluate(async () => {
+      const cache = await caches.open('simplelife-shell-v3');
+      const origin = window.location.origin;
+      const documentResponse = await cache.match(new URL('/experiments/stt-local/index.html', origin));
+      const scriptResponse = await cache.match(new URL('/experiments/stt-local/app.js', origin));
+      return {
+        documentStatus: documentResponse?.status ?? null,
+        scriptStatus: scriptResponse?.status ?? null,
+        documentBytes: Number(documentResponse?.headers.get('content-length') || 0),
+        scriptBytes: Number(scriptResponse?.headers.get('content-length') || 0),
+      };
+    });
+    expect(cachedLab.documentStatus).toBe(200);
+    expect(cachedLab.scriptStatus).toBe(200);
+
+    await context.setOffline(true);
+    const offlinePage = await context.newPage();
+    const externalRequests = [];
+    const pageErrors = [];
+    offlinePage.on('request', (request) => {
+      if (new URL(request.url()).origin !== new URL(labURL).origin) {
+        externalRequests.push(request.url());
+      }
+    });
+    offlinePage.on('pageerror', (error) => pageErrors.push(error.message));
+
+    const serviceWorkerSession = await context.newCDPSession(offlinePage);
+    await serviceWorkerSession.send('ServiceWorker.enable');
+    await serviceWorkerSession.send('ServiceWorker.startWorker', { scopeURL: appURL });
+
+    const response = await offlinePage.goto(labURL, { waitUntil: 'load', timeout: 15_000 });
+    expect(response?.ok()).toBe(true);
+    await expect(offlinePage.getByRole('heading', { name: 'Transcripción local de voz' })).toBeVisible();
+    await expect(offlinePage.getByRole('button', { name: 'Descargar y preparar modelo' })).toBeEnabled();
+    await expect(offlinePage.locator('#status')).toContainText('Motor sin cargar');
+    expect(await offlinePage.evaluate(() => navigator.onLine)).toBe(false);
+    expect(externalRequests).toEqual([]);
+    expect(pageErrors).toEqual([]);
+  } finally {
+    await context.close();
+  }
+});
