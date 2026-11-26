@@ -17,23 +17,34 @@ test('a verified offline-ready shell has no persistent banner', () => {
   assert.equal(getOfflineShellStatusMessage('checking', false), null);
 });
 
-test('preparation copy explains the next step when the device is offline', () => {
+test('offline readiness notices never cover the app while internet is available', () => {
+  assert.equal(getOfflineShellStatusMessage('preparing', true), null);
+  assert.equal(getOfflineShellStatusMessage('unavailable', true), null);
+});
+
+test('preparation guidance appears only while offline and the shell is incomplete', () => {
   const message = getOfflineShellStatusMessage('preparing', false);
   assert.match(message, /aún no ha terminado/i);
   assert.match(message, /Conéctate una vez/i);
   assert.doesNotMatch(message, /Mantén Internet conectado para preparar/i);
 });
 
-test('preparation copy is informative while the device is online', () => {
-  assert.equal(
-    getOfflineShellStatusMessage('preparing', true),
-    'Preparando el acceso sin conexión…',
-  );
+test('an unavailable shell gives offline-only recovery guidance', () => {
+  const message = getOfflineShellStatusMessage('unavailable', false);
+  assert.match(message, /No se pudo comprobar/i);
+  assert.match(message, /Conéctate una vez/i);
 });
 
-test('an unavailable shell gives truthful guidance based on connectivity', () => {
-  assert.match(getOfflineShellStatusMessage('unavailable', false), /Conéctate una vez/i);
-  assert.match(getOfflineShellStatusMessage('unavailable', true), /No se pudo comprobar/i);
+test('the app entry point explicitly checks for Service Worker updates on every launch', async () => {
+  const entry = await readFile(new URL('../src/main.jsx', import.meta.url), 'utf8');
+  assert.match(entry, /registration\.update\(\)/);
+  assert.match(entry, /updateViaCache:\s*'none'/);
+});
+
+test('a newly activated Service Worker reloads the page once so old bundles cannot remain mounted', async () => {
+  const entry = await readFile(new URL('../src/main.jsx', import.meta.url), 'utf8');
+  assert.match(entry, /addEventListener\('controllerchange'/);
+  assert.match(entry, /window\.location\.reload\(\)/);
 });
 
 test('the status notice stays in document flow instead of covering mobile navigation', async () => {
@@ -48,4 +59,12 @@ test('the authenticated application shell does not mount the preparation banner 
   const authenticatedBranch = app.slice(app.indexOf('const title = getPageTitle'));
   assert.match(authenticatedBranch, /<AppShell/);
   assert.doesNotMatch(authenticatedBranch, /<OfflinePreparationStatus\s*\/>/);
+});
+
+test('Inbox voice capture contains the isolated local transcription test panel', async () => {
+  const voice = await readFile(new URL('../src/features/inbox/components/VoiceCapture.jsx', import.meta.url), 'utf8');
+  const inbox = await readFile(new URL('../src/features/inbox/InboxPage.jsx', import.meta.url), 'utf8');
+  assert.match(inbox, /import\s*\{\s*VoiceCapture\s*\}\s*from\s*'\.\/components\/VoiceCapture\.jsx'/);
+  assert.match(voice, /Probar transcripción local en Inbox/);
+  assert.match(voice, /Transcribir en este dispositivo/);
 });
