@@ -4,7 +4,6 @@ import { uuidv7 } from '../../../lib/uuidv7.js';
 
 import { canAppendAudioChunk, MAX_AUDIO_BYTES } from '../domain/voice-capture-policy.js';
 import { getVoiceCaptureSaveErrorMessage } from '../domain/voice-capture-save-errors.js';
-import { getLocalVoiceTestFileError, transcribeLocalVoiceFile } from '../domain/local-voice-transcription.js';
 const MIME_CANDIDATES = [
   'audio/webm;codecs=opus',
   'audio/webm',
@@ -30,11 +29,6 @@ export function VoiceCapture({ profile, busy = false, runAction }) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [localTestFile, setLocalTestFile] = useState(null);
-  const [localTestBusy, setLocalTestBusy] = useState(false);
-  const [localTestStatus, setLocalTestStatus] = useState('');
-  const [localTestResult, setLocalTestResult] = useState('');
-  const [localTestError, setLocalTestError] = useState('');
   const recorderRef = useRef(null);
   const streamRef = useRef(null);
   const chunksRef = useRef([]);
@@ -128,35 +122,6 @@ export function VoiceCapture({ profile, busy = false, runAction }) {
       stagedError.status = Number.isInteger(failure?.status) ? failure.status : undefined;
       throw stagedError;
     }
-  };
-
-  const handleLocalTestFileChange = (event) => {
-    const file = event.target.files?.[0] || null;
-    setLocalTestFile(file);
-    setLocalTestError('');
-    setLocalTestResult('');
-    setLocalTestStatus(file
-      ? 'Archivo seleccionado localmente: ' + file.name + ' (' + Math.round(file.size / 1024) + ' KiB). No se ha subido.'
-      : '');
-  };
-
-  const handleLocalTestTranscribe = async () => {
-    const validationError = getLocalVoiceTestFileError(localTestFile);
-    if (validationError) { setLocalTestError(validationError); return; }
-    setLocalTestBusy(true);
-    setLocalTestError('');
-    setLocalTestResult('');
-    setLocalTestStatus('Recuperando Whisper.cpp y el modelo verificado desde el almacenamiento local…');
-    try {
-      const result = await transcribeLocalVoiceFile(localTestFile, {
-        onStatus: (message) => setLocalTestStatus(message),
-      });
-      setLocalTestResult(result.text || 'No se detectó voz reconocible en el audio.');
-      setLocalTestStatus('Prueba completada en este dispositivo · ' + result.durationSeconds.toFixed(1) + ' s de audio. El archivo no se guardó ni se envió.');
-    } catch (failure) {
-      setLocalTestError(failure?.message || 'No se pudo completar la transcripción local.');
-      setLocalTestStatus('La prueba no se completó. No se hizo fallback remoto.');
-    } finally { setLocalTestBusy(false); }
   };
 
   const handleStop = () => {
@@ -289,29 +254,6 @@ export function VoiceCapture({ profile, busy = false, runAction }) {
           </button>
         )}
         {recording && <span className="voice-recording-indicator">Grabando…</span>}
-      </div>
-      <div className="voice-local-test">
-        <div>
-          <strong>Probar transcripción local en Inbox</strong>
-          <p>Selecciona un audio sintético o público. Se procesa con Whisper.cpp en este dispositivo; no se sube, no se guarda y no crea una captura.</p>
-        </div>
-        <label htmlFor="inbox-local-voice-test-file">Audio de prueba</label>
-        <input id="inbox-local-voice-test-file" type="file" accept="audio/*"
-          onChange={handleLocalTestFileChange}
-          disabled={localTestBusy || recording || uploading || busy} />
-        <div className="voice-local-test-actions">
-          <button type="button" className="capture-action-button"
-            onClick={handleLocalTestTranscribe}
-            disabled={!localTestFile || localTestBusy || recording || uploading || busy}>
-            {localTestBusy ? 'Transcribiendo localmente…' : 'Transcribir en este dispositivo'}
-          </button>
-        </div>
-        {localTestStatus && <p className="voice-local-test-status" role="status">{localTestStatus}</p>}
-        {localTestError && <p className="form-error" role="alert">{localTestError}</p>}
-        {localTestResult && <div className="voice-local-test-result" aria-live="polite">
-          <strong>Texto reconocido</strong><p>{localTestResult}</p>
-        </div>}
-        <small>Prueba aislada dentro de la aplicación. No utiliza el micrófono, el bucket privado, Supabase ni el worker de transcripción.</small>
       </div>
       {error && <p className="form-error" role="alert">{error}</p>}
       {notice && <p className="offline-vault-notice" role="status">{notice}</p>}
