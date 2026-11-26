@@ -143,6 +143,7 @@ let workerServer;
 let processServer;
 let dispatcherServer;
 let voiceFinalizeServer;
+let voiceWorkerServer;
 let purgeFixtureAssetId = null;
 let purgeFixturePath = null;
 try {
@@ -417,6 +418,27 @@ try {
     "SELECT status || ':' || sha256_hex FROM public.capture_audio_asset WHERE id='" + voiceAssetId + "'::uuid",
   ), "uploaded:" + voiceSha256, "server-computed digest persisted");
 
+  // The transcription worker must remain disabled until ARIA supplies a
+  // verified speech route and an explicit adapter. It must not claim or send
+  // audio merely because its secret endpoint is reachable.
+  voiceWorkerServer = await startFunction(
+    "inbox-voice-transcription-worker",
+    { apikey: secret },
+    405,
+  );
+  const disabledVoiceWorker = await fetch(voiceWorkerServer.url, {
+    method: "POST",
+    headers: { apikey: secret, "content-type": "application/json" },
+    body: "{}",
+    signal: AbortSignal.timeout(10000),
+  });
+  equal(disabledVoiceWorker.status, 503, "voice worker remains fail-closed without route");
+  equal(await responseJson(disabledVoiceWorker, "disabled voice worker"), {
+    accepted: false, status: "disabled", reason: "SPEECH_ROUTE_NOT_CONFIGURED",
+  }, "voice worker disabled response");
+  await stopServer(voiceWorkerServer.server);
+  voiceWorkerServer = null;
+
   const foreignVoice = await finalizeVoice(ownerB.accessToken, voiceAssetId);
   equal(foreignVoice.status, 404, "another owner cannot finalize private voice asset");
 
@@ -588,6 +610,7 @@ try {
   console.log("PASS: retryable failure reclaims the same run with an incremented attempt number.");
   console.log("PASS: authenticated process endpoint rejects another owner's run and persists unreviewed proposals through actual Edge Runtime.");
   console.log("PASS: voice finalizer downloads private Storage bytes, verifies the actual SHA-256, persists only a server-computed digest, and rejects same-size corruption.");
+  console.log("PASS: secret-only voice transcription worker stays disabled before claim/provider calls until a verified ARIA route and explicit adapter are wired.");
   console.log("PASS: no AI API, provider credential, or hosted Supabase write is used.");
 } finally {
   if (queueServer) await stopServer(queueServer.server);
@@ -595,6 +618,7 @@ try {
   if (processServer) await stopServer(processServer.server);
   if (dispatcherServer) await stopServer(dispatcherServer.server);
   if (voiceFinalizeServer) await stopServer(voiceFinalizeServer.server);
+  if (voiceWorkerServer) await stopServer(voiceWorkerServer.server);
   if (purgeFixturePath) {
     try {
       const cleanup = await fetch(base + "/storage/v1/object/inbox-voice-private", {
