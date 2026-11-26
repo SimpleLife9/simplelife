@@ -181,11 +181,13 @@ export async function handleRequest(
 
   // Resolve and validate the route BEFORE claiming work. Missing/unverified
   // configuration therefore cannot lease jobs or consume their retention.
-  if (!dependencies.resolveRoute || !dependencies.transcribe) {
+  const resolveRoute = dependencies.resolveRoute;
+  const transcribe = dependencies.transcribe;
+  if (!resolveRoute || !transcribe) {
     return json({ accepted: false, status: "disabled", reason: "SPEECH_ROUTE_NOT_CONFIGURED" }, 503);
   }
   let route: unknown;
-  try { route = await dependencies.resolveRoute(); } catch {
+  try { route = await resolveRoute(); } catch {
     return json({ accepted: false, status: "disabled", reason: "SPEECH_ROUTE_RESOLUTION_FAILED" }, 503);
   }
   const { decision, evidence, reason } = parseDecision(route);
@@ -273,7 +275,7 @@ export async function handleRequest(
 
   let transcript: ProviderResult;
   try {
-    transcript = await dependencies.transcribe({
+    transcript = await transcribe({
       audio: downloaded.data,
       mimeType: job.mime_type as string,
       providerId: decision.providerId,
