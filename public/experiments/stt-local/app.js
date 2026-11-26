@@ -7,7 +7,7 @@ const MODEL_ID = "onnx-community/whisper-tiny";
 const MODEL_REVISION = "ff4177021cc41f7db950912b73ea4fdf7d01d8e7";
 // Transformers.js 4.3.2 performs a metadata preflight without forwarding `revision`.
 // Pin the shared URL template as well so every request, including that preflight, uses this exact commit.
-const MODEL_REMOTE_PATH_TEMPLATE = "{model}/resolve/{revision}/";
+const MODEL_REMOTE_PATH_TEMPLATE = "{model}/resolve/" + MODEL_REVISION + "/";
 const SAMPLE_RATE = 16_000;
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 const MAX_DURATION_SECONDS = 180;
@@ -89,23 +89,30 @@ function setBusy(busy) {
   $("transcribe").disabled = busy || !state.pipeline || !$("audio-file").files?.length;
 }
 function pinModelRevisionUrl(url) {
-  const modelPrefix = "/" + MODEL_ID + "/resolve/";
-  if (url.origin !== "https://huggingface.co" || !url.pathname.startsWith(modelPrefix)) {
+  const hubPrefix = "/" + MODEL_ID + "/resolve/";
+  const proxyPrefix = "/__stt-model/" + MODEL_ID + "/resolve/";
+  let suffix = null;
+
+  if (url.origin === "https://huggingface.co" && url.pathname.startsWith(hubPrefix)) {
+    suffix = url.pathname.slice(hubPrefix.length);
+  } else if (url.origin === location.origin && url.pathname.startsWith(proxyPrefix)) {
+    suffix = url.pathname.slice(proxyPrefix.length);
+  } else {
     return url;
   }
-  const suffix = url.pathname.slice(modelPrefix.length);
+
   const separator = suffix.indexOf("/");
   if (separator < 1) return url;
   const requestedRevision = suffix.slice(0, separator);
   const filePath = suffix.slice(separator + 1);
-  if (!["main", MODEL_REVISION].includes(requestedRevision) || !filePath || filePath.includes("..")) {
+  if (!["main", MODEL_REVISION].includes(requestedRevision)
+    || !filePath || filePath.includes("..")) {
     return url;
   }
-  const proxied = new URL(
-    "/__stt-model/" + MODEL_ID + "/resolve/" + MODEL_REVISION + "/" + filePath,
+  return new URL(
+    proxyPrefix + MODEL_REVISION + "/" + filePath,
     location.origin,
   );
-  return proxied;
 }
 
 function installFetchWriteGuard() {

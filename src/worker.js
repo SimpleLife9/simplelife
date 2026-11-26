@@ -28,6 +28,8 @@ const STT_UPSTREAM_HOSTS = new Set([
   "us.gcp.cdn.hf.co",
   "cdn-lfs-us-1.hf.co",
   "cdn-lfs-eu-1.hf.co",
+  "cdn-lfs.huggingface.co",
+  "cas-bridge.xethub.hf.co",
 ]);
 
 function sttProxyError(status, message) {

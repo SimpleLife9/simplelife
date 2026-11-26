@@ -280,7 +280,7 @@ test('a new Service Worker cache version replaces stale cached STT lab code', as
     expect(result.scriptStatus).toBe(200);
     expect(result.scriptText).toContain('STT_RUNTIME_IMPORT_FAILED [cdn.jsdelivr.net]');
     expect(result.scriptText).toContain('STT_MODEL_OR_WASM_LOAD_FAILED:');
-    expect(result.scriptText).toContain('const MODEL_REMOTE_PATH_TEMPLATE = "{model}/resolve/{revision}/";');
+    expect(result.scriptText).toContain('const MODEL_REMOTE_PATH_TEMPLATE = "{model}/resolve/" + MODEL_REVISION + "/";');
     expect(result.scriptText).toContain('function pinModelRevisionUrl(url)');
     expect(result.scriptText).toContain('"/" + MODEL_ID + "/resolve/" + MODEL_REVISION + "/"');
     expect(result.scriptText).toContain('env.remotePathTemplate = MODEL_REMOTE_PATH_TEMPLATE;');
@@ -308,10 +308,15 @@ test('STT lab pins Transformers.js metadata preflights to the immutable model re
             backends: { onnx: { wasm: { numThreads: 0 } } },
           };
           export async function pipeline(_task, model) {
-            const response = await fetch(
+            const hubRequest = await fetch(
               "https://huggingface.co/" + model + "/resolve/main/config.json",
             );
-            if (!response.ok) throw new Error("Mock model config returned " + response.status);
+            const localRequest = await fetch(
+              location.origin + "/__stt-model/" + model + "/resolve/main/config.json",
+            );
+            if (!hubRequest.ok || !localRequest.ok) {
+              throw new Error("Mock model config returned " + hubRequest.status + "/" + localRequest.status);
+            }
             return async () => ({ text: "" });
           }
         `,
@@ -360,6 +365,7 @@ test('STT lab pins Transformers.js metadata preflights to the immutable model re
 
     expect(modelRequests).toEqual([]);
     expect(sameOriginModelRequests).toEqual([
+      new URL('/__stt-model/onnx-community/whisper-tiny/resolve/ff4177021cc41f7db950912b73ea4fdf7d01d8e7/config.json', baseURL).toString(),
       new URL('/__stt-model/onnx-community/whisper-tiny/resolve/ff4177021cc41f7db950912b73ea4fdf7d01d8e7/config.json', baseURL).toString(),
     ]);
     await expect(page.getByRole('button', { name: 'Transcribir localmente' })).toBeDisabled();
