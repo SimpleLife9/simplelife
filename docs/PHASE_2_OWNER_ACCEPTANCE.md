@@ -325,3 +325,10 @@ The PASS items below are only the independently confirmed checks. The following 
 - The owner has not yet explicitly confirmed whether the persistent “Preparando modo sin conexión” banner disappeared from the navigation area and whether all section buttons are unobstructed at normal phone display scale.
 - Keep this visual/navigation acceptance separate from the successful audio-save PASS. Do not mark it complete without the owner's confirmation.
 
+## 22. Android navigation banner and section visibility — owner-confirmed PASS (25 November 2026 AST)
+
+- Roberto confirms that the persistent “Preparando modo sin conexión” banner no longer obstructs the navigation and that the section buttons are visible and usable.
+- This closes the Android visual/navigation acceptance for the Preview fix.
+- Combined Android owner acceptance now PASS for: replacement recovery key, offline cold-reopen, actual recovery while preserving pending captures, synthetic microphone recording/private-storage save, and navigation visibility.
+- Still OPEN: PC fully-offline vault save, reconnect/sync, and interrupted retry without duplicates; ARIA speech-to-text provider approval remains a separate technical gate.
+
