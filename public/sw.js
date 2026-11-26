@@ -133,6 +133,9 @@ self.addEventListener('fetch', (event) => {
         }
         return response;
       } catch (networkError) {
+        // A navigation to the isolated STT lab must recover its own cached
+        // document when the network fails, not silently fall back to the app.
+        if (isSttLabNavigation && cachedSttLabDocument) return cachedSttLabDocument;
         if (cachedDocument) return cachedDocument;
 
         console.warn('Offline app-shell document is not cached:', networkError);
