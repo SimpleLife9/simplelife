@@ -32,3 +32,17 @@ The new completion path replaces the older transcript-only RPC because that func
 Queueing and retrying never extend the original seven-day retention window for an untranscribed source. Expired assets cannot be claimed. When a transcript succeeds, the audio asset follows the existing capture-retention rules.
 
 This is schema and lifecycle groundwork only. No provider adapter, scheduler, route discovery, or real transcription call is enabled by this change. No hosted Supabase project or production deployment is changed by CI; the required tests run against ephemeral local Postgres. Merge and hosted migration application remain separate gates.
+
+## Internal Edge worker contract (no provider enabled)
+
+A secret-only Edge endpoint, `inbox-voice-transcription-worker`, now implements the provider-neutral execution order, but it is intentionally disabled in the deployed entrypoint because no verified route resolver or explicit provider adapter is wired.
+
+- It evaluates route eligibility **before claim**. With the current production entrypoint, missing route/adapter returns `SPEECH_ROUTE_NOT_CONFIGURED` without touching the queue, downloading audio, or contacting a provider.
+- When dependencies are injected for tests, it claims one job, downloads from the private bucket, recomputes size/SHA-256, and refuses to continue on mismatch.
+- It records provider/model/adapter/region and nine evidence identifiers using `mark_inbox_voice_transcription_request_started` immediately before the adapter call.
+- Provider errors after that durable marker use the terminal manual-review path; no automatic provider retry occurs. Successful results must match the verified provider/model/region before atomic completion creates the Inbox capture/part/processing run.
+- The Deno fixture tests cover missing route, legal eligibility denial, digest mismatch, successful synthetic completion, provider timeout ambiguity, provenance mismatch, no-work and stale lease.
+- The actual local Edge Runtime smoke invokes the endpoint and requires the disabled response when no route is configured.
+
+This worker is not a real STT integration yet. It has no configured Groq/Cloudflare/ARIA credentials, no provider endpoint, no scheduler and no production route resolver; synthetic provider tests never contact an external service.
+
