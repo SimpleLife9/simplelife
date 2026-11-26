@@ -23,8 +23,13 @@ function request(payload: unknown = {}): Request {
     body: JSON.stringify(payload),
   });
 }
+function toArrayBuffer(data: Uint8Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(data.byteLength);
+  new Uint8Array(buffer).set(data);
+  return buffer;
+}
 async function sha256(data: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", data);
+  const digest = await crypto.subtle.digest("SHA-256", toArrayBuffer(data));
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 const AUDIO = new Uint8Array([0x52,0x49,0x46,0x46,0x01,0x02,0x03,0x04]);
@@ -74,7 +79,7 @@ async function context({
 } = {}) {
   const resolvedHash = hash ?? await AUDIO_HASH_PROMISE;
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
-  const blob = new Blob([bytes], { type: "audio/webm" });
+  const blob = new Blob([toArrayBuffer(bytes)], { type: "audio/webm" });
   const claim = {
     asset_id: ASSET,
     owner_profile_id: OWNER,
