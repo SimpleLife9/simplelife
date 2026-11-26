@@ -174,7 +174,9 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  if (APP_SHELL.includes(url.pathname) || url.pathname.startsWith('/assets/')) {
+  if (APP_SHELL.includes(url.pathname)
+    || STT_LAB_ASSETS.includes(url.pathname)
+    || url.pathname.startsWith('/assets/')) {
     event.respondWith((async () => {
       const cache = await caches.open(CACHE_NAME);
       // Preview/static hosts may add Vary: Origin even for identical public bundles.
