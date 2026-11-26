@@ -19,7 +19,7 @@ The queue allows at most three claims. A lease that expires before request start
 
 The queue and attempt tables live in the non-API `private` schema, have RLS enabled, and grant no direct table access to browser or service roles. Only the service-role RPCs can claim, record request start, fail, or complete a job. Each attempt stores provider/model/adapter/region identifiers and evidence identifiers only; it does not store credentials, audio bytes, or transcript text.
 
-Before a future worker calls a provider, it must evaluate the fail-closed speech route policy at request time and pass verified evidence identifiers to `mark_inbox_voice_transcription_request_started`. The policy helper is not yet connected to a provider worker, and this queue migration does not make an external request.
+Before a future worker calls a provider, it must evaluate the fail-closed speech route policy at request time and pass verified evidence identifiers to `mark_inbox_voice_transcription_request_started`. That RPC re-locks and re-checks the source asset status and retention deadline immediately before it records `request_started`; an expired, unlinked, or otherwise ineligible source cannot proceed to inference. The policy helper is not yet connected to a provider worker, and this queue migration does not make an external request.
 
 ## Atomic Inbox hand-off
 
