@@ -107,7 +107,9 @@ export default {
       && response.ok;
     const isSttLabAsset = request.method === "GET"
       && response.ok
-      && (url.pathname === "/experiments/stt-local/index.html"
+      && (url.pathname === "/experiments/stt-local"
+        || url.pathname === "/experiments/stt-local/"
+        || url.pathname === "/experiments/stt-local/index.html"
         || url.pathname === "/experiments/stt-local/app.js");
 
     if (!isAppNavigation && !isHashedBuildAsset && !isSttLabAsset) return response;
