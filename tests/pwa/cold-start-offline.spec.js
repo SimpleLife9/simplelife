@@ -329,6 +329,18 @@ test('STT lab pins Transformers.js metadata preflights to the immutable model re
         body: '{"model_type":"whisper"}',
       });
     });
+    const sameOriginModelRequests = [];
+    await page.route('**/__stt-model/**', async (route) => {
+      sameOriginModelRequests.push(route.request().url());
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'content-type': 'application/json',
+          'cache-control': 'public, max-age=86400',
+        },
+        body: '{"model_type":"whisper"}',
+      });
+    });
 
     await page.goto(appURL, { waitUntil: 'load' });
     await page.evaluate(() => navigator.serviceWorker.ready);
@@ -346,13 +358,28 @@ test('STT lab pins Transformers.js metadata preflights to the immutable model re
     await page.getByRole('button', { name: 'Descargar y preparar modelo' }).click();
     await expect(page.locator('#status')).toContainText('Modelo listo.', { timeout: 10_000 });
 
-    expect(modelRequests).toEqual([
-      'https://huggingface.co/onnx-community/whisper-tiny/resolve/ff4177021cc41f7db950912b73ea4fdf7d01d8e7/config.json',
+    expect(modelRequests).toEqual([]);
+    expect(sameOriginModelRequests).toEqual([
+      new URL('/__stt-model/onnx-community/whisper-tiny/resolve/ff4177021cc41f7db950912b73ea4fdf7d01d8e7/config.json', baseURL).toString(),
     ]);
     await expect(page.getByRole('button', { name: 'Transcribir localmente' })).toBeDisabled();
   } finally {
     await context.close();
   }
+});
+
+test('Cloudflare Preview serves pinned Whisper metadata through the same-origin model proxy', async ({ request }) => {
+  test.skip(!process.env.PWA_BASE_URL, 'Requires the deployed Cloudflare Preview Worker.');
+  const url = new URL(
+    '/__stt-model/onnx-community/whisper-tiny/resolve/ff4177021cc41f7db950912b73ea4fdf7d01d8e7/config.json',
+    baseURL,
+  );
+  const response = await request.get(url.toString(), { timeout: 30_000 });
+  expect(response.status()).toBe(200);
+  expect(response.headers()['cache-control']).toMatch(/max-age=86400/);
+  const config = await response.json();
+  expect(config.model_type).toBe('whisper');
+  expect(config.vocab_size).toBe(51865);
 });
 
 test('isolated local STT lab reopens from the service-worker cache while offline', async ({ browser }) => {

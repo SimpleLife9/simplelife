@@ -53,3 +53,14 @@ This experiment changes no production UI, Supabase schema/data/RLS, Edge Functio
 - The fetch guard now checks the initial and final redirect host against that explicit set and reports the failing hostname/path (without query strings or signed tokens).
 - The UI distinguishes runtime import failure from model/WASM download failure, so the next diagnostic is actionable.
 - This is a targeted compatibility fix, not a broad wildcard allowlist. The browser must still be able to reach the listed HTTPS endpoints; the actual model download remains unverified until the user repeats the explicit load action.
+
+
+## Same-origin model-download relay (26 November 2026)
+
+- The browser now fetches model files from `/__stt-model/` on the same origin as the laboratory. The existing Cloudflare Worker performs a read-only server-to-server fetch of the public Hugging Face snapshot and streams the bytes to the browser.
+- This specifically avoids requiring the owner's browser/network to connect directly to `huggingface.co` or the Hub's redirected Xet/CDN hosts. Hugging Face documents that model files are served by separate storage/CDN hosts and that restrictive networks can fail even when the Hub hostname itself is reachable ([official networking guidance](https://huggingface.co/docs/hub/models-downloading#downloading-behind-a-proxy-or-firewall)).
+- The Worker is not an open proxy. It permits only GET/HEAD, rejects query strings, and serves a closed file list from `onnx-community/whisper-tiny` at revision `ff4177021cc41f7db950912b73ea4fdf7d01d8e7`. Redirect destinations are checked against the documented Hugging Face Hub/Xet/CDN host set.
+- Cloudflare Worker response streaming avoids buffering the 40.8 MB Q8 model weights in Worker memory. The upstream response is edge-cacheable for one day; the browser/Transformers cache remains enabled.
+- No audio is sent to this Worker. The request contract only exposes static model artifacts; the audio still decodes and runs in-tab on WebAssembly.
+- Preview CI now probes the live same-origin proxy against the actual pinned Hugging Face `config.json`, in addition to the browser regression proving that an attempted direct Hub URL is rewritten to the same-origin Worker path.
+- This remains an isolated experiment. No new Worker, project, secret, hosted Supabase change, inference endpoint or paid provider is introduced. The existing Worker will route the proxy path only in this PR Preview until a separate production authorization.

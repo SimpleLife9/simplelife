@@ -23,18 +23,9 @@ test('local STT experiment is isolated and makes no remote request before explic
   const appSource = await appResponse.text();
   expect(appSource).toContain('https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2"');
   expect(appSource).not.toContain('@huggingface/transformers@4.3.2/+esm');
-  for (const host of [
-    'cas-server.xethub.hf.co',
-    'cas-server.xethub-eu.hf.co',
-    'transfer.xethub.hf.co',
-    'transfer.xethub-eu.hf.co',
-    'us.aws.cdn.hf.co',
-    'us.gcp.cdn.hf.co',
-    'cdn-lfs-us-1.hf.co',
-    'cdn-lfs-eu-1.hf.co',
-  ]) {
-    expect(appSource).toContain('"' + host + '"');
-  }
+  expect(appSource).toContain('"/__stt-model/"');
+  expect(appSource).toContain('env.remoteHost = new URL("/__stt-model/", location.origin).href;');
+  expect(appSource).toContain('pinModelRevisionUrl(originalUrl)');
 
   expect(remoteRequests).toEqual([]);
   expect(await page.locator('input[type="file"]').count()).toBe(1);

@@ -31,7 +31,7 @@
   <h1>Transcripción local de voz</h1>
   <p>Laboratorio técnico con Whisper Tiny multilingüe, Transformers.js y WebAssembly (CPU). El modelo se descarga una vez y queda en la caché privada del navegador cuando el navegador lo permite.</p>
   <div class="notice"><strong>Usa únicamente audio sintético o público de prueba.</strong> No selecciones ninguno de tus audios privados ni grabaciones personales. Este laboratorio no está aprobado para procesar los originales.</div>
-  <div class="privacy" style="margin-top:12px"><strong>Privacidad:</strong> el audio elegido se decodifica y se procesa dentro de esta pestaña. El código bloquea solicitudes fetch de escritura (POST/PUT/PATCH/DELETE). Solo se descargan el motor WASM y los pesos estáticos del modelo. No usa micrófono, Supabase, ARIA ni un servicio de transcripción remoto.</div>
+  <div class="privacy" style="margin-top:12px"><strong>Privacidad:</strong> el audio elegido se decodifica y se procesa dentro de esta pestaña. El audio elegido se procesa íntegramente en esta pestaña y nunca se envía al Worker. El código bloquea solicitudes fetch de escritura (POST/PUT/PATCH/DELETE). El motor y los pesos públicos se descargan mediante el Worker del mismo dominio, que solo permite GET/HEAD a archivos de una revisión fija. No usa micrófono, Supabase, ARIA ni un servicio de transcripción remoto.</div>
 
   <h2 style="margin-top:24px">1. Preparar motor y modelo</h2>
   <p class="small">Whisper Tiny multilingüe · revisión fija <code>ff417702</code> · pesos Q8 aproximados: 40,8 MB, más runtime WASM. Se ejecuta con un hilo CPU.</p>

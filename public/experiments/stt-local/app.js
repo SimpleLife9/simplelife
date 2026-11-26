@@ -2,18 +2,6 @@ const TRANSFORMERS_MODULE = "https://cdn.jsdelivr.net/npm/@huggingface/transform
 const ALLOWED_DOWNLOAD_HOSTS = new Set([
   location.hostname,
   "cdn.jsdelivr.net",
-  "huggingface.co",
-  "hf.co",
-  "cas-server.xethub.hf.co",
-  "cas-server.xethub-eu.hf.co",
-  "transfer.xethub.hf.co",
-  "transfer.xethub-eu.hf.co",
-  "us.aws.cdn.hf.co",
-  "us.gcp.cdn.hf.co",
-  "cdn-lfs-us-1.hf.co",
-  "cdn-lfs-eu-1.hf.co",
-  "cdn-lfs.huggingface.co",
-  "cas-bridge.xethub.hf.co",
 ]);
 const MODEL_ID = "onnx-community/whisper-tiny";
 const MODEL_REVISION = "ff4177021cc41f7db950912b73ea4fdf7d01d8e7";
@@ -101,16 +89,23 @@ function setBusy(busy) {
   $("transcribe").disabled = busy || !state.pipeline || !$("audio-file").files?.length;
 }
 function pinModelRevisionUrl(url) {
-  const unpinnedPrefix = "/" + MODEL_ID + "/resolve/main/";
-  if (url.origin !== "https://huggingface.co" || !url.pathname.startsWith(unpinnedPrefix)) {
+  const modelPrefix = "/" + MODEL_ID + "/resolve/";
+  if (url.origin !== "https://huggingface.co" || !url.pathname.startsWith(modelPrefix)) {
     return url;
   }
-  const pinnedUrl = new URL(url.href);
-  pinnedUrl.pathname = pinnedUrl.pathname.replace(
-    unpinnedPrefix,
-    "/" + MODEL_ID + "/resolve/" + MODEL_REVISION + "/",
+  const suffix = url.pathname.slice(modelPrefix.length);
+  const separator = suffix.indexOf("/");
+  if (separator < 1) return url;
+  const requestedRevision = suffix.slice(0, separator);
+  const filePath = suffix.slice(separator + 1);
+  if (!["main", MODEL_REVISION].includes(requestedRevision) || !filePath || filePath.includes("..")) {
+    return url;
+  }
+  const proxied = new URL(
+    "/__stt-model/" + MODEL_ID + "/resolve/" + MODEL_REVISION + "/" + filePath,
+    location.origin,
   );
-  return pinnedUrl;
+  return proxied;
 }
 
 function installFetchWriteGuard() {
@@ -122,11 +117,8 @@ function installFetchWriteGuard() {
       throw new Error("STT_NETWORK_WRITE_BLOCKED");
     }
     const originalUrl = new URL(input instanceof Request ? input.url : input, location.href);
-    if (!ALLOWED_DOWNLOAD_HOSTS.has(originalUrl.hostname)) {
-      throw new Error("STT_REMOTE_HOST_NOT_ALLOWLISTED: " + originalUrl.hostname);
-    }
-    // Transformers.js may issue a metadata preflight with revision="main".
-    // Pin that exact repository path before any network request can leave the tab.
+    // Route every Whisper Hub request through the same-origin read-only Worker.
+    // The proxy validates the immutable snapshot and only serves allowlisted files.
     const url = pinModelRevisionUrl(originalUrl);
     if (!ALLOWED_DOWNLOAD_HOSTS.has(url.hostname)) {
       throw new Error("STT_REMOTE_HOST_NOT_ALLOWLISTED: " + url.hostname);
@@ -167,6 +159,7 @@ $("load-model").addEventListener("click", async () => {
     }
     const { env, pipeline } = runtime;
     setStatus("Runtime listo. Descargando modelo y archivos WASM desde los hosts estáticos permitidos…");
+    env.remoteHost = new URL("/__stt-model/", location.origin).href;
     env.remotePathTemplate = MODEL_REMOTE_PATH_TEMPLATE;
     env.useBrowserCache = true;
     env.useWasmCache = true;
