@@ -290,8 +290,8 @@ jobs:
                   }
 
                   const documentCacheControl = documentResponse.headers.get('cache-control') || '';
-                  if (!/max-age=604800/.test(documentCacheControl)) {
-                    lastIssue = `Preview app document cache policy is stale: ${documentCacheControl || 'missing'}`;
+                  if (!/no-store/i.test(documentCacheControl)) {
+                    lastIssue = `Preview app document must be no-store to deliver updates: ${documentCacheControl || 'missing'}`;
                   } else {
                     console.log(`Preview serves the exact production asset manifest (${actual.assets.length} assets).`);
                     console.log(`Preview serves the exact production Service Worker (sha256 ${actualServiceWorkerHash}).`);
