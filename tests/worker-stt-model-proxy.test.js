@@ -156,3 +156,27 @@ test('Worker marks mutable STT lab HTML and JavaScript as no-store', async () =>
   assert.equal(extensionlessDirectory.headers.get('cache-control'), 'no-store');
   assert.equal(script.headers.get('cache-control'), 'no-store');
 });
+
+
+test('Worker app navigation documents are no-store so existing PWAs can discover updates', async () => {
+  const response = await worker.fetch(
+    new Request(ORIGIN + '/', {
+      headers: {
+        'sec-fetch-mode': 'navigate',
+        'sec-fetch-dest': 'document',
+      },
+    }),
+    {
+      ASSETS: {
+        fetch: async () => new Response('<!doctype html><title>SimpleLife current build</title>', {
+          status: 200,
+          headers: { 'content-type': 'text/html; charset=utf-8' },
+        }),
+      },
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.match(await response.text(), /SimpleLife current build/);
+});
