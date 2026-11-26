@@ -269,25 +269,46 @@ test('isolated local STT lab reopens from the service-worker cache while offline
 
     await context.setOffline(true);
     const offlinePage = await context.newPage();
+
+    const serviceWorkerSession = await context.newCDPSession(offlinePage);
+    await serviceWorkerSession.send('Network.enable');
+    // Clear the HTTP cache but preserve Cache Storage. The following
+    // navigation must therefore be answered by the Service Worker cache.
+    await serviceWorkerSession.send('Network.clearBrowserCache');
+    await serviceWorkerSession.send('ServiceWorker.enable');
+    await serviceWorkerSession.send('ServiceWorker.startWorker', { scopeURL: appURL });
+
+    const rootResponse = await offlinePage.goto(appURL, { waitUntil: 'load', timeout: 15_000 });
+    expect(rootResponse?.ok()).toBe(true);
+    expect(rootResponse?.fromServiceWorker()).toBe(true);
+    await offlinePage.waitForFunction(
+      () => Boolean(navigator.serviceWorker.controller),
+      null,
+      { timeout: 15_000 },
+    );
+
     const externalRequests = [];
     const pageErrors = [];
+    const sttScriptResponses = [];
     offlinePage.on('request', (request) => {
       if (new URL(request.url()).origin !== new URL(labURL).origin) {
         externalRequests.push(request.url());
       }
     });
+    offlinePage.on('response', (response) => {
+      if (new URL(response.url()).pathname === '/experiments/stt-local/app.js') {
+        sttScriptResponses.push(response.fromServiceWorker());
+      }
+    });
     offlinePage.on('pageerror', (error) => pageErrors.push(error.message));
-
-    const serviceWorkerSession = await context.newCDPSession(offlinePage);
-    await serviceWorkerSession.send('ServiceWorker.enable');
-    await serviceWorkerSession.send('ServiceWorker.startWorker', { scopeURL: appURL });
 
     const response = await offlinePage.goto(labURL, { waitUntil: 'load', timeout: 15_000 });
     expect(response?.ok()).toBe(true);
+    expect(response?.fromServiceWorker()).toBe(true);
     await expect(offlinePage.getByRole('heading', { name: 'Transcripción local de voz' })).toBeVisible();
     await expect(offlinePage.getByRole('button', { name: 'Descargar y preparar modelo' })).toBeEnabled();
     await expect(offlinePage.locator('#status')).toContainText('Motor sin cargar');
-    expect(await offlinePage.evaluate(() => navigator.onLine)).toBe(false);
+    expect(sttScriptResponses).toContain(true);
     expect(externalRequests).toEqual([]);
     expect(pageErrors).toEqual([]);
   } finally {
