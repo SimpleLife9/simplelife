@@ -2,9 +2,12 @@ const CACHE_NAME = 'simplelife-shell-v6';
 // Cloudflare's SPA asset handler redirects /index.html to /. Precache the
 // canonical root document, then store a separate /index.html alias below.
 const STT_LAB_DOCUMENT = '/experiments/stt-local/index.html';
+const STT_LAB_ASSETS = [
+  STT_LAB_DOCUMENT,
+  '/experiments/stt-local/app.js',
+];
 const APP_SHELL = [
   '/', '/manifest.webmanifest', '/leaf.svg', '/precache-manifest.json',
-  STT_LAB_DOCUMENT, '/experiments/stt-local/app.js',
 ];
 
 async function readBuildAssetManifest() {
@@ -28,6 +31,19 @@ async function precacheAppShell() {
   // Install is committed only after the canonical HTML shell and every
   // compiled JavaScript/CSS/font/image asset needed to boot the app exist.
   await cache.addAll([...new Set([...APP_SHELL, ...assets])]);
+
+  // Stable STT lab paths must bypass the browser HTTP cache during every
+  // Service Worker version install. Otherwise a fresh vN Cache Storage bucket
+  // can be populated with an old HTML/JS response retained by max-age headers.
+  for (const path of STT_LAB_ASSETS) {
+    const url = new URL(path, self.location.origin);
+    const request = new Request(url, { cache: 'reload' });
+    const response = await fetch(request);
+    if (!response.ok) {
+      throw new Error('The current STT lab asset could not be refreshed: ' + path);
+    }
+    await cache.put(url, response);
+  }
 
   // Cloudflare serves /index.html as a 307 redirect to /. Never store that
   // redirect as the offline document: it loops when the browser is offline.
