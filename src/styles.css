@@ -462,3 +462,18 @@
 .offline-shell-status.is-unavailable{border-color:#f0dfc6;background:#fffaf1;color:#946a2d}
 .offline-shell-status.is-unavailable .offline-shell-status-dot{background:#c18b3f}
 @media(max-width:600px){.offline-shell-status{width:fit-content;max-width:calc(100vw - 18px);margin:8px 9px 0;padding:8px 10px;font-size:.62rem}}
+
+
+/* Local-only Whisper test inside the Inbox voice panel. */
+.voice-local-test{grid-column:1/-1;display:grid;gap:7px;margin-top:3px;padding-top:10px;border-top:1px solid #edf1eb}
+.voice-local-test>div:first-child>strong{font-size:.7rem;color:#3e5f4b}
+.voice-local-test>div:first-child>p{margin:4px 0 0;max-width:720px;color:#829087;font-size:.63rem;line-height:1.45}
+.voice-local-test>label{font-size:.62rem;font-weight:700;color:#64776b}
+.voice-local-test input[type=file]{width:100%;min-width:0;padding:8px;border:1px dashed #cbd8cb;border-radius:8px;background:#fbfcfa;color:#6d7c71;font-size:.62rem}
+.voice-local-test-actions{display:flex;flex-wrap:wrap;gap:8px}
+.voice-local-test-status{margin:0;color:#718276;font-size:.62rem;line-height:1.45;overflow-wrap:anywhere}
+.voice-local-test-result{padding:10px 12px;border:1px solid #dce8dd;border-radius:9px;background:#f6faf6}
+.voice-local-test-result strong{font-size:.65rem;color:#3e5f4b}
+.voice-local-test-result p{margin:5px 0 0;color:#34483f;font-size:.72rem;line-height:1.5;overflow-wrap:anywhere}
+.voice-local-test>small{color:#94a097;font-size:.58rem;line-height:1.45}
+@media(max-width:600px){.voice-local-test-actions{align-items:stretch}.voice-local-test-actions button{width:100%}}
