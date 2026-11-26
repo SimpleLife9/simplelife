@@ -30,7 +30,10 @@ async function precacheAppShell() {
   const assets = await readBuildAssetManifest();
   // Install is committed only after the canonical HTML shell and every
   // compiled JavaScript/CSS/font/image asset needed to boot the app exist.
-  await cache.addAll([...new Set([...APP_SHELL, ...assets])]);
+  const appShellRequests = APP_SHELL.map((path) => (
+    path === '/' ? new Request(path, { cache: 'reload' }) : path
+  ));
+  await cache.addAll([...new Set([...appShellRequests, ...assets])]);
 
   // Stable STT lab paths must bypass the browser HTTP cache during every
   // Service Worker version install. Otherwise a fresh vN Cache Storage bucket
