@@ -61,10 +61,21 @@ test('the authenticated application shell does not mount the preparation banner 
   assert.doesNotMatch(authenticatedBranch, /<OfflinePreparationStatus\s*\/>/);
 });
 
-test('Inbox voice capture contains the isolated local transcription test panel', async () => {
+test('Inbox mounts a standalone local transcription panel outside the voice recorder', async () => {
   const voice = await readFile(new URL('../src/features/inbox/components/VoiceCapture.jsx', import.meta.url), 'utf8');
   const inbox = await readFile(new URL('../src/features/inbox/InboxPage.jsx', import.meta.url), 'utf8');
+  const panel = await readFile(new URL('../src/features/inbox/components/LocalVoiceTranscriptionPanel.jsx', import.meta.url), 'utf8');
+  const styles = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
+
   assert.match(inbox, /import\s*\{\s*VoiceCapture\s*\}\s*from\s*'\.\/components\/VoiceCapture\.jsx'/);
-  assert.match(voice, /Probar transcripción local en Inbox/);
-  assert.match(voice, /Transcribir en este dispositivo/);
+  assert.match(inbox, /import\s*\{\s*LocalVoiceTranscriptionPanel\s*\}\s*from\s*'\.\/components\/LocalVoiceTranscriptionPanel\.jsx'/);
+  assert.match(inbox, /<VoiceCapture\b[\s\S]*?\/>\s*<LocalVoiceTranscriptionPanel\b/);
+  assert.doesNotMatch(voice, /Probar transcripción local en Inbox|Transcribir en este dispositivo/);
+  assert.match(panel, /Prueba de transcripción local/);
+  assert.match(panel, /Elegir audio de prueba/);
+  assert.match(panel, /Transcribir en este dispositivo/);
+  assert.match(panel, /getLocalVoiceTestFileError\(file\)/);
+  assert.match(panel, /transcribeLocalVoiceFile\(file/);
+  assert.match(panel, /data-testid="inbox-local-stt-panel"/);
+  assert.match(styles, /\.inbox-local-stt-panel\{/);
 });
