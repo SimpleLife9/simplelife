@@ -347,3 +347,39 @@ The PASS items below are only the independently confirmed checks. The following 
 - This is automated regression coverage, not a claim that a physical PC network interruption was manually induced. The owner-confirmed offline save/reconnect remains PASS; the distinct physical interruption test remains OPEN unless separately performed.
 - Exact-SHA CI for the commit containing this test is required before marking the regression suite PASS. No hosted DB, production, billing, or provider state is changed.
 
+## 25. Speech-to-text provider review — updated no-cost/privacy/region gates (26 November 2026 UTC)
+
+### Azure Speech F0 — candidate only; not approved
+
+- Official pricing lists 5 hours/month of real-time Standard speech-to-text in Free F0; the allowance is shared with Custom and does not include Batch. F0 has a single concurrent base-model real-time request. Sources: [Azure Speech pricing](https://azure.microsoft.com/en-us/pricing/details/speech/) · [quotas and limits](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-services-quotas-and-limits).
+- Speech resource region is selected explicitly and is used for data processing/storage; Brazil South (`brazilsouth`) is listed for real-time transcription. Sources: [supported regions](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/regions).
+- Real-time STT audio is processed in server memory with no data stored at rest; transit is encrypted. Audio/transcription logging is off by default but must remain off. If enabled, logs may be kept for 30 days. Sources: [Speech data privacy](https://learn.microsoft.com/en-us/azure/ai-foundry/responsible-ai/speech-service/speech-to-text/data-privacy-security) · [logging](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/logging-audio-transcription).
+- **Eligibility is OPEN:** Microsoft's Export FAQ says products/services may not be exported to Cuba without authorization. OFAC FAQ 1175 separately authorizes certain API and cloud services supporting internet communications under specified regulations; that does not prove that this exact Speech product/account/use is covered or that Microsoft will provision it. Sources: [Microsoft Export FAQ](https://www.microsoft.com/en-us/exporting/faq) · [OFAC FAQ 1175](https://ofac.treasury.gov/faqs/1175). No false billing/location details or geographic workaround.
+- No Azure subscription/resource/key/secret/provider registration has been created; no audio probe was sent.
+
+### Cloudflare Workers AI Whisper Large V3 Turbo — not approved
+
+- Workers Free includes 10,000 Neurons/day; over-quota requests fail on Free and Paid usage above the allocation is billable. Whisper Large V3 Turbo uses 46.63 Neurons/audio minute (published unit price $0.0005/minute), theoretically about 214 min/day if no other Workers AI usage consumes the pool. Sources: [Workers AI pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/) · [model card](https://developers.cloudflare.com/workers-ai/models/whisper-large-v3-turbo/).
+- The current account's remaining daily quota is not verified, and the project's explicit inference-region gate remains unresolved. No request sent.
+
+### Groq Whisper Large V3 Turbo — rejected for the $0 rule
+
+- Official model price is $0.04/audio hour even though Free rate limits are published. It fails the strict $0 ceiling. Sources: [model card](https://console.groq.com/docs/model/whisper-large-v3-turbo) · [Speech to Text](https://console.groq.com/docs/speech-to-text).
+
+## 26. Google Cloud Speech-to-Text V1 — additional Free candidate, gates OPEN (26 November 2026 UTC)
+
+- Official pricing lists **60 minutes/month per account at $0** for Standard Speech Recognition both with and without data logging. The no-logging SKU costs $0.024/minute above the free 60 minutes. Do not opt into data logging. Source: [Speech-to-Text pricing](https://cloud.google.com/speech-to-text/pricing).
+- Google requires billing enabled on the Cloud project even when usage stays within the free quota. This is not a no-billing service. Source: [Cloud Speech-to-Text setup](https://docs.cloud.google.com/speech-to-text/docs/setup).
+- For streaming/synchronous endpoints without data-logging opt-in, Google says audio is processed in memory and no customer audio data is stored; content is used only to provide the API service. Source: [Data usage FAQ](https://docs.cloud.google.com/speech-to-text/docs/v1/data-usage-faq).
+- Explicit US and EU multi-region endpoints constrain data at rest and in use to those continental boundaries. Global processing is not acceptable under this project's region gate; single-region processing is not supported. Source: [Supported regional endpoints](https://docs.cloud.google.com/speech-to-text/docs/v1/endpoints).
+- Synchronous requests accept about 1 minute / 10 MiB; streaming is up to 5 minutes with audio sent near real time. Source: [V1 quotas and limits](https://docs.cloud.google.com/speech-to-text/docs/v1/quotas).
+- **Country/account eligibility remains OPEN:** Google's Cloud Billing documentation says access to some services is restricted in certain territories and explicitly includes Cuba among examples; the billing country must match the real billing mailing address. A US/EU API endpoint does not bypass this. Source: [Create a Cloud Billing account](https://docs.cloud.google.com/billing/docs/how-to/create-billing-account). Do not falsify billing country or route through another territory.
+- A future $0-only adapter would need to reconcile all account-shared usage, enforce a hard monthly stop below 60 minutes, avoid other billable Google Cloud services/storage and fail closed before the paid tier. No current billing account, remaining quota or eligibility evidence is available.
+- No Google Cloud project, billing account, API enablement, key, ARIA provider route or secret was created/changed. No audio was sent.
+
+### Consolidated provider decision
+
+Google Cloud STT V1 (without logging, explicit US/EU endpoint) is now the strongest published free candidate technically, but is **not approved** until country/account eligibility, billing prerequisite, current shared free quota and enforceable $0 stop are verified. Azure F0 remains unapproved due the same unresolved eligibility requirement; Cloudflare lacks a verified inference region/current quota; Groq fails the $0 limit.
+
+Keep the transcription worker disabled/fail-closed. The five private originals remain private and pending. The synthetic recording proves private capture/storage only, not external-processing consent. No provider request or paid billing occurred in this review.
+
