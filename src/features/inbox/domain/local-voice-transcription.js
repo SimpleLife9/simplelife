@@ -20,6 +20,16 @@ const ALLOWED_AUDIO_TYPES = new Set([
 
 let sessionPromise = null;
 
+export function getLocalVoiceRuntimeCompatibilityError(environment = globalThis) {
+  if (environment?.crossOriginIsolated !== true) {
+    return 'Whisper.cpp necesita aislamiento de origen cruzado. La pestaña debe abrirse con COOP same-origin y COEP credentialless. Actualiza SimpleLife en una pestaña nueva y vuelve a intentarlo; no borres los datos del sitio.';
+  }
+  if (typeof environment.SharedArrayBuffer !== 'function') {
+    return 'Este navegador no habilitó SharedArrayBuffer, necesario para ejecutar Whisper.cpp. Usa una versión actual de Chrome o Edge.';
+  }
+  return null;
+}
+
 export function getLocalVoiceTestFileError(file) {
   if (!file || typeof file !== "object") return "Selecciona un audio sintético o público para la prueba.";
   if (!Number.isFinite(file.size) || file.size < 1) return "El archivo de audio está vacío.";
@@ -65,52 +75,57 @@ async function sha256Hex(bytes) {
 }
 
 async function createVerifiedWhisperSession(onStatus) {
-  if (!globalThis.location?.origin) throw new Error("STT_ORIGIN_UNAVAILABLE");
+  const compatibilityError = getLocalVoiceRuntimeCompatibilityError();
+  if (compatibilityError) throw new Error('STT_CROSS_ORIGIN_ISOLATION_REQUIRED: ' + compatibilityError);
+  if (!globalThis.location?.origin) throw new Error('STT_ORIGIN_UNAVAILABLE');
   const modelUrl = new URL(LOCAL_STT_MODEL.modelUrl, globalThis.location.origin);
-  if (modelUrl.origin !== globalThis.location.origin) {
-    throw new Error("STT_MODEL_MUST_USE_SAME_ORIGIN_PROXY");
-  }
+  if (modelUrl.origin !== globalThis.location.origin) throw new Error('STT_MODEL_MUST_USE_SAME_ORIGIN_PROXY');
 
-  onStatus?.("Cargando runtime Whisper.cpp desde jsDelivr…");
-  let runtime;
+  let stage = 'runtime_import';
   try {
-    runtime = await import(/* @vite-ignore */ WHISPER_WASM_MODULE);
-  } catch (error) {
-    throw new Error("No se pudo cargar Whisper.cpp: " + String(error?.message || error).slice(0, 180));
+    onStatus?.('Cargando runtime Whisper.cpp desde jsDelivr…');
+    let runtime;
+    try {
+      runtime = await import(/* @vite-ignore */ WHISPER_WASM_MODULE);
+    } catch (error) {
+      throw new Error('No se pudo cargar Whisper.cpp: ' + String(error?.message || error).slice(0, 180));
+    }
+    const { WhisperWasmService, ModelManager } = runtime;
+    if (typeof WhisperWasmService !== 'function' || typeof ModelManager !== 'function') throw new Error('STT_RUNTIME_EXPORTS_INVALID');
+
+    const whisper = new WhisperWasmService({ logLevel: 0 });
+    stage = 'wasm_simd_check';
+    if (!await whisper.checkWasmSupport()) throw new Error('Este navegador no ofrece WebAssembly SIMD, necesario para este motor.');
+
+    const modelManager = new ModelManager({ logLevel: 0 });
+    stage = 'model_download';
+    onStatus?.('Recuperando o descargando el modelo tiny-q5_1 desde el almacenamiento local…');
+    let lastProgress = -1;
+    const modelBytes = await modelManager.loadModelByUrl(modelUrl.href, (progress) => {
+      const rounded = Math.max(0, Math.min(100, Math.round(progress)));
+      if (rounded === lastProgress) return;
+      lastProgress = rounded;
+      onStatus?.('Modelo tiny-q5_1 · ' + rounded + '% · almacenamiento local del navegador.');
+    });
+
+    stage = 'model_integrity_check';
+    onStatus?.('Verificando SHA-256 del modelo…');
+    const actualHash = await sha256Hex(modelBytes);
+    if (actualHash !== LOCAL_STT_MODEL.sha256) {
+      await modelManager.clearCache().catch(() => {});
+      throw new Error('STT_MODEL_CHECKSUM_MISMATCH: el modelo local no coincide con la revisión fijada.');
+    }
+
+    stage = 'wasm_initialization';
+    onStatus?.('Inicializando Whisper.cpp en WebAssembly con aislamiento verificado…');
+    await whisper.initModel(modelBytes);
+    stage = 'session_creation';
+    return whisper.createSession();
+  } catch (failure) {
+    const detail = String(failure?.message || failure || 'unknown failure').slice(0, 220);
+    throw new Error('STT_' + stage.toUpperCase() + '_FAILED: ' + detail, { cause: failure });
   }
-
-  const { WhisperWasmService, ModelManager } = runtime;
-  if (typeof WhisperWasmService !== "function" || typeof ModelManager !== "function") {
-    throw new Error("STT_RUNTIME_EXPORTS_INVALID");
-  }
-
-  const whisper = new WhisperWasmService({ logLevel: 0 });
-  if (!await whisper.checkWasmSupport()) {
-    throw new Error("Este navegador no ofrece WebAssembly SIMD, necesario para este motor.");
-  }
-
-  const modelManager = new ModelManager({ logLevel: 0 });
-  onStatus?.("Recuperando o descargando el modelo tiny-q5_1 desde el almacenamiento local…");
-  let lastProgress = -1;
-  const modelBytes = await modelManager.loadModelByUrl(modelUrl.href, (progress) => {
-    const rounded = Math.max(0, Math.min(100, Math.round(progress)));
-    if (rounded === lastProgress) return;
-    lastProgress = rounded;
-    onStatus?.("Modelo tiny-q5_1 · " + rounded + "% · almacenamiento local del navegador.");
-  });
-
-  onStatus?.("Verificando SHA-256 del modelo…");
-  const actualHash = await sha256Hex(modelBytes);
-  if (actualHash !== LOCAL_STT_MODEL.sha256) {
-    await modelManager.clearCache().catch(() => {});
-    throw new Error("STT_MODEL_CHECKSUM_MISMATCH: el modelo local no coincide con la revisión fijada.");
-  }
-
-  onStatus?.("Inicializando Whisper.cpp en WebAssembly…");
-  await whisper.initModel(modelBytes);
-  return whisper.createSession();
 }
-
 function getVerifiedWhisperSession(onStatus) {
   if (!sessionPromise) {
     sessionPromise = createVerifiedWhisperSession(onStatus).catch((error) => {
@@ -142,21 +157,24 @@ export function createLocalVoiceTranscriber({
     }
 
     const segments = [];
-    const stream = session.streaming(samples, {
-      language: "es",
-      threads: 2,
-      translate: false,
-      timeoutMs: 300_000,
-      sleepMsBetweenChunks: 80,
-    });
-    if (!stream || typeof stream[Symbol.asyncIterator] !== "function") {
-      throw new Error("STT_STREAM_NOT_AVAILABLE");
-    }
-
-    for await (const segment of stream) {
-      if (segment?.text) segments.push(String(segment.text).trim());
-      const partial = segments.join(" ").replace(/\s+/g, " ").trim();
-      onStatus?.(partial ? "Reconociendo: " + partial : "Whisper está procesando el audio…");
+    onStatus?.('Ejecutando Whisper.cpp en este dispositivo…');
+    try {
+      const stream = session.streaming(samples, {
+        language: 'es',
+        threads: 2,
+        translate: false,
+        timeoutMs: 300_000,
+        sleepMsBetweenChunks: 80,
+      });
+      if (!stream || typeof stream[Symbol.asyncIterator] !== 'function') throw new Error('STT_STREAM_NOT_AVAILABLE');
+      for await (const segment of stream) {
+        if (segment?.text) segments.push(String(segment.text).trim());
+        const partial = segments.join(' ').replace(/\s+/g, ' ').trim();
+        onStatus?.(partial ? 'Reconociendo: ' + partial : 'Whisper está procesando el audio…');
+      }
+    } catch (failure) {
+      const detail = String(failure?.message || failure || 'unknown failure').slice(0, 220);
+      throw new Error('STT_INFERENCE_FAILED: ' + detail, { cause: failure });
     }
 
     return {

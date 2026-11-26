@@ -5,8 +5,14 @@ import {
   getLocalVoiceTestFileError,
   LOCAL_STT_MODEL,
   LOCAL_STT_MAX_AUDIO_BYTES,
+  getLocalVoiceRuntimeCompatibilityError,
 } from "../src/features/inbox/domain/local-voice-transcription.js";
 
+test("Whisper runtime requires cross-origin isolation and SharedArrayBuffer before loading", () => {
+  assert.match(getLocalVoiceRuntimeCompatibilityError({ crossOriginIsolated: false, SharedArrayBuffer: undefined }), /aislamiento de origen cruzado/);
+  assert.match(getLocalVoiceRuntimeCompatibilityError({ crossOriginIsolated: true, SharedArrayBuffer: undefined }), /SharedArrayBuffer/);
+  assert.equal(getLocalVoiceRuntimeCompatibilityError({ crossOriginIsolated: true, SharedArrayBuffer: class SharedArrayBuffer {} }), null);
+});
 test("local voice test accepts supported synthetic audio and enforces the 25 MiB limit", () => {
   assert.equal(getLocalVoiceTestFileError({
     name: "synthetic-speech.wav", type: "audio/wav", size: 128,

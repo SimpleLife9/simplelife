@@ -158,6 +158,12 @@ $("load-model").addEventListener("click", async () => {
   installReadOnlyFetchGuard();
 
   try {
+    if (globalThis.crossOriginIsolated !== true || typeof globalThis.SharedArrayBuffer !== "function") {
+      throw new Error(
+        "WHISPER_CROSS_ORIGIN_ISOLATION_REQUIRED: abre el laboratorio en un origen con COOP same-origin y COEP credentialless. No borres los datos del sitio.",
+      );
+    }
+
     let runtime;
     try {
       runtime = await import(WHISPER_WASM_MODULE);
