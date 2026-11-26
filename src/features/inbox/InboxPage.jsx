@@ -7,6 +7,7 @@ import { useRows } from '../../shared/hooks/useRows.js';
 import { CaptureComposer } from './components/CaptureComposer.jsx';
 import { OfflineVaultPanel } from './components/OfflineVaultPanel.jsx';
 import { VoiceCapture } from './components/VoiceCapture.jsx';
+import { LocalVoiceTranscriptionPanel } from './components/LocalVoiceTranscriptionPanel.jsx';
 import { createIndexedDbOfflineStorage, createOfflineCaptureVault } from './offline/private-offline-vault.js';
 import { getOfflineVaultUserMessage } from './offline/offline-vault-errors.js';
 import { CapturePartPersistenceError, persistTextCapture } from './data/capture-repository.js';
@@ -916,6 +917,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
       onOfflineUnavailable={() => setOfflineVaultError('No hay conexión. Para guardar sin conexión, crea o desbloquea la bóveda privada primero.')}
     />
     <VoiceCapture profile={profile} busy={busy || offlineVaultBusy || profile?.offlineOnly === true} runAction={runAction} />
+    <LocalVoiceTranscriptionPanel busy={busy || offlineVaultBusy || profile?.offlineOnly === true} />
     {voiceAssets.filter((asset) => !asset.capture_id).length > 0 && (
       <section className="voice-asset-list" aria-label="Audios privados pendientes">
         <strong>Audios privados pendientes</strong>
