@@ -1353,6 +1353,21 @@ test('Inbox supports search, review states, archiving, restore and original capt
   await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
   await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
   await expect(page.getByRole('heading', { name: 'Inbox', exact: true })).toBeVisible();
+  const localSttPanel = page.getByRole('region', { name: 'Prueba de transcripción local' });
+  await expect(localSttPanel).toBeVisible();
+  await expect(localSttPanel.getByRole('heading', { name: 'Prueba de transcripción local' })).toBeVisible();
+  await expect(localSttPanel.getByRole('button', { name: 'Elegir audio de prueba' })).toBeVisible();
+  const transcribeButton = localSttPanel.getByRole('button', { name: 'Transcribir en este dispositivo' });
+  await expect(transcribeButton).toBeVisible();
+  await expect(transcribeButton).toBeDisabled();
+  const testAudioInput = localSttPanel.getByLabel('Audio sintético o público de prueba');
+  await testAudioInput.setInputFiles({
+    name: 'audio-sintetico-prueba.wav',
+    mimeType: 'audio/wav',
+    buffer: Buffer.from('synthetic public test audio'),
+  });
+  await expect(transcribeButton).toBeEnabled();
+
 
   // The capability notice must match the implemented private voice/offline behavior.
   const capabilityNotice = page.locator('.honest-note');
