@@ -242,6 +242,35 @@ jobs:
                   .update(actualServiceWorker)
                   .digest('hex');
                 if (actualServiceWorkerHash === expectedServiceWorkerHash) {
+                  // The isolated STT lab lives at stable public paths outside
+                  // Vite's hashed asset manifest. Verify its exact bytes too;
+                  // matching the shell manifest/SW alone cannot detect stale
+                  // HTML or JavaScript served by the Preview edge cache.
+                  for (const path of [
+                    '/experiments/stt-local/index.html',
+                    '/experiments/stt-local/app.js',
+                  ]) {
+                    const assetUrl = new URL(path, process.env.PWA_PREVIEW_URL);
+                    assetUrl.searchParams.set('ci_check', String(Date.now()));
+                    const assetResponse = await fetch(assetUrl, {
+                      cache: 'no-store',
+                      signal: AbortSignal.timeout(8_000),
+                    });
+                    if (!assetResponse.ok) {
+                      throw new Error(`Preview STT lab asset ${path} returned HTTP ${assetResponse.status}`);
+                    }
+                    const actualAsset = await assetResponse.text();
+                    const expectedAsset = await readFile(`dist${path}`, 'utf8');
+                    if (actualAsset !== expectedAsset) {
+                      throw new Error(`Preview STT lab asset is stale and does not match this CI build: ${path}`);
+                    }
+                    const assetCacheControl = assetResponse.headers.get('cache-control') || '';
+                    if (!/no-store/i.test(assetCacheControl)) {
+                      throw new Error(`Preview STT lab asset cache policy must be no-store: ${path} (${assetCacheControl || 'missing'})`);
+                    }
+                    console.log(`Preview serves the exact current STT lab asset with no-store: ${path}`);
+                  }
+
                   // A matching manifest and Service Worker are not sufficient:
                   // Cloudflare's static asset headers must also be deployed.
                   // Send the same Fetch Metadata used by a browser navigation
