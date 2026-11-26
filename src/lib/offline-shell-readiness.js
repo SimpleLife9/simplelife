@@ -1,4 +1,4 @@
-export const OFFLINE_SHELL_CACHE_NAME = 'simplelife-shell-v7';
+export const OFFLINE_SHELL_CACHE_NAME = 'simplelife-shell-v8';
 
 export function getOfflineShellStatusMessage(state, isOnline) {
   // Never cover the working app while the device has connectivity. Readiness
