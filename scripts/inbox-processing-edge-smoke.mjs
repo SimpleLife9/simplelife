@@ -439,9 +439,10 @@ try {
     signal: AbortSignal.timeout(10000),
   });
   equal(disabledVoiceWorker.status, 503, "voice worker remains fail-closed without route");
-  equal(await responseJson(disabledVoiceWorker, "disabled voice worker"), {
-    accepted: false, status: "disabled", reason: "SPEECH_ROUTE_NOT_CONFIGURED",
-  }, "voice worker disabled response");
+  const disabledVoiceWorkerBody = await responseJson(disabledVoiceWorker, "disabled voice worker");
+  equal(disabledVoiceWorkerBody.accepted, false, "voice worker disabled accepted flag");
+  equal(disabledVoiceWorkerBody.status, "disabled", "voice worker disabled status");
+  equal(disabledVoiceWorkerBody.reason, "SPEECH_ROUTE_NOT_CONFIGURED", "voice worker disabled reason");
   await stopServer(voiceWorkerServer.server);
   voiceWorkerServer = null;
 
