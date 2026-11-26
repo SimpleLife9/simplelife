@@ -120,7 +120,7 @@ export default {
       // revisions. Never let the browser/CDN retain a previous lab build.
       headers.set("Cache-Control", "no-store");
     } else if (isAppNavigation) {
-      headers.set("Cache-Control", "public, max-age=604800");
+      headers.set("Cache-Control", "no-store");
     } else {
       headers.set("Cache-Control", "public, max-age=31536000, immutable");
     }
