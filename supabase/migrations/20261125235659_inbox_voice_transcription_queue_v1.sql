@@ -342,7 +342,7 @@ BEGIN
      OR lower(p_inference_region) IN ('global','unknown','unspecified','unverified')
      OR p_policy_version IS DISTINCT FROM 'inbox-speech-route-policy-v1'
      OR p_route_evidence IS NULL OR jsonb_typeof(p_route_evidence)<>'object'
-     OR jsonb_object_length(p_route_evidence)<>9
+     OR (SELECT count(*) FROM jsonb_object_keys(p_route_evidence))<>9
      OR NOT (p_route_evidence ?& ARRAY[
        'capability','provider','model','adapter','account',
        'legalEligibility','region','privacy','quota'
