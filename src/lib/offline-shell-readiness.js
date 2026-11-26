@@ -1,4 +1,4 @@
-export const OFFLINE_SHELL_CACHE_NAME = 'simplelife-shell-v6';
+export const OFFLINE_SHELL_CACHE_NAME = 'simplelife-shell-v7';
 
 export function getOfflineShellStatusMessage(state, isOnline) {
   if (state === 'preparing') {
