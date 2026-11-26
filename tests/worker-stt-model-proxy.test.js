@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { proxyWhisperCppModelFile } from '../src/worker.js';
+import worker, { proxyWhisperCppModelFile } from '../src/worker.js';
 
 const ORIGIN = 'https://simplelife-preview.example';
 const REVISION = '0b364b566045a405be7225ee1e415a073e04da77';
@@ -119,4 +119,28 @@ test('Whisper.cpp proxy rejects redirects outside the explicit Hugging Face CDN 
 
   assert.equal(response.status, 502);
   assert.equal(await response.text(), 'STT_MODEL_UPSTREAM_HOST_REJECTED');
+});
+
+
+test('Worker marks mutable STT lab HTML and JavaScript as no-store', async () => {
+  const cachedAssetFetch = async (request) => new Response('current lab asset', {
+    status: 200,
+    headers: { 'cache-control': 'public, max-age=604800' },
+  });
+
+  const document = await worker.fetch(
+    new Request(ORIGIN + '/experiments/stt-local/index.html', {
+      headers: { 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document' },
+    }),
+    { ASSETS: { fetch: cachedAssetFetch } },
+  );
+  const script = await worker.fetch(
+    new Request(ORIGIN + '/experiments/stt-local/app.js'),
+    { ASSETS: { fetch: cachedAssetFetch } },
+  );
+
+  assert.equal(document.status, 200);
+  assert.equal(script.status, 200);
+  assert.equal(document.headers.get('cache-control'), 'no-store');
+  assert.equal(script.headers.get('cache-control'), 'no-store');
 });
