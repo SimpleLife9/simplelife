@@ -10,7 +10,7 @@ test('local STT experiment is isolated and makes no remote request before explic
     });
   });
 
-  await page.goto('/experiments/stt-local/');
+  await page.goto('/experiments/stt-local/index.html');
   await expect(page.getByRole('heading', { name: 'Transcripción local de voz' })).toBeVisible();
   await expect(page.getByText('No selecciones ninguno de tus audios privados', { exact: false })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Descargar y preparar modelo' })).toBeEnabled();
