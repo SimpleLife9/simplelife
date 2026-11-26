@@ -2,15 +2,29 @@ export const INBOX_SPEECH_ROUTE_POLICY_VERSION = "inbox-speech-route-policy-v1";
 
 const NON_REGIONAL_VALUES = new Set(["global", "unknown", "unspecified", "unverified", ""]);
 
-function isRecord(value) {
+type RouteRecord = Record<string, unknown>;
+type SpeechRouteDecision =
+  | { ok: false; reason: string }
+  | {
+    ok: true;
+    policyVersion: string;
+    providerId: string;
+    modelId: string;
+    adapterId: string;
+    inferenceRegion: string;
+    capabilityId: "speech_to_text";
+    quotaUnit: string;
+  };
+
+function isRecord(value: unknown): value is RouteRecord {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function hasText(value) {
+function hasText(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-function fail(reason) {
+function fail(reason: string): SpeechRouteDecision {
   return { ok: false, reason };
 }
 
@@ -23,49 +37,62 @@ function fail(reason) {
  * a currently valid zero-cost quota are all explicitly verified.
  *
  * This is a policy contract, not a provider integration. No current Inbox
- * worker invokes a provider through this module.
+ * worker invokes a provider through this module unless a resolver and adapter
+ * are explicitly injected into the secret-only transcription worker.
  */
-export function evaluateInboxSpeechRoute(route, now = Date.now()) {
+export function evaluateInboxSpeechRoute(
+  route: unknown,
+  now: number | Date = Date.now(),
+): SpeechRouteDecision {
   const nowMs = now instanceof Date ? now.getTime() : now;
   if (!Number.isFinite(nowMs)) return fail("INVALID_CLOCK");
   if (!isRecord(route)) return fail("SPEECH_ROUTE_NOT_CONFIGURED");
 
-  if (!isRecord(route.capability)
-    || route.capability.id !== "speech_to_text"
-    || route.capability.status !== "verified") {
+  const capability = route.capability;
+  if (!isRecord(capability)
+    || capability.id !== "speech_to_text"
+    || capability.status !== "verified") {
     return fail("SPEECH_CAPABILITY_NOT_VERIFIED");
   }
 
-  if (!isRecord(route.provider)
-    || !hasText(route.provider.id)
-    || route.provider.status !== "available") {
+  const provider = route.provider;
+  if (!isRecord(provider)
+    || !hasText(provider.id)
+    || provider.status !== "available") {
     return fail("SPEECH_PROVIDER_NOT_AVAILABLE");
   }
+  const providerId = provider.id;
 
-  if (!isRecord(route.model)
-    || !hasText(route.model.id)
-    || route.model.status !== "available") {
+  const model = route.model;
+  if (!isRecord(model)
+    || !hasText(model.id)
+    || model.status !== "available") {
     return fail("SPEECH_MODEL_NOT_AVAILABLE");
   }
+  const modelId = model.id;
 
-  if (!isRecord(route.adapter)
-    || !hasText(route.adapter.id)
-    || route.adapter.status !== "verified") {
+  const adapter = route.adapter;
+  if (!isRecord(adapter)
+    || !hasText(adapter.id)
+    || adapter.status !== "verified") {
     return fail("SPEECH_ADAPTER_NOT_VERIFIED");
   }
+  const adapterId = adapter.id;
 
-  if (!isRecord(route.account)
-    || !hasText(route.account.id)
-    || route.account.status !== "available"
-    || route.account.enabled !== true) {
+  const account = route.account;
+  if (!isRecord(account)
+    || !hasText(account.id)
+    || account.status !== "available"
+    || account.enabled !== true) {
     return fail("SPEECH_ACCOUNT_NOT_AVAILABLE");
   }
 
   // The provider/account must also be legally eligible for this account,
   // deployment jurisdiction and specific API use case.
-  if (!isRecord(route.legalEligibility)
-    || route.legalEligibility.status !== "verified"
-    || route.legalEligibility.allowed !== true) {
+  const legalEligibility = route.legalEligibility;
+  if (!isRecord(legalEligibility)
+    || legalEligibility.status !== "verified"
+    || legalEligibility.allowed !== true) {
     return fail("SPEECH_LEGAL_ELIGIBILITY_NOT_VERIFIED");
   }
 
@@ -76,6 +103,7 @@ export function evaluateInboxSpeechRoute(route, now = Date.now()) {
     || NON_REGIONAL_VALUES.has(region.value.trim().toLowerCase())) {
     return fail("SPEECH_INFERENCE_REGION_NOT_VERIFIED");
   }
+  const inferenceRegion = region.value.trim();
 
   const privacy = route.privacy;
   if (!isRecord(privacy)
@@ -98,11 +126,13 @@ export function evaluateInboxSpeechRoute(route, now = Date.now()) {
 
   const quota = route.quota;
   if (!isRecord(quota)
+    || typeof quota.remaining !== "number"
     || !Number.isFinite(quota.remaining)
     || quota.remaining <= 0
     || !hasText(quota.unit)) {
     return fail("SPEECH_FREE_QUOTA_UNAVAILABLE");
   }
+  const quotaUnit = quota.unit;
 
   const checkedAt = typeof quota.checkedAt === "string" ? Date.parse(quota.checkedAt) : NaN;
   const validUntil = typeof quota.validUntil === "string" ? Date.parse(quota.validUntil) : NaN;
@@ -126,11 +156,11 @@ export function evaluateInboxSpeechRoute(route, now = Date.now()) {
   return {
     ok: true,
     policyVersion: INBOX_SPEECH_ROUTE_POLICY_VERSION,
-    providerId: route.provider.id,
-    modelId: route.model.id,
-    adapterId: route.adapter.id,
-    inferenceRegion: region.value.trim(),
+    providerId,
+    modelId,
+    adapterId,
+    inferenceRegion,
     capabilityId: "speech_to_text",
-    quotaUnit: quota.unit,
+    quotaUnit,
   };
 }
