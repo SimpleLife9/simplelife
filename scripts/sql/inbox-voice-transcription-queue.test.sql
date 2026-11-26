@@ -83,7 +83,12 @@ INSERT INTO public.capture_audio_asset(
   '019b7300-0000-7000-8000-000000000001','019b7300-0000-7000-8000-000000000001',
   'inbox-voice-private',
   '019b7300-0000-7000-8000-000000000001/019b7300-0000-7000-8000-000000000104/source.webm',
-  'audio/webm',4096,repeat('d',64),'uploading');
+  'audio/webm',4096,repeat('d',64),'uploading'),
+ ('019b7300-0000-7000-8000-000000000105',
+  '019b7300-0000-7000-8000-000000000001','019b7300-0000-7000-8000-000000000001',
+  'inbox-voice-private',
+  '019b7300-0000-7000-8000-000000000001/019b7300-0000-7000-8000-000000000105/source.webm',
+  'audio/webm',4096,repeat('e',64),'uploading');
 
 UPDATE public.capture_audio_asset
 SET status='uploaded',uploaded_at=clock_timestamp()
@@ -347,6 +352,68 @@ BEGIN
 END;
 $test$;
 RESET ROLE;
+
+-- A lease does not authorize a provider request after the source TTL expires.
+UPDATE public.capture_audio_asset
+SET status='uploaded',uploaded_at=clock_timestamp()
+WHERE id='019b7300-0000-7000-8000-000000000105';
+
+SET LOCAL ROLE service_role;
+DO $test$
+DECLARE
+  v_claim record;
+BEGIN
+  SELECT * INTO v_claim
+  FROM public.claim_inbox_voice_transcription_job(
+    '019b7300-0000-7000-8000-000000000208',
+    '00000000-0000-4000-8000-000000000208',90
+  );
+  IF NOT FOUND OR v_claim.asset_id<>'019b7300-0000-7000-8000-000000000105' THEN
+    RAISE EXCEPTION 'Fifth voice asset was not claimed for TTL boundary test';
+  END IF;
+END;
+$test$;
+RESET ROLE;
+
+UPDATE public.capture_audio_asset
+SET retention_until=clock_timestamp()-interval '1 second'
+WHERE id='019b7300-0000-7000-8000-000000000105';
+
+SET LOCAL ROLE service_role;
+DO $test$
+DECLARE
+  v_started boolean;
+BEGIN
+  v_started := public.mark_inbox_voice_transcription_request_started(
+    '019b7300-0000-7000-8000-000000000105',
+    '00000000-0000-4000-8000-000000000208',
+    'test-provider','fixture-model','test-adapter','us-west-2',
+    'inbox-speech-route-policy-v1',
+    jsonb_build_object(
+      'capability','evidence:capability','provider','evidence:provider',
+      'model','evidence:model','adapter','evidence:adapter','account','evidence:account',
+      'legalEligibility','evidence:legal','region','evidence:region',
+      'privacy','evidence:privacy','quota','evidence:quota'
+    )
+  );
+  IF v_started THEN
+    RAISE EXCEPTION 'Expired voice source was allowed to start a provider request';
+  END IF;
+END;
+$test$;
+RESET ROLE;
+
+DO $test$
+BEGIN
+  IF (SELECT status FROM private.inbox_voice_transcription_job
+      WHERE asset_id='019b7300-0000-7000-8000-000000000105')<>'expired'
+     OR (SELECT status FROM private.inbox_voice_transcription_attempt
+      WHERE asset_id='019b7300-0000-7000-8000-000000000105'
+        AND attempt_number=1)<>'expired' THEN
+    RAISE EXCEPTION 'Expired source TTL did not expire its active lease and attempt';
+  END IF;
+END;
+$test$;
 
 DO $test$
 BEGIN
