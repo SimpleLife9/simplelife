@@ -418,6 +418,12 @@ try {
     "SELECT status || ':' || sha256_hex FROM public.capture_audio_asset WHERE id='" + voiceAssetId + "'::uuid",
   ), "uploaded:" + voiceSha256, "server-computed digest persisted");
 
+  // Supabase CLI v3.2 serves one Edge Runtime process at a time. Stop the
+  // voice finalizer before starting the transcription worker; restart it
+  // afterwards for the remaining owner-isolation and digest-corruption checks.
+  await stopServer(voiceFinalizeServer.server);
+  voiceFinalizeServer = null;
+
   // The transcription worker must remain disabled until ARIA supplies a
   // verified speech route and an explicit adapter. It must not claim or send
   // audio merely because its secret endpoint is reachable.
@@ -438,6 +444,12 @@ try {
   }, "voice worker disabled response");
   await stopServer(voiceWorkerServer.server);
   voiceWorkerServer = null;
+
+  voiceFinalizeServer = await startFunction(
+    "inbox-voice-finalize",
+    { apikey: publishable, authorization: "Bearer " + ownerA.accessToken },
+    405,
+  );
 
   const foreignVoice = await finalizeVoice(ownerB.accessToken, voiceAssetId);
   equal(foreignVoice.status, 404, "another owner cannot finalize private voice asset");
