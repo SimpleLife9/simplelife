@@ -1,5 +1,10 @@
 import { defineConfig } from 'vite';
 
+const crossOriginIsolationHeaders = {
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Embedder-Policy': 'credentialless',
+};
+
 function appShellPrecacheManifest() {
   return {
     name: 'simplelife-app-shell-precache-manifest',
@@ -9,7 +14,7 @@ function appShellPrecacheManifest() {
         .filter((fileName) => fileName !== 'precache-manifest.json'
           && fileName !== 'sw.js'
           && !fileName.endsWith('.map'))
-        .map((fileName) => `/${fileName}`);
+        .map((fileName) => '/' + fileName);
 
       this.emitFile({
         type: 'asset',
@@ -28,6 +33,10 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 5173,
     strictPort: true,
+    headers: crossOriginIsolationHeaders,
+  },
+  preview: {
+    headers: crossOriginIsolationHeaders,
   },
   build: {
     target: 'es2022',
