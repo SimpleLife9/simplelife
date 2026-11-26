@@ -383,3 +383,12 @@ Google Cloud STT V1 (without logging, explicit US/EU endpoint) is now the strong
 
 Keep the transcription worker disabled/fail-closed. The five private originals remain private and pending. The synthetic recording proves private capture/storage only, not external-processing consent. No provider request or paid billing occurred in this review.
 
+## 27. PC offline sync — interrupted retry — owner-confirmed PASS (26 November 2026 UTC)
+
+- The owner completed the deliberate physical interruption test in the SimpleLife branch Preview on PC using the unique synthetic capture label `PRUEBA-REINTENTO-PC-26NOV-01`.
+- During `Sincronizar ahora`, connectivity was interrupted while the app was showing `Sincronizando…`. The encrypted capture remained queued locally; after connectivity was restored, the owner retried synchronization successfully.
+- The owner confirmed the final Inbox search returned exactly one capture for the unique label and one initial part, with no duplicate created by the interrupted attempt. This is an owner-confirmed physical UI acceptance; no independent hosted database read was performed for this manual test.
+- **PC physical offline acceptance is now PASS** for: vault prepared/unlocked online, encrypted capture saved while offline, normal reconnect/sync, and deliberate interrupted-sync retry without duplicates. The separate automated ambiguous-response regression is also covered by CI #922 at exact SHA `cdbc1f879fa726d11702d54b0c8a9afcfcc1a5b3`.
+- CI #923 is **SUCCESS** at exact SHA `392359c69dded7469beec9c98c5bc395d748088f` (49 required steps passed; the conditional failure-artifact upload was skipped as expected). The documentation update in this section will trigger a new exact-SHA CI run; do not treat #923 as testing this new documentation commit.
+- No production deployment, merge, hosted Supabase migration/data/secret change, paid billing, or speech-provider request is implied. The speech-to-text provider gate remains OPEN and fail-closed; the five private originals remain private and pending.
+
