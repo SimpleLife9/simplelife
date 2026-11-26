@@ -308,3 +308,20 @@ The PASS items below are only the independently confirmed checks. The following 
 - **PASS scope:** recovery-key renewal, offline cold-reopen/persistence and actual recovery with the replacement key. No vault reset, browser-storage deletion or reinstall.
 - **Still OPEN:** PC fully-offline save + interrupted retry without duplicates; Android microphone/private-audio capture + normal-scale controls. The STT provider approval gate remains separate and OPEN.
 - The real recovery key and passphrases were not shared in chat.
+
+## 21. Android voice capture and private storage — owner-confirmed PASS (25 November 2026 AST)
+
+### Physical capture and storage — PASS
+
+- After opening the updated Preview on Android, the owner made a short synthetic voice recording. The app now displays: “Audio original guardado en almacenamiento privado. La transcripción permanece pendiente hasta configurar un proveedor aprobado.”
+- The Inbox screen shows **5** entries as “Audio original · esperando transcripción”: the four previously pending private originals plus the new synthetic test recording. This is the owner's visible app result; it is not represented as a fresh independent database audit.
+- The app states that voice originals are uploaded to a private bucket, linked to the owner's profile, not public and not automatically sent to a model. The displayed limit remains 25 MiB and unlinked audio retention is 7 days.
+- The new test entry displays retention until **2 Dec 2026, 20:58** (as shown by the owner's local app). Existing items retain their individually displayed expiry dates. Do not extend TTL or re-record/re-upload the four existing originals.
+- Scope of PASS: Android microphone recording and successful private-storage save/upload as reported by the owner. This does **not** mean speech-to-text completed, AI classification ran, or an external provider was called.
+- No private audio was downloaded, played or transmitted by this audit. Keep the transcription worker fail-closed until the separate ARIA STT approval gate is satisfied.
+
+### Remaining Android visual acceptance — OPEN
+
+- The owner has not yet explicitly confirmed whether the persistent “Preparando modo sin conexión” banner disappeared from the navigation area and whether all section buttons are unobstructed at normal phone display scale.
+- Keep this visual/navigation acceptance separate from the successful audio-save PASS. Do not mark it complete without the owner's confirmation.
+
