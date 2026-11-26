@@ -1,4 +1,4 @@
-const CACHE_NAME = 'simplelife-shell-v5';
+const CACHE_NAME = 'simplelife-shell-v6';
 // Cloudflare's SPA asset handler redirects /index.html to /. Precache the
 // canonical root document, then store a separate /index.html alias below.
 const STT_LAB_DOCUMENT = '/experiments/stt-local/index.html';
