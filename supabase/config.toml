@@ -45,3 +45,7 @@ verify_jwt = false
 # Owner-authenticated voice finalizer recomputes SHA-256 from private Storage bytes.
 [functions.inbox-voice-finalize]
 verify_jwt = true
+
+# Internal transcription worker; @supabase/server validates the secret API key.
+[functions.inbox-voice-transcription-worker]
+verify_jwt = false
