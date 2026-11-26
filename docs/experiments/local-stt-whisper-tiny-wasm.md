@@ -44,3 +44,12 @@ Whisper Tiny Q8 is the smaller first candidate to measure, not a production reco
 ## Release boundary
 
 This experiment changes no production UI, Supabase schema/data/RLS, Edge Functions, secrets, billing, scheduler, worker configuration, audio retention, or STT provider route. The private transcription worker remains disabled/fail-closed. PR #97 remains OPEN/DRAFT; no merge or production deploy is authorized by this experiment.
+
+
+## Browser CDN and model-download routing fix (26 November 2026)
+
+- The pinned Transformers.js runtime now uses the documented vanilla-browser ES module URL `https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2` (without jsDelivr's `+esm` transformation). See [official installation instructions](https://huggingface.co/docs/transformers.js/installation).
+- The model fetch allowlist explicitly includes the current Hugging Face Hub/Xet endpoints: `cas-server.xethub.hf.co`, `cas-server.xethub-eu.hf.co`, `transfer.xethub.hf.co`, `transfer.xethub-eu.hf.co`, `us.aws.cdn.hf.co`, `us.gcp.cdn.hf.co`, `cdn-lfs-us-1.hf.co`, and `cdn-lfs-eu-1.hf.co`, alongside the existing Hub/CDN domains. Hugging Face documents that model files can redirect to these separate storage/CDN hosts and that allowlisting only `huggingface.co` is insufficient: [official download networking requirements](https://huggingface.co/docs/hub/models-downloading#downloading-behind-a-proxy-or-firewall).
+- The fetch guard now checks the initial and final redirect host against that explicit set and reports the failing hostname/path (without query strings or signed tokens).
+- The UI distinguishes runtime import failure from model/WASM download failure, so the next diagnostic is actionable.
+- This is a targeted compatibility fix, not a broad wildcard allowlist. The browser must still be able to reach the listed HTTPS endpoints; the actual model download remains unverified until the user repeats the explicit load action.
