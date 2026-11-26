@@ -71,24 +71,6 @@ jobs:
         with:
           version: 3.2.0
 
-      - name: Generate durable voice queue migration with pinned Supabase CLI
-        run: |
-          set -euo pipefail
-          name=inbox_voice_transcription_queue_v1
-          mapfile -t existing < <(find supabase/migrations -maxdepth 1 -type f -name "*_${name}.sql" -print)
-          if [ "${#existing[@]}" -eq 0 ]; then
-            supabase migration new "$name"
-            mapfile -t generated < <(find supabase/migrations -maxdepth 1 -type f -name "*_${name}.sql" -print)
-            if [ "${#generated[@]}" -ne 1 ]; then
-              echo "Expected exactly one CLI-generated migration, found ${#generated[@]}" >&2
-              exit 1
-            fi
-            cp scripts/sql/inbox-voice-transcription-queue-schema.sql "${generated[0]}"
-            echo "CLI_GENERATED_VOICE_QUEUE_MIGRATION=${generated[0]}"
-          else
-            echo "Committed voice queue migration already exists: ${existing[0]}"
-          fi
-
       - name: Start full local Supabase stack without applying migrations
         run: |
           python - <<'PY'
