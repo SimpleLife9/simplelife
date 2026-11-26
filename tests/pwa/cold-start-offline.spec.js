@@ -34,7 +34,7 @@ async function prepareOnlineShell(page) {
   await expect(page.locator('#root > :not(.offline-shell-status)')).toHaveCount(1);
 
   const cacheAudit = await page.evaluate(async () => {
-    const cache = await caches.open('simplelife-shell-v5');
+    const cache = await caches.open('simplelife-shell-v6');
     const manifestResponse = await cache.match(
       new URL('/precache-manifest.json', window.location.origin).href,
       { ignoreVary: true },
@@ -240,7 +240,7 @@ test('a new Service Worker cache version replaces stale cached STT lab code', as
     const page = await context.newPage();
     await page.goto(new URL('/experiments/stt-local/index.html', baseURL).toString(), { waitUntil: 'load' });
     await page.evaluate(async () => {
-      const legacy = await caches.open('simplelife-shell-v4');
+      const legacy = await caches.open('simplelife-shell-v5');
       await legacy.put(
         new URL('/experiments/stt-local/app.js', window.location.origin),
         new Response('/* stale STT lab script from the previous deployment */', {
@@ -263,7 +263,11 @@ test('a new Service Worker cache version replaces stale cached STT lab code', as
 
     const result = await page.evaluate(async () => {
       const names = await caches.keys();
-      const cache = await caches.open('simplelife-shell-v5');
+      const cache = await caches.open('simplelife-shell-v6');
+      const document = await cache.match(
+        new URL('/experiments/stt-local/index.html', window.location.origin),
+        { ignoreVary: true },
+      );
       const script = await cache.match(
         new URL('/experiments/stt-local/app.js', window.location.origin),
         { ignoreVary: true },
@@ -272,122 +276,41 @@ test('a new Service Worker cache version replaces stale cached STT lab code', as
         names,
         scriptText: script ? await script.text() : null,
         scriptStatus: script?.status ?? null,
+        documentText: document ? await document.text() : null,
       };
     });
 
-    expect(result.names).toContain('simplelife-shell-v5');
-    expect(result.names).not.toContain('simplelife-shell-v4');
+    expect(result.names).toContain('simplelife-shell-v6');
+    expect(result.names).not.toContain('simplelife-shell-v5');
     expect(result.scriptStatus).toBe(200);
     expect(result.scriptText).toContain('STT_RUNTIME_IMPORT_FAILED [cdn.jsdelivr.net]');
-    expect(result.scriptText).toContain('STT_MODEL_OR_WASM_LOAD_FAILED:');
-    expect(result.scriptText).toContain('const MODEL_REMOTE_PATH_TEMPLATE = "{model}/resolve/" + MODEL_REVISION + "/";');
-    expect(result.scriptText).toContain('function pinModelRevisionUrl(url)');
-    expect(result.scriptText).toContain('const proxyPrefix = "/__stt-model/" + MODEL_ID + "/resolve/";');
-    expect(result.scriptText).toContain('proxyPrefix + MODEL_REVISION + "/" + filePath');
-    expect(result.scriptText).toContain('env.remoteHost = new URL("/__stt-model/", location.origin).href;');
-    expect(result.scriptText).toContain('env.remotePathTemplate = MODEL_REMOTE_PATH_TEMPLATE;');
+    expect(result.scriptText).toContain('STT_MODEL_CHECKSUM_MISMATCH');
+    expect(result.scriptText).toContain('const MODEL_SHA256 = "818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7";');
+    expect(result.scriptText).toContain('function installReadOnlyFetchGuard()');
+    expect(result.scriptText).toContain('const WHISPER_CPP_MODEL_URL = "/__stt-whisper/" + MODEL_PATH;');
+    expect(result.scriptText).toContain('state.session.streaming(samples');
+    expect(result.scriptText).not.toContain('@huggingface/transformers');
+    expect(result.documentText).toContain('whisper.cpp');
+    expect(result.documentText).toContain('32,2 MB');
   } finally {
     await context.close();
   }
 });
 
-test('STT lab pins Transformers.js metadata preflights to the immutable model revision', async ({ browser }) => {
-  const context = await browser.newContext({ serviceWorkers: 'allow' });
-  try {
-    const page = await context.newPage();
-    const modelRequests = [];
-    await page.route('https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2', async (route) => {
-      await route.fulfill({
-        status: 200,
-        headers: {
-          'access-control-allow-origin': '*',
-          'content-type': 'text/javascript; charset=utf-8',
-          'cache-control': 'no-store',
-        },
-        body: `
-          export const env = {
-            remotePathTemplate: "{model}/resolve/{revision}/",
-            backends: { onnx: { wasm: { numThreads: 0 } } },
-          };
-          export async function pipeline(_task, model) {
-            const hubRequest = await fetch(
-              "https://huggingface.co/" + model + "/resolve/main/config.json",
-            );
-            const localRequest = await fetch(
-              location.origin + "/__stt-model/" + model + "/resolve/main/config.json",
-            );
-            if (!hubRequest.ok || !localRequest.ok) {
-              throw new Error("Mock model config returned " + hubRequest.status + "/" + localRequest.status);
-            }
-            return async () => ({ text: "" });
-          }
-        `,
-      });
-    });
-    await page.route('https://huggingface.co/**', async (route) => {
-      modelRequests.push(route.request().url());
-      await route.fulfill({
-        status: 200,
-        headers: {
-          'access-control-allow-origin': '*',
-          'content-type': 'application/json',
-          'cache-control': 'no-store',
-        },
-        body: '{"model_type":"whisper"}',
-      });
-    });
-    const sameOriginModelRequests = [];
-    await page.route('**/__stt-model/**', async (route) => {
-      sameOriginModelRequests.push(route.request().url());
-      await route.fulfill({
-        status: 200,
-        headers: {
-          'content-type': 'application/json',
-          'cache-control': 'public, max-age=86400',
-        },
-        body: '{"model_type":"whisper"}',
-      });
-    });
-
-    await page.goto(appURL, { waitUntil: 'load' });
-    await page.evaluate(() => navigator.serviceWorker.ready);
-    if (!await page.evaluate(() => Boolean(navigator.serviceWorker.controller))) {
-      await page.reload({ waitUntil: 'load' });
-    }
-    await page.waitForFunction(
-      () => Boolean(navigator.serviceWorker.controller),
-      null,
-      { timeout: 20_000 },
-    );
-
-    const labURL = new URL('/experiments/stt-local/index.html', baseURL).toString();
-    await page.goto(labURL, { waitUntil: 'load' });
-    await page.getByRole('button', { name: 'Descargar y preparar modelo' }).click();
-    await expect(page.locator('#status')).toContainText('Modelo listo.', { timeout: 10_000 });
-
-    expect(modelRequests).toEqual([]);
-    expect(sameOriginModelRequests).toEqual([
-      new URL('/__stt-model/onnx-community/whisper-tiny/resolve/ff4177021cc41f7db950912b73ea4fdf7d01d8e7/config.json', baseURL).toString(),
-      new URL('/__stt-model/onnx-community/whisper-tiny/resolve/ff4177021cc41f7db950912b73ea4fdf7d01d8e7/config.json', baseURL).toString(),
-    ]);
-    await expect(page.getByRole('button', { name: 'Transcribir localmente' })).toBeDisabled();
-  } finally {
-    await context.close();
-  }
-});
-
-test('Cloudflare Preview serves pinned Whisper metadata through the same-origin model proxy', async ({ request }) => {
+test('Cloudflare Preview streams the pinned Whisper.cpp tiny-q5_1 model through the existing Worker', async ({ request }) => {
   test.skip(!process.env.PWA_BASE_URL, 'Requires the deployed Cloudflare Preview Worker.');
   const url = new URL(
-    '/__stt-model/onnx-community/whisper-tiny/resolve/ff4177021cc41f7db950912b73ea4fdf7d01d8e7/config.json',
+    '/__stt-whisper/ggerganov/whisper.cpp/resolve/0b364b566045a405be7225ee1e415a073e04da77/ggml-tiny-q5_1.bin',
     baseURL,
   );
-  const response = await request.get(url.toString(), { timeout: 30_000 });
-  expect(response.status()).toBe(200);
-  expect(response.headers()['cache-control']).toMatch(/max-age=86400/);
-  const config = await response.json();
-  expect(config.model_type).toBe('whisper');
-  expect(config.vocab_size).toBe(51865);
+  const response = await request.get(url.toString(), {
+    headers: { range: 'bytes=0-63' },
+    timeout: 30_000,
+  });
+  expect(response.status()).toBe(206);
+  expect(response.headers()['cache-control']).toMatch(/max-age=31536000/);
+  expect(response.headers()['content-range']).toMatch(/^bytes 0-63\/3\d{7}$/);
+  expect((await response.body()).byteLength).toBe(64);
 });
 
 test('isolated local STT lab reopens from the service-worker cache while offline', async ({ browser }) => {
@@ -411,7 +334,7 @@ test('isolated local STT lab reopens from the service-worker cache while offline
     await expect(onlinePage.getByRole('button', { name: 'Descargar y preparar modelo' })).toBeEnabled();
 
     const cachedLab = await onlinePage.evaluate(async () => {
-      const cache = await caches.open('simplelife-shell-v5');
+      const cache = await caches.open('simplelife-shell-v6');
       const origin = window.location.origin;
       const documentResponse = await cache.match(new URL('/experiments/stt-local/index.html', origin));
       const scriptResponse = await cache.match(new URL('/experiments/stt-local/app.js', origin));
