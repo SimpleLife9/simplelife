@@ -1,4 +1,20 @@
-const TRANSFORMERS_MODULE = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2/+esm";
+const TRANSFORMERS_MODULE = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2";
+const ALLOWED_DOWNLOAD_HOSTS = new Set([
+  location.hostname,
+  "cdn.jsdelivr.net",
+  "huggingface.co",
+  "hf.co",
+  "cas-server.xethub.hf.co",
+  "cas-server.xethub-eu.hf.co",
+  "transfer.xethub.hf.co",
+  "transfer.xethub-eu.hf.co",
+  "us.aws.cdn.hf.co",
+  "us.gcp.cdn.hf.co",
+  "cdn-lfs-us-1.hf.co",
+  "cdn-lfs-eu-1.hf.co",
+  "cdn-lfs.huggingface.co",
+  "cas-bridge.xethub.hf.co",
+]);
 const MODEL_ID = "onnx-community/whisper-tiny";
 const MODEL_REVISION = "ff4177021cc41f7db950912b73ea4fdf7d01d8e7";
 const SAMPLE_RATE = 16_000;
@@ -90,20 +106,23 @@ function installFetchWriteGuard() {
       throw new Error("STT_NETWORK_WRITE_BLOCKED");
     }
     const url = new URL(input instanceof Request ? input.url : input, location.href);
-    const allowed = new Set([
-      location.hostname,
-      "cdn.jsdelivr.net",
-      "huggingface.co",
-      "hf.co",
-      "cdn-lfs.huggingface.co",
-      "cas-bridge.xethub.hf.co",
-      "cdn-lfs-us-1.hf.co",
-      "cdn-lfs-eu-1.hf.co",
-    ]);
-    if (!allowed.has(url.hostname)) {
+    if (!ALLOWED_DOWNLOAD_HOSTS.has(url.hostname)) {
       throw new Error("STT_REMOTE_HOST_NOT_ALLOWLISTED: " + url.hostname);
     }
-    return nativeFetch(input, init);
+    try {
+      const response = await nativeFetch(input, init);
+      const finalUrl = response.url ? new URL(response.url) : url;
+      if (!ALLOWED_DOWNLOAD_HOSTS.has(finalUrl.hostname)) {
+        throw new Error("STT_REDIRECT_HOST_NOT_ALLOWLISTED: " + finalUrl.hostname);
+      }
+      return response;
+    } catch (error) {
+      const message = String(error?.message || error);
+      if (message.startsWith("STT_")) throw error;
+      throw new Error(
+        "STT_FETCH_FAILED: " + url.hostname + url.pathname + " (" + message.slice(0, 120) + ")",
+      );
+    }
   };
   window.__simpleLifeSttFetchGuardInstalled = true;
 }
@@ -112,10 +131,17 @@ $("load-model").addEventListener("click", async () => {
   if (state.loading || state.pipeline) return;
   state.loading = true;
   setBusy(true);
-  setStatus("Cargando el runtime local. Solo se permiten descargas GET de archivos estáticos del motor y del modelo.");
+  setStatus("Descargando runtime Transformers.js 4.3.2 desde cdn.jsdelivr.net…");
   installFetchWriteGuard();
   try {
-    const { env, pipeline } = await import(TRANSFORMERS_MODULE);
+    let runtime;
+    try {
+      runtime = await import(TRANSFORMERS_MODULE);
+    } catch (error) {
+      throw new Error("STT_RUNTIME_IMPORT_FAILED [cdn.jsdelivr.net]: " + String(error?.message || error).slice(0, 180));
+    }
+    const { env, pipeline } = runtime;
+    setStatus("Runtime listo. Descargando modelo y archivos WASM desde los hosts estáticos permitidos…");
     env.useBrowserCache = true;
     env.useWasmCache = true;
     env.cacheKey = "simplelife-local-stt-whisper-tiny-v1";
@@ -126,16 +152,20 @@ $("load-model").addEventListener("click", async () => {
       ? await navigator.storage.persist().catch(() => false)
       : false;
     $("storage").textContent = persistent ? "Persistente concedida" : "Caché del navegador";
-    state.pipeline = await pipeline("automatic-speech-recognition", MODEL_ID, {
-      device: "wasm",
-      dtype: "q8",
-      revision: MODEL_REVISION,
-      progress_callback: (event) => {
-        const name = typeof event.file === "string" ? event.file.split("/").pop() : "archivo del modelo";
-        const progress = Number.isFinite(event.progress) ? " · " + event.progress.toFixed(0) + "%" : "";
-        setStatus("Preparando " + name + progress);
-      },
-    });
+    try {
+      state.pipeline = await pipeline("automatic-speech-recognition", MODEL_ID, {
+        device: "wasm",
+        dtype: "q8",
+        revision: MODEL_REVISION,
+        progress_callback: (event) => {
+          const name = typeof event.file === "string" ? event.file.split("/").pop() : "archivo del modelo";
+          const progress = Number.isFinite(event.progress) ? " · " + event.progress.toFixed(0) + "%" : "";
+          setStatus("Preparando " + name + progress);
+        },
+      });
+    } catch (error) {
+      throw new Error("STT_MODEL_OR_WASM_LOAD_FAILED: " + String(error?.message || error).slice(0, 200));
+    }
     setStatus("Modelo listo. Ya puedes elegir un audio de prueba; no se ha accedido a micrófono ni a Storage privado.");
   } catch (error) {
     state.pipeline = null;
