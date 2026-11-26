@@ -1,7 +1,11 @@
 const CACHE_NAME = 'simplelife-shell-v3';
 // Cloudflare's SPA asset handler redirects /index.html to /. Precache the
 // canonical root document, then store a separate /index.html alias below.
-const APP_SHELL = ['/', '/manifest.webmanifest', '/leaf.svg', '/precache-manifest.json'];
+const STT_LAB_DOCUMENT = '/experiments/stt-local/index.html';
+const APP_SHELL = [
+  '/', '/manifest.webmanifest', '/leaf.svg', '/precache-manifest.json',
+  STT_LAB_DOCUMENT, '/experiments/stt-local/app.js',
+];
 
 async function readBuildAssetManifest() {
   const response = await fetch('/precache-manifest.json', { cache: 'no-store' });
@@ -67,6 +71,9 @@ self.addEventListener('fetch', (event) => {
   if (request.mode === 'navigate') {
     const navigationResponse = (async () => {
       let cachedDocument = null;
+      let cachedSttLabDocument = null;
+      const isSttLabNavigation = url.pathname === STT_LAB_DOCUMENT
+        || url.pathname === '/experiments/stt-local/';
 
       // Prefer the canonical root document. Only accept a real HTTP 200 page,
       // never a hosted SPA redirect from /index.html back to /.
@@ -80,6 +87,13 @@ self.addEventListener('fetch', (event) => {
           new URL('/index.html', self.location.origin),
           { ignoreVary: true },
         );
+        cachedSttLabDocument = await cache.match(
+          new URL(STT_LAB_DOCUMENT, self.location.origin),
+          { ignoreVary: true },
+        );
+        if (cachedSttLabDocument?.status !== 200 || !cachedSttLabDocument.ok) {
+          cachedSttLabDocument = null;
+        }
         cachedDocument = [cachedRoot, cachedIndex].find((candidate) => (
           candidate && candidate.status === 200 && candidate.ok
         )) || null;
@@ -90,6 +104,7 @@ self.addEventListener('fetch', (event) => {
       // Do not even start a network fetch when the browser is offline.
       // A cached document is enough to boot the already-precached app shell.
       if (!self.navigator.onLine) {
+        if (isSttLabNavigation && cachedSttLabDocument) return cachedSttLabDocument;
         if (cachedDocument) return cachedDocument;
         return new Response('SimpleLife necesita abrirse online al menos una vez para preparar este dispositivo.', {
           status: 503,
@@ -99,6 +114,14 @@ self.addEventListener('fetch', (event) => {
 
       try {
         const response = await fetch(request);
+        if (response.ok && isSttLabNavigation) {
+          try {
+            const cache = await caches.open(CACHE_NAME);
+            await cache.put(STT_LAB_DOCUMENT, response.clone());
+          } catch (cacheError) {
+            console.error('STT lab document cache failed:', cacheError);
+          }
+        }
         if (response.ok && (url.pathname === '/' || url.pathname === '/index.html')) {
           try {
             const cache = await caches.open(CACHE_NAME);
