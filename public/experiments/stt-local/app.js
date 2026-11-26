@@ -122,7 +122,9 @@ $("load-model").addEventListener("click", async () => {
     env.allowRemoteModels = true;
     env.allowLocalModels = false;
     env.backends.onnx.wasm.numThreads = 1;
-    const persistent = await navigator.storage?.persist?.().catch(() => false);
+    const persistent = navigator.storage?.persist
+      ? await navigator.storage.persist().catch(() => false)
+      : false;
     $("storage").textContent = persistent ? "Persistente concedida" : "Caché del navegador";
     state.pipeline = await pipeline("automatic-speech-recognition", MODEL_ID, {
       device: "wasm",
