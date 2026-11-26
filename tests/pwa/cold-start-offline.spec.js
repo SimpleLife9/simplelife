@@ -34,7 +34,7 @@ async function prepareOnlineShell(page) {
   await expect(page.locator('#root > :not(.offline-shell-status)')).toHaveCount(1);
 
   const cacheAudit = await page.evaluate(async () => {
-    const cache = await caches.open('simplelife-shell-v4');
+    const cache = await caches.open('simplelife-shell-v5');
     const manifestResponse = await cache.match(
       new URL('/precache-manifest.json', window.location.origin).href,
       { ignoreVary: true },
@@ -240,7 +240,7 @@ test('a new Service Worker cache version replaces stale cached STT lab code', as
     const page = await context.newPage();
     await page.goto(new URL('/experiments/stt-local/index.html', baseURL).toString(), { waitUntil: 'load' });
     await page.evaluate(async () => {
-      const legacy = await caches.open('simplelife-shell-v3');
+      const legacy = await caches.open('simplelife-shell-v4');
       await legacy.put(
         new URL('/experiments/stt-local/app.js', window.location.origin),
         new Response('/* stale STT lab script from the previous deployment */', {
@@ -263,7 +263,7 @@ test('a new Service Worker cache version replaces stale cached STT lab code', as
 
     const result = await page.evaluate(async () => {
       const names = await caches.keys();
-      const cache = await caches.open('simplelife-shell-v4');
+      const cache = await caches.open('simplelife-shell-v5');
       const script = await cache.match(
         new URL('/experiments/stt-local/app.js', window.location.origin),
         { ignoreVary: true },
@@ -275,14 +275,81 @@ test('a new Service Worker cache version replaces stale cached STT lab code', as
       };
     });
 
-    expect(result.names).toContain('simplelife-shell-v4');
-    expect(result.names).not.toContain('simplelife-shell-v3');
+    expect(result.names).toContain('simplelife-shell-v5');
+    expect(result.names).not.toContain('simplelife-shell-v4');
     expect(result.scriptStatus).toBe(200);
     expect(result.scriptText).toContain('STT_RUNTIME_IMPORT_FAILED [cdn.jsdelivr.net]');
     expect(result.scriptText).toContain('STT_MODEL_OR_WASM_LOAD_FAILED:');
-    expect(result.scriptText).toContain('const MODEL_REMOTE_PATH_TEMPLATE = "{model}/resolve/" + MODEL_REVISION + "/";');
+    expect(result.scriptText).toContain('const MODEL_REMOTE_PATH_TEMPLATE = "{model}/resolve/{revision}/";');
+    expect(result.scriptText).toContain('function pinModelRevisionUrl(url)');
+    expect(result.scriptText).toContain('"/" + MODEL_ID + "/resolve/" + MODEL_REVISION + "/"');
     expect(result.scriptText).toContain('env.remotePathTemplate = MODEL_REMOTE_PATH_TEMPLATE;');
-    expect(result.scriptText).not.toContain('/resolve/main/');
+  } finally {
+    await context.close();
+  }
+});
+
+test('STT lab pins Transformers.js metadata preflights to the immutable model revision', async ({ browser }) => {
+  const context = await browser.newContext({ serviceWorkers: 'allow' });
+  try {
+    const page = await context.newPage();
+    const modelRequests = [];
+    await page.route('https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2', async (route) => {
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'access-control-allow-origin': '*',
+          'content-type': 'text/javascript; charset=utf-8',
+          'cache-control': 'no-store',
+        },
+        body: `
+          export const env = {
+            remotePathTemplate: "{model}/resolve/{revision}/",
+            backends: { onnx: { wasm: { numThreads: 0 } } },
+          };
+          export async function pipeline(_task, model) {
+            const response = await fetch(
+              "https://huggingface.co/" + model + "/resolve/main/config.json",
+            );
+            if (!response.ok) throw new Error("Mock model config returned " + response.status);
+            return async () => ({ text: "" });
+          }
+        `,
+      });
+    });
+    await page.route('https://huggingface.co/**', async (route) => {
+      modelRequests.push(route.request().url());
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'access-control-allow-origin': '*',
+          'content-type': 'application/json',
+          'cache-control': 'no-store',
+        },
+        body: '{"model_type":"whisper"}',
+      });
+    });
+
+    await page.goto(appURL, { waitUntil: 'load' });
+    await page.evaluate(() => navigator.serviceWorker.ready);
+    if (!await page.evaluate(() => Boolean(navigator.serviceWorker.controller))) {
+      await page.reload({ waitUntil: 'load' });
+    }
+    await page.waitForFunction(
+      () => Boolean(navigator.serviceWorker.controller),
+      null,
+      { timeout: 20_000 },
+    );
+
+    const labURL = new URL('/experiments/stt-local/index.html', baseURL).toString();
+    await page.goto(labURL, { waitUntil: 'load' });
+    await page.getByRole('button', { name: 'Descargar y preparar modelo' }).click();
+    await expect(page.locator('#status')).toContainText('Modelo listo.', { timeout: 10_000 });
+
+    expect(modelRequests).toEqual([
+      'https://huggingface.co/onnx-community/whisper-tiny/resolve/ff4177021cc41f7db950912b73ea4fdf7d01d8e7/config.json',
+    ]);
+    await expect(page.getByRole('button', { name: 'Transcribir localmente' })).toBeDisabled();
   } finally {
     await context.close();
   }
@@ -309,7 +376,7 @@ test('isolated local STT lab reopens from the service-worker cache while offline
     await expect(onlinePage.getByRole('button', { name: 'Descargar y preparar modelo' })).toBeEnabled();
 
     const cachedLab = await onlinePage.evaluate(async () => {
-      const cache = await caches.open('simplelife-shell-v4');
+      const cache = await caches.open('simplelife-shell-v5');
       const origin = window.location.origin;
       const documentResponse = await cache.match(new URL('/experiments/stt-local/index.html', origin));
       const scriptResponse = await cache.match(new URL('/experiments/stt-local/app.js', origin));

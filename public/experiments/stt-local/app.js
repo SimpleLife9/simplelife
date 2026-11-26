@@ -19,7 +19,7 @@ const MODEL_ID = "onnx-community/whisper-tiny";
 const MODEL_REVISION = "ff4177021cc41f7db950912b73ea4fdf7d01d8e7";
 // Transformers.js 4.3.2 performs a metadata preflight without forwarding `revision`.
 // Pin the shared URL template as well so every request, including that preflight, uses this exact commit.
-const MODEL_REMOTE_PATH_TEMPLATE = "{model}/resolve/" + MODEL_REVISION + "/";
+const MODEL_REMOTE_PATH_TEMPLATE = "{model}/resolve/{revision}/";
 const SAMPLE_RATE = 16_000;
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 const MAX_DURATION_SECONDS = 180;
@@ -100,6 +100,19 @@ function setBusy(busy) {
   $("audio-file").disabled = busy || !state.pipeline;
   $("transcribe").disabled = busy || !state.pipeline || !$("audio-file").files?.length;
 }
+function pinModelRevisionUrl(url) {
+  const unpinnedPrefix = "/" + MODEL_ID + "/resolve/main/";
+  if (url.origin !== "https://huggingface.co" || !url.pathname.startsWith(unpinnedPrefix)) {
+    return url;
+  }
+  const pinnedUrl = new URL(url.href);
+  pinnedUrl.pathname = pinnedUrl.pathname.replace(
+    unpinnedPrefix,
+    "/" + MODEL_ID + "/resolve/" + MODEL_REVISION + "/",
+  );
+  return pinnedUrl;
+}
+
 function installFetchWriteGuard() {
   if (window.__simpleLifeSttFetchGuardInstalled) return;
   const nativeFetch = window.fetch.bind(window);
@@ -108,12 +121,21 @@ function installFetchWriteGuard() {
     if (!["GET", "HEAD"].includes(method)) {
       throw new Error("STT_NETWORK_WRITE_BLOCKED");
     }
-    const url = new URL(input instanceof Request ? input.url : input, location.href);
+    const originalUrl = new URL(input instanceof Request ? input.url : input, location.href);
+    if (!ALLOWED_DOWNLOAD_HOSTS.has(originalUrl.hostname)) {
+      throw new Error("STT_REMOTE_HOST_NOT_ALLOWLISTED: " + originalUrl.hostname);
+    }
+    // Transformers.js may issue a metadata preflight with revision="main".
+    // Pin that exact repository path before any network request can leave the tab.
+    const url = pinModelRevisionUrl(originalUrl);
     if (!ALLOWED_DOWNLOAD_HOSTS.has(url.hostname)) {
       throw new Error("STT_REMOTE_HOST_NOT_ALLOWLISTED: " + url.hostname);
     }
+    const fetchInput = url.href !== originalUrl.href
+      ? (input instanceof Request ? new Request(url.href, input) : url.href)
+      : input;
     try {
-      const response = await nativeFetch(input, init);
+      const response = await nativeFetch(fetchInput, init);
       const finalUrl = response.url ? new URL(response.url) : url;
       if (!ALLOWED_DOWNLOAD_HOSTS.has(finalUrl.hostname)) {
         throw new Error("STT_REDIRECT_HOST_NOT_ALLOWLISTED: " + finalUrl.hostname);
