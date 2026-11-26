@@ -134,13 +134,25 @@ test('Worker marks mutable STT lab HTML and JavaScript as no-store', async () =>
     }),
     { ASSETS: { fetch: cachedAssetFetch } },
   );
+  const canonicalDirectory = await worker.fetch(
+    new Request(ORIGIN + '/experiments/stt-local/'),
+    { ASSETS: { fetch: cachedAssetFetch } },
+  );
+  const extensionlessDirectory = await worker.fetch(
+    new Request(ORIGIN + '/experiments/stt-local'),
+    { ASSETS: { fetch: cachedAssetFetch } },
+  );
   const script = await worker.fetch(
     new Request(ORIGIN + '/experiments/stt-local/app.js'),
     { ASSETS: { fetch: cachedAssetFetch } },
   );
 
   assert.equal(document.status, 200);
+  assert.equal(canonicalDirectory.status, 200);
+  assert.equal(extensionlessDirectory.status, 200);
   assert.equal(script.status, 200);
   assert.equal(document.headers.get('cache-control'), 'no-store');
+  assert.equal(canonicalDirectory.headers.get('cache-control'), 'no-store');
+  assert.equal(extensionlessDirectory.headers.get('cache-control'), 'no-store');
   assert.equal(script.headers.get('cache-control'), 'no-store');
 });
