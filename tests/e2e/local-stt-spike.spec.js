@@ -1,31 +1,31 @@
 import { test, expect } from '@playwright/test';
 
-test('local STT experiment is isolated and makes no remote request before explicit model loading', async ({ page }) => {
+test('isolated STT lab uses whisper.cpp locally and performs no download before explicit preparation', async ({ page }) => {
   const remoteRequests = [];
   page.on('request', (request) => {
     const url = new URL(request.url());
-    if (url.origin !== 'http://127.0.0.1:5173') remoteRequests.push({
-      method: request.method(),
-      host: url.hostname,
-    });
+    if (url.origin !== 'http://127.0.0.1:5173') {
+      remoteRequests.push({ method: request.method(), host: url.hostname });
+    }
   });
 
   await page.goto('/experiments/stt-local/index.html');
   await expect(page.getByRole('heading', { name: 'Transcripción local de voz' })).toBeVisible();
-  await expect(page.getByText('No selecciones ninguno de tus audios privados', { exact: false })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Descargar y preparar modelo' })).toBeEnabled();
-  await expect(page.getByLabel('Audio sintético de prueba')).toBeDisabled();
+  await expect(page.getByText('No selecciones audios privados', { exact: false })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Descargar y preparar motor' })).toBeEnabled();
+  await expect(page.getByLabel('Audio sintético o público de prueba')).toBeDisabled();
 
   const source = await page.locator('script[type="module"]').getAttribute('src');
   expect(source).toBe('./app.js');
   const appResponse = await page.request.get('/experiments/stt-local/app.js');
   expect(appResponse.ok()).toBe(true);
   const appSource = await appResponse.text();
-  expect(appSource).toContain('https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2"');
-  expect(appSource).not.toContain('@huggingface/transformers@4.3.2/+esm');
-  expect(appSource).toContain('"/__stt-model/"');
-  expect(appSource).toContain('env.remoteHost = new URL("/__stt-model/", location.origin).href;');
-  expect(appSource).toContain('pinModelRevisionUrl(originalUrl)');
+  expect(appSource).toContain('@timur00kh/whisper.wasm@0.1.1/+esm');
+  expect(appSource).toContain('"/__stt-whisper/" + MODEL_PATH');
+  expect(appSource).toContain('818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7');
+  expect(appSource).toContain('state.session.streaming(samples');
+  expect(appSource).not.toContain('@huggingface/transformers');
+  expect(appSource).not.toContain('onnx-community/whisper-tiny');
 
   expect(remoteRequests).toEqual([]);
   expect(await page.locator('input[type="file"]').count()).toBe(1);
