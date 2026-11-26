@@ -18,7 +18,8 @@
     button.secondary{background:#edf3ed;color:#315d43}button:disabled{opacity:.5;cursor:not-allowed}
     .status{border:1px solid #e5ebe5;background:#fbfcfb;border-radius:12px;padding:14px 16px;margin:16px 0;font-size:.9rem;color:#52655a;min-height:48px}
     label{display:block;font-weight:700;margin:16px 0 8px}
-    input[type=file]{display:block;width:100%;border:1px dashed #b9cbbd;border-radius:12px;padding:13px;background:#fbfdfb}
+    input[type=file],input[type=text]{display:block;width:100%;border:1px solid #dce6dd;border-radius:12px;padding:13px;background:#fbfdfb}
+    input[type=file]{border-style:dashed;border-color:#b9cbbd}
     .result{white-space:pre-wrap;overflow-wrap:anywhere;border:1px solid #e5ebe5;border-radius:12px;padding:16px;min-height:70px;background:#fbfcfb;color:#20342f}
     .small{font-size:.82rem;color:#849187}.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px;margin:14px 0}
     .metric{background:#f5f8f5;border-radius:10px;padding:11px}.metric b{display:block;font-size:1.02rem;color:#315d43}.metric span{font-size:.75rem;color:#7b8b80}
@@ -29,27 +30,27 @@
 <main>
   <div class="eyebrow">Prueba aislada · no forma parte de la aplicación principal</div>
   <h1>Transcripción local de voz</h1>
-  <p>Laboratorio técnico con Whisper Tiny multilingüe, Transformers.js y WebAssembly (CPU). El modelo se descarga una vez y queda en la caché privada del navegador cuando el navegador lo permite.</p>
-  <div class="notice"><strong>Usa únicamente audio sintético o público de prueba.</strong> No selecciones ninguno de tus audios privados ni grabaciones personales. Este laboratorio no está aprobado para procesar los originales.</div>
-  <div class="privacy" style="margin-top:12px"><strong>Privacidad:</strong> el audio elegido se decodifica y se procesa dentro de esta pestaña. El audio elegido se procesa íntegramente en esta pestaña y nunca se envía al Worker. El código bloquea solicitudes fetch de escritura (POST/PUT/PATCH/DELETE). El motor y los pesos públicos se descargan mediante el Worker del mismo dominio, que solo permite GET/HEAD a archivos de una revisión fija. No usa micrófono, Supabase, ARIA ni un servicio de transcripción remoto.</div>
+  <p>Laboratorio con <strong>whisper.cpp + WebAssembly SIMD</strong>. Usa el modelo Tiny multilingüe cuantizado Q5_1 (32,2 MB): se descarga una vez y queda guardado en IndexedDB para reutilizarlo sin volver a consumir descarga en cada sesión.</p>
+  <div class="notice"><strong>Usa únicamente audio sintético o público de prueba.</strong> No selecciones audios privados ni grabaciones personales. Este laboratorio no está aprobado para procesar originales.</div>
+  <div class="privacy" style="margin-top:12px"><strong>Privacidad:</strong> el audio se decodifica y procesa en esta pestaña. Nunca se envía al Worker ni a un servicio de inferencia. El Worker existente solo transmite el archivo público del modelo, de una revisión fija, mediante GET/HEAD. El motor se obtiene de jsDelivr al pulsar preparar; no se usa micrófono, Supabase, ARIA ni un servicio de transcripción remoto.</div>
 
   <h2 style="margin-top:24px">1. Preparar motor y modelo</h2>
-  <p class="small">Whisper Tiny multilingüe · revisión fija <code>ff417702</code> · pesos Q8 aproximados: 40,8 MB, más runtime WASM. Se ejecuta con un hilo CPU.</p>
+  <p class="small">Modelo: <code>ggml-tiny-q5_1.bin</code> · revisión fija <code>0b364b56</code> · SHA-256 verificado antes de inicializar · CPU local, 2 hilos.</p>
   <div class="controls">
-    <button id="load-model">Descargar y preparar modelo</button>
-    <button id="release-model" class="secondary" disabled>Liberar memoria</button>
+    <button id="load-model">Descargar y preparar motor</button>
+    <button id="release-model" class="secondary" disabled>Soltar motor</button>
   </div>
   <div id="status" class="status" role="status" aria-live="polite">Motor sin cargar. La descarga solo comienza al pulsar el botón.</div>
   <div class="metrics">
-    <div class="metric"><b id="storage">—</b><span>Persistencia de caché</span></div>
-    <div class="metric"><b id="device-memory">—</b><span>Memoria del dispositivo (estimación del navegador)</span></div>
+    <div class="metric"><b id="storage">—</b><span>Uso y cuota de almacenamiento local</span></div>
+    <div class="metric"><b id="device-memory">—</b><span>Memoria del dispositivo (si el navegador la expone)</span></div>
     <div class="metric"><b id="heap">—</b><span>Heap JS (no incluye toda la memoria WASM)</span></div>
   </div>
 
   <hr>
   <h2>2. Probar un audio sintético</h2>
-  <p>Selecciona un archivo breve de prueba (máximo 25 MiB y 3 minutos). El archivo no se sube; se convierte a mono/16 kHz localmente.</p>
-  <label for="audio-file">Audio sintético de prueba</label>
+  <p>Selecciona un archivo breve (máximo 25 MiB y 2 minutos). Se convierte a mono/16 kHz y se procesa localmente. La inferencia no consume solicitudes de una API ni créditos por minuto.</p>
+  <label for="audio-file">Audio sintético o público de prueba</label>
   <input id="audio-file" type="file" accept="audio/*" disabled>
   <div class="controls">
     <button id="transcribe" disabled>Transcribir localmente</button>
@@ -58,13 +59,13 @@
   <div class="metrics">
     <div class="metric"><b id="duration">—</b><span>Duración de audio</span></div>
     <div class="metric"><b id="elapsed">—</b><span>Tiempo de inferencia</span></div>
-    <div class="metric"><b id="wer">—</b><span>Error de palabras frente a referencia (si se introduce)</span></div>
+    <div class="metric"><b id="wer">—</b><span>Error de palabras frente a referencia</span></div>
   </div>
   <label for="reference">Texto de referencia opcional</label>
-  <input id="reference" type="text" autocomplete="off" placeholder="Escribe la frase exacta del audio de prueba para medir WER">
-  <p class="small">La cifra WER es solo una métrica aproximada de esta muestra; no certifica precisión en español cubano ni en audios reales.</p>
+  <input id="reference" type="text" autocomplete="off" placeholder="Escribe la frase exacta del audio para medir WER">
+  <p class="small">El WER es una métrica orientativa de esta muestra; no certifica precisión en español cubano ni en audios reales.</p>
   <hr>
-  <p class="small">Estado experimental. No se conecta a la cola privada ni crea capturas. Cierra la pestaña o pulsa «Liberar memoria» para terminar la sesión.</p>
+  <p class="small">Estado experimental. No se conecta a la cola privada ni crea capturas. Al soltar el motor, el modelo verificado permanece almacenado localmente; el navegador libera memoria cuando lo considere oportuno.</p>
 </main>
 <script type="module" src="./app.js"></script>
 </body>
