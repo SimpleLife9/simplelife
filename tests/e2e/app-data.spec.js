@@ -4700,4 +4700,5 @@ test('Inbox shows one local transcription action per saved private recording wit
   expect(uploadedVoiceObjects).toHaveLength(0);
   expect(voiceFinalizeRequests).toHaveLength(0);
   expect(audioDownloadRequests).toHaveLength(0);
+  expect(queueRequests).toHaveLength(0);
 });

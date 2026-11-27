@@ -567,14 +567,6 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
     if (processed.data?.status === 'not_claimable') throw new Error('El trabajo sigue en cola; vuelve a intentarlo.');
   };
 
-  const handleLocalVoiceCaptureSaved = async (captureId) => {
-    try {
-      await queueAndProcess(captureId);
-    } catch (failure) {
-      setCaptureRecoveryError('La transcripción ya está guardada en Inbox; no la repitas. Falló la preparación de sugerencias y puedes reintentarla desde la captura: ' + (failure?.message || 'servicio no disponible'));
-    }
-  };
-
   const processCapture = (capture) => {
     setProcessingErrorsByCapture((current) => {
       const next = { ...current };
@@ -950,7 +942,6 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
                 profile={profile}
                 busy={busy || offlineVaultBusy || profile?.offlineOnly === true}
                 runAction={runAction}
-                onSaved={handleLocalVoiceCaptureSaved}
               />
             )}
             {asset.retention_until && <small>Retención temporal hasta {new Intl.DateTimeFormat('es', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(asset.retention_until))}</small>}

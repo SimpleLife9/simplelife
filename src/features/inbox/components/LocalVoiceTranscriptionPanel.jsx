@@ -8,7 +8,6 @@ export function LocalVoiceTranscriptionPanel({
   profile,
   busy = false,
   runAction,
-  onSaved,
 }) {
   const [transcribing, setTranscribing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -72,7 +71,6 @@ export function LocalVoiceTranscriptionPanel({
         || (receipt.replayed !== true && receipt.capture_id !== proposedCaptureId)) {
         throw new Error('El servidor no confirmó la captura de voz vinculada al original.');
       }
-      await onSaved?.(receipt.capture_id);
       setStatus('Transcripción guardada como captura de Inbox. El original se conserva.');
     };
 

@@ -83,6 +83,7 @@ test('Inbox mounts a local transcription action inside each eligible private aud
 
   assert.ok(inbox.includes('<LocalVoiceTranscriptionPanel'));
   assert.ok(inbox.includes('asset={asset}'));
+  assert.doesNotMatch(inbox, /handleLocalVoiceCaptureSaved/);
   assert.ok(inbox.includes('voiceAssets.filter((asset) => !asset.capture_id).map'));
   assert.match(panel, /Transcribir localmente/);
   assert.match(panel, /Guardar transcripción como captura/);
