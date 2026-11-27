@@ -109,11 +109,12 @@ FROM PUBLIC, anon, authenticated, service_role;
 
 -- The Data API sees only this invoker wrapper in public. The owner-bound
 -- SECURITY DEFINER implementation is not in an exposed schema.
+-- Keep the private schema closed to every Data API role. The public
+-- SECURITY DEFINER wrapper is the sole explicitly granted API entry point.
 REVOKE ALL ON SCHEMA private FROM PUBLIC, anon, authenticated, service_role;
-GRANT USAGE ON SCHEMA private TO authenticated;
-GRANT EXECUTE
+REVOKE ALL PRIVILEGES
 ON FUNCTION private.record_inbox_voice_transcription_local_impl(uuid,uuid,uuid,text)
-TO authenticated;
+FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE OR REPLACE FUNCTION public.record_inbox_voice_transcription_local(
   p_asset_id uuid,
@@ -122,15 +123,23 @@ CREATE OR REPLACE FUNCTION public.record_inbox_voice_transcription_local(
   p_transcript_text text
 )
 RETURNS TABLE(capture_id uuid, part_id uuid, replayed boolean)
-LANGUAGE sql
+LANGUAGE plpgsql
 VOLATILE
-SECURITY INVOKER
+SECURITY DEFINER
 SET search_path = pg_catalog
 AS $function$
+BEGIN
+  -- Never let the public SECURITY DEFINER entry point run for anon callers.
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'A signed-in user is required' USING ERRCODE='42501';
+  END IF;
+
+  RETURN QUERY
   SELECT result.capture_id,result.part_id,result.replayed
   FROM private.record_inbox_voice_transcription_local_impl(
     p_asset_id,p_capture_id,p_part_id,p_transcript_text
   ) AS result;
+END;
 $function$;
 
 ALTER FUNCTION public.record_inbox_voice_transcription_local(uuid,uuid,uuid,text)

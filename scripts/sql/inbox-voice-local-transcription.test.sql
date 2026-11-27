@@ -39,14 +39,16 @@ BEGIN
        'public.record_inbox_voice_transcription_local(uuid,uuid,uuid,text)','EXECUTE')
      OR has_function_privilege('service_role',
        'public.record_inbox_voice_transcription_local(uuid,uuid,uuid,text)','EXECUTE')
-     OR NOT has_function_privilege('authenticated',
+     OR has_function_privilege('authenticated',
        'private.record_inbox_voice_transcription_local_impl(uuid,uuid,uuid,text)','EXECUTE')
      OR has_function_privilege('anon',
        'private.record_inbox_voice_transcription_local_impl(uuid,uuid,uuid,text)','EXECUTE')
      OR has_function_privilege('service_role',
        'private.record_inbox_voice_transcription_local_impl(uuid,uuid,uuid,text)','EXECUTE')
-     OR NOT has_schema_privilege('authenticated','private','USAGE') THEN
-    RAISE EXCEPTION 'Local transcript RPC privileges do not match the authenticated-only wrapper contract';
+     OR has_schema_privilege('authenticated','private','USAGE')
+     OR has_schema_privilege('anon','private','USAGE')
+     OR has_schema_privilege('service_role','private','USAGE') THEN
+    RAISE EXCEPTION 'Local transcript RPC privileges do not match the authenticated-only public wrapper contract';
   END IF;
 
   IF (
@@ -54,8 +56,8 @@ BEGIN
     FROM pg_catalog.pg_proc AS p
     JOIN pg_catalog.pg_namespace AS n ON n.oid=p.pronamespace
     WHERE n.nspname='public' AND p.proname='record_inbox_voice_transcription_local'
-  ) IS DISTINCT FROM false THEN
-    RAISE EXCEPTION 'The public Data API wrapper must be SECURITY INVOKER';
+  ) IS DISTINCT FROM true THEN
+    RAISE EXCEPTION 'The public authenticated-only API wrapper must be SECURITY DEFINER';
   END IF;
 
   IF (
