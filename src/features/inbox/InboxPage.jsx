@@ -445,7 +445,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
     if (data?.verified !== true || data?.assetId !== asset.id) {
       throw new Error('El servidor no confirmó la verificación del audio privado.');
     }
-  }, 'Audio verificado y finalizado. La transcripción sigue pendiente del proveedor aprobado.');
+  }, 'Audio verificado y finalizado. Ya puedes transcribirlo localmente desde su tarjeta en Inbox.');
 
   const getCaptureParts = (captureId) => captureParts.filter((part) => part.capture_id === captureId).sort((a, b) => a.part_index - b.part_index);
   const getCapturePart = (captureId) => getCaptureParts(captureId)[0];

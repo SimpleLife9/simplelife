@@ -4524,10 +4524,17 @@ test('mobile vault recovery key restores queued encrypted capture and rotates th
   await expect(page.locator('.connection-state')).toHaveText('Sin conexión');
 });
 
-test('Inbox safely retries finalization for an already-uploaded private voice object', async ({ page }) => {
+test('Inbox safely verifies a saved private recording and exposes its local transcription action', async ({ page }) => {
   const firstAsset = {
     id: '019b7000-0000-7000-8000-000000000501',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
     capture_id: null,
+    bucket_id: 'inbox-voice-private',
+    object_path: profile.id + '/019b7000-0000-7000-8000-000000000501/source.webm',
+    mime_type: 'audio/webm',
+    file_size_bytes: 128,
+    sha256_hex: 'a'.repeat(64),
     status: 'uploading',
     retention_until: '2026-12-02T02:03:15.000Z',
     created_at: '2026-11-25T21:03:15.000Z',
@@ -4535,6 +4542,7 @@ test('Inbox safely retries finalization for an already-uploaded private voice ob
   const secondAsset = {
     ...firstAsset,
     id: '019b7000-0000-7000-8000-000000000502',
+    object_path: profile.id + '/019b7000-0000-7000-8000-000000000502/source.webm',
     created_at: '2026-11-25T21:03:25.000Z',
   };
   const { voiceAssets, voiceFinalizeRequests, uploadedVoiceObjects } = await mockSupabaseSession(page, {
@@ -4554,13 +4562,15 @@ test('Inbox safely retries finalization for an already-uploaded private voice ob
   await retryButtons.first().click();
   await expect(page.locator('.alert.alert-success'))
     .toContainText('Audio verificado y finalizado');
-  await expect(pending).toContainText('esperando transcripción');
+  await expect(pending).toContainText('listo para transcribir localmente');
   await expect(pending.getByRole('button', { name: 'Reintentar verificación' })).toHaveCount(1);
+  await expect(pending.getByRole('button', { name: 'Transcribir localmente' })).toHaveCount(1);
 
   await pending.getByRole('button', { name: 'Reintentar verificación' }).click();
   await expect(page.locator('.alert.alert-success'))
     .toContainText('Audio verificado y finalizado');
   await expect(pending.getByRole('button', { name: 'Reintentar verificación' })).toHaveCount(0);
+  await expect(pending.getByRole('button', { name: 'Transcribir localmente' })).toHaveCount(2);
 
   expect(voiceFinalizeRequests).toHaveLength(2);
   expect(voiceFinalizeRequests.map((request) => request.assetId).sort())
@@ -4571,7 +4581,7 @@ test('Inbox safely retries finalization for an already-uploaded private voice ob
   expect(uploadedVoiceObjects).toHaveLength(0);
 });
 
-test('mobile voice capture uploads a private original and leaves transcription pending', async ({ page }) => {
+test('mobile voice capture uploads a private original and offers local transcription in Inbox', async ({ page }) => {
   await page.addInitScript(() => {
     const track = { stop: () => { window.__voiceMicrophoneTrackStopped = true; } };
     Object.defineProperty(navigator, 'mediaDevices', {
