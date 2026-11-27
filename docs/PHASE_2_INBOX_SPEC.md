@@ -1,6 +1,6 @@
 # Phase 2 — Universal Inbox and Intelligent Capture
 
-**Status:** Implementation consolidated in PR #97 (OPEN / DRAFT / NOT MERGED). The original kickoff sections below are retained as the product contract; the 24 November checkpoint records which capabilities have since been implemented and verified in DEV.  
+**Status (27 November 2026):** PR #97 remains OPEN / DRAFT / NOT MERGED. Exact HEAD `8430ea182e73a633ac44c52b0b9a0d2d881d4e1f` passed CI #1017 (51/51 steps; 205 unit, 59 browser/mobile and 8 Preview PWA cold-launch checks). Owner confirmed two locally transcribed voice captures now appear in Inbox. Newest details are recorded in Section 15; older checkpoints below remain historical.  
 **Integration dependency:** Event destinations remain disabled until Agenda PR #93 is integrated and the authenticated Event writer is available. The provider-independent capture foundation in this PR does not depend on Agenda code.  
 **Source of product requirements:** ChatBending Master, Vision Phase B, and `docs/PRODUCT_PHASE_ROADMAP.md`.
 
@@ -68,7 +68,7 @@ The model's numeric confidence is metadata, not a calibrated probability or auth
 
 The schema accepts `input_type='voice'`, while `content_original` remains text. The integration branch implements a private audio-object lifecycle in DEV: a non-public `inbox-voice-private` bucket, owner/asset-scoped object paths, an upload state that cannot be promoted by the browser, and bounded retention for abandoned/unlinked audio. The browser-provided SHA-256 is only an expected digest: after upload, the authenticated `inbox-voice-finalize` Edge Function downloads the private object, checks its actual byte size, recomputes SHA-256 server-side and finalizes only on a match. The finalization RPC is service-role-only; the legacy client-callable digest RPC is revoked. The UI records audio but never places raw bytes or a public media URL in `content_original`.
 
-**Not implemented yet:** speech-to-text/transcription and any provider request. The owner authorized Cloudflare Workers AI as a possible fallback on 24 November, but explicitly prefers ARIA's canonical Model Routing after its planned recovery on 26 November. Do not activate either provider path until that integration is assessed. Record the chosen model, processing region, data-retention terms, and free-only quota before the first real request.
+**Current implementation — local Whisper.cpp (27 November 2026):** speech-to-text is implemented in the browser using the pinned Whisper.cpp WASM runtime and model. The owner explicitly selects an eligible private recording; the browser downloads only that object, checks its expected SHA-256 and runs inference on-device. Audio bytes are not sent to ARIA, Cloudflare Workers AI, Google, OpenRouter or another STT provider. The reviewed transcript is saved only after the owner presses **Guardar transcripción como captura**, through the authenticated owner-scoped DEV RPC; a new Inbox capture and source part are linked to the original audio asset. The original object is not replaced or deleted. This closes the external-provider requirement for transcription; it does not implement model-backed classification.
 
 ## 8. Security, privacy and reliability guardrails
 
@@ -86,7 +86,7 @@ The schema accepts `input_type='voice'`, while `content_original` remains text. 
 2. **Text capture foundation:** extract the composer/capture flow into Inbox feature modules without changing behavior; test persistence, source preservation, double-submit protection and owner isolation.
 3. **Processing pipeline:** authenticated server-side queue/claim/complete/retry lifecycle backed by `processing_run`; validate outputs and idempotency in ephemeral PostgreSQL/Edge Runtime tests.
 4. **Review and destination flow:** confidence-aware suggestions, clarification, correction history and explicit confirmation; gate destinations that are not yet implemented.
-5. **Voice capture/transcription:** private voice recording/storage is now implemented in DEV; transcription remains disabled until ARIA routing is restored or an explicitly approved fallback is selected and its region/retention/quota policy is confirmed.
+5. **Voice capture/transcription:** private voice recording/storage and browser-local Whisper.cpp transcription are implemented in DEV/Preview. The owner-reviewed transcript is saved into Inbox through an owner-scoped RPC; no STT provider is used. The current manual acceptance and remaining device-specific checks are recorded in Section 15.
 6. **Search, deduplication and recoverable deletion:** traceable proposals and explicit confirmation; no destructive auto-merge.
 7. **Offline and synchronization:** the encrypted local vault and idempotent sync path are implemented and covered by automated tests; finish owner acceptance on desktop and physical Android, including airplane-mode reopen, recovery-key rotation, reconnect and duplicate-free retry.
 
@@ -192,3 +192,33 @@ The finalization RPC is service-role-only. The legacy authenticated RPC that acc
 
 - A Playwright desktop E2E was added to create/unlock the private vault, save a synthetic capture while browser connectivity is offline, restore connectivity, simulate a committed server write whose acknowledgement is lost, and retry with the same capture/part UUIDs. The fixture asserts one capture, one part and a replay receipt rather than a duplicate. Exact-SHA CI is pending.
 - Scheduler observability in hosted DEV is PASS: non-200 Edge responses and DNS timeouts are visible in Edge access logs and `net._http_response`. The cron `succeeded` status alone records enqueue execution, so delivery diagnosis uses the network response table. Eight transient DNS timeouts were observed in 24 hours; subsequent requests recovered. No capture/audio body or raw secret was needed for diagnosis.
+
+
+## 15. Current phase checkpoint — local voice transcription, PWA freshness and ARIA boundary — 27 November 2026
+
+### Delivered and verified
+
+- Exact branch HEAD: `8430ea182e73a633ac44c52b0b9a0d2d881d4e1f`; [CI #1017 SUCCESS](https://github.com/SimpleLife9/simplelife/actions/runs/45996562112), 51/51 steps.
+- Unit tests 205/205; browser/mobile 59/59; hosted Preview cold-launch after full browser restart 8/8. Ephemeral PostgreSQL/RLS, migration suite, Deno, Edge Runtime and production build passed.
+- Cloudflare Preview serves the exact CI build: application JS `/assets/index-BYUFEqLt.js`, CSS `/assets/index-DqGuvou2.css`, two-asset manifest, exact HTML shell with `Cache-Control: no-store`, and Service Worker SHA-256 `34ed605f5d9d19737554c3d11578425e74d40daf26f52f9e0f2547cf28d3c834`.
+- The app fingerprints its compiled JavaScript/CSS when registering the Service Worker. A new compiled shell therefore changes the registered script URL and triggers the worker update lifecycle. No local cache, IndexedDB, localStorage or encrypted vault data is cleared.
+- Inbox orders by `created_at` (when a capture entered Inbox) instead of the original recording timestamp; voice rows preserve and display both timestamps.
+- Owner confirmed that two new locally transcribed captures now appear in Inbox. Read-only DEV audit: 2 of 5 private audio assets are `transcribed`; each is linked to one `voice` capture and one source part, with `sync_status=synced` and `attention_status=needs_review`. The other three assets remain `uploaded`. No audio object bytes were read, listened to or changed.
+
+### ARIA relationship and remaining model-classification gate
+
+- Phase 2 is the universal Inbox; the ARIA Planner that schedules/replans a person's day is Phase 3. This follows the product contract and is not a Phase 2 exit criterion.
+- Model-backed Inbox classification remains a distinct Phase 2 gate. The deployed processor is still `inbox-rules-v1`, a deterministic heuristic and **not** an AI model.
+- Current ARIA DEV/LIVE registry has 26 capability rows and every row is `text_generation` (16 verified, 10 unknown); there is no `speech_to_text` capability. Voice transcription does not depend on that missing route because Whisper.cpp runs locally.
+- ARIA's deployed runtime/agent code keeps `MISSION_EXECUTION_PAUSED=true`; autonomy cron jobs 48/49/50 are disabled and the read-only DB audit found zero running missions. Gemini usage counters exist, but numeric quota ceilings/reset windows are unknown; the OpenRouter quota snapshot is dated 7 November and is stale for a current remaining-capacity claim.
+- ARIA safety PRs #1474, #1475, #1476, #1478 and #1479 are still OPEN/DRAFT/not merged. The LIVE ARIA project does not yet contain the mission-budget policy/reservation tables from #1478. Their CI successes do not mean the budget guard is deployed.
+- Therefore no model-backed classification request is enabled. Do not unfreeze ARIA, call a remote model, route private Inbox text externally, or activate a fallback until the circuit-breaker, quota-observability, unknown-capacity deny and mission-budget guard are merged/deployed in a reviewed order with an approved free-only budget policy.
+
+### Release boundary and exact open gates
+
+- PR #97 remains OPEN / DRAFT / NOT MERGED. No production deploy or production migration has been performed.
+- The owner reports one final manual refresh was still needed when first opening the new Preview after this rollout. Automated CI verifies the exact Preview and clean cold launch, but another owner navigation without manual refresh has not yet been independently confirmed. Do not delete site data or the offline vault to force an update.
+- Local Whisper capture/save is owner-accepted in Preview; Android-specific local transcription on a physical phone has not been separately identified/accepted.
+- Model-backed classification remains OPEN. The Phase 2 classification implementation is still heuristic. Phase 2 must not be labelled 100% while the approved product requirement for model-assisted classification is left unresolved, unless the owner explicitly accepts deterministic-only classification as the final Phase 2 scope.
+- ARIA Planner remains Phase 3, not part of this Inbox release.
+

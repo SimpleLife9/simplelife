@@ -1,6 +1,6 @@
 # Phase 2 — Owner Acceptance (Desktop + Physical Android)
 
-**Authoritative status (updated 25 Nov 2026 AST; CI timestamp 26 Nov UTC):** Current code HEAD is `1f871e9a16c3723aa7f0f694f337ba45a858a1f9`; CI #914 [SUCCESS](https://github.com/SimpleLife9/simplelife/actions/runs/45731058715), exact SHA, 49/49 required steps PASS, one conditional failure-artifact upload SKIPPED as expected, zero failed steps. This validates the local migrations/SQL suites, Deno, Edge Runtime, PWA offline cold-start and exact Cloudflare branch Preview restart. It does **not** close owner physical acceptance or authorize an STT provider. Section 19 supersedes older physical acceptance claims where they conflict: PC functional offline save/retry and Android physical mic/control checks remain OPEN. Android recovery-key renewal, offline cold-reopen and actual restore with the replacement key are owner-confirmed PASS (25 Nov 2026 AST). Direct ARIA read-only audit finds 26 capability records, all `text_generation`, and no approved `speech_to_text` route. Four DEV private audio assets remain `uploaded`, untranscribed, with original TTL ending 2 Dec 2026 UTC. PR #97 remains OPEN / DRAFT / NOT MERGED; CI Preview only, no production deployment.
+**Authoritative status (updated 27 Nov 2026 AST):** Current PR #97 HEAD is `8430ea182e73a633ac44c52b0b9a0d2d881d4e1f`; CI #1017 [SUCCESS](https://github.com/SimpleLife9/simplelife/actions/runs/45996562112), 51/51 steps, with 205/205 unit tests, 59 browser/mobile tests and 8/8 Preview PWA cold-launch tests. Cloudflare Preview HTML, JS/CSS, manifest and Service Worker match the exact build. Owner confirmed that two locally transcribed voice captures appear in Inbox. Read-only DEV audit: 2/5 private voice assets are transcribed and linked to one capture and one source part each; the other 3 remain uploaded. Android offline/recovery, microphone/private-upload/navigation, PC offline write/sync and deliberate interrupted-sync retry are owner-confirmed PASS in Sections 19–27. PR #97 remains OPEN / DRAFT / NOT MERGED; Preview only; no production deployment. **Phase 2 is not yet 100%:** model-backed Inbox classification remains open because the active processor is deterministic/heuristic, while ARIA's safe mission-budget guard is not yet deployed. ARIA Planner itself belongs to Phase 3.
 **Target:** SimpleLife DEV deployment from the final exact PR #97 SHA.
 **Required evidence:** final deployed SHA, desktop browser/version, Android model + Android version + browser/PWA mode, date, and owner PASS/FAIL for each section.
 
@@ -27,7 +27,7 @@ Perform on the owner's actual Android phone, not a desktop emulator.
 - [ ] Sign in and grant microphone permission only when prompted.
 - [ ] Record a short voice sample, stop it, and confirm it appears as a private audio asset.
 - [ ] Confirm the voice object is in the private bucket and another test account cannot list, read or download it.
-- [ ] Confirm the app does not claim that audio was transcribed while no approved transcription provider is configured.
+- [ ] On the physical Android phone, select one private recording and verify Whisper.cpp transcribes it locally, the owner can review/edit and explicitly save the text as an Inbox capture, and the original private audio remains linked and unchanged. (Preview owner acceptance exists; physical-Android-specific local transcription is still unverified.)
 - [ ] Create/unlock the offline vault and save a text capture.
 - [ ] Enable airplane mode. Confirm the new capture remains encrypted in local storage and the queue remains visible only while the vault is unlocked.
 - [ ] Force-close and reopen the PWA in airplane mode. Unlock with the passphrase and verify the capture is still present.
@@ -57,7 +57,8 @@ Deployment order: apply the ordered Inbox migrations, deploy the queue/worker/pr
 
 ## 4. Explicit limitations requiring owner/provider approval
 
-- **Model routing:** the owner authorized Cloudflare Workers AI as a fallback, but prefers to use ARIA's canonical Model Routing after its planned recovery on 26 November. Do not call either provider or send capture/audio content externally before that integration is reviewed and approved for the exact model, region, retention terms and free-only quota.
+- **Transcription:** Whisper.cpp now runs locally in the browser and does not send private audio to an external provider. The owner confirms two locally produced transcripts are saved and visible in Inbox. Physical Android local-transcription acceptance remains a separate checkbox above.
+- **Model-backed classification:** still OPEN. ARIA's text-generation registry is not a verified audio/STT route, and the current Inbox classifier remains deterministic. Do not send private Inbox text externally before ARIA's safety PRs, current quota/capacity evidence, exact model and data-handling controls are deployed and reviewed. No paid usage is authorized.
 - **Voice recording:** private audio capture/storage is implemented in DEV; transcription remains disabled until the provider route above is integrated and verified.
 - The offline vault recovers with its one-time 256-bit recovery key. If the owner loses both the passphrase and the recovery key, the locally encrypted queue is unrecoverable by design.
 - This DEV acceptance does not certify production deployment or production data migration.
@@ -391,4 +392,29 @@ Keep the transcription worker disabled/fail-closed. The five private originals r
 - **PC physical offline acceptance is now PASS** for: vault prepared/unlocked online, encrypted capture saved while offline, normal reconnect/sync, and deliberate interrupted-sync retry without duplicates. The separate automated ambiguous-response regression is also covered by CI #922 at exact SHA `cdbc1f879fa726d11702d54b0c8a9afcfcc1a5b3`.
 - CI #923 is **SUCCESS** at exact SHA `392359c69dded7469beec9c98c5bc395d748088f` (49 required steps passed; the conditional failure-artifact upload was skipped as expected). The documentation update in this section will trigger a new exact-SHA CI run; do not treat #923 as testing this new documentation commit.
 - No production deployment, merge, hosted Supabase migration/data/secret change, paid billing, or speech-provider request is implied. The speech-to-text provider gate remains OPEN and fail-closed; the five private originals remain private and pending.
+
+
+
+## 28. Local Whisper transcription saved as Inbox captures — owner-confirmed PASS (27 November 2026 AST)
+
+- The owner confirmed that the two new locally transcribed captures appear in Inbox after opening the updated branch Preview.
+- Exact code HEAD: `8430ea182e73a633ac44c52b0b9a0d2d881d4e1f`; CI #1017 SUCCESS on that exact SHA. Unit 205/205; browser/mobile 59/59; Preview cold-launch 8/8 after full browser restart.
+- The implementation downloads only the owner-selected private audio asset to the browser, verifies its expected SHA-256, runs the pinned Whisper.cpp WASM model on-device and never sends audio bytes to an external STT provider. Saving requires the owner's explicit action and uses `public.record_inbox_voice_transcription_local` in DEV.
+- Read-only DEV verification found exactly two transcribed assets, each linked to a `voice` capture and one source `capture_part`; both captures are synced and remain `needs_review`. Three other assets remain `uploaded`. The original private objects were not read or modified by this audit.
+- The transcript-save UI acceptance is PASS in the owner-opened Preview. The owner did not identify the device used for these two saves; therefore this does not close the physical-Android-specific checkbox in Section 2.
+
+## 29. ARIA model-routing safety gate — code recovered; runtime still frozen (27 November 2026 UTC)
+
+- ARIA Supabase project is ACTIVE_HEALTHY. Its current `capability_matrix` contains 26 `text_generation` rows (16 verified, 10 unknown) and no `speech_to_text` capability.
+- The Google Gemini account's recorded usage is 124 requests / 57,914 tokens, but numeric request/token ceilings and the usage reset window are unknown. The OpenRouter free-quota observation is dated 7 November 2026 and cannot establish current remaining quota. Do not treat an old 50-request snapshot as current capacity.
+- Deployed ARIA runtime-gateway, agent-runtime and execution-runtime source still has `MISSION_EXECUTION_PAUSED=true`. Cron jobs 48, 49 and 50 are disabled; the read-only mission-state audit found zero running missions.
+- Safety PRs remain OPEN/DRAFT/not merged: [#1474 circuit breaker](https://github.com/Robvg9/aria-worker/pull/1474), [#1475 provider quota observability](https://github.com/Robvg9/aria-worker/pull/1475), [#1476 unknown-capacity route blocking](https://github.com/Robvg9/aria-worker/pull/1476), [#1478 mission budget ledger](https://github.com/Robvg9/aria-worker/pull/1478), [#1479 runtime budget enforcement](https://github.com/Robvg9/aria-worker/pull/1479). Their CI jobs have passed, but #1478's budget tables do not exist in the ARIA LIVE database and #1479's guards are not live.
+- No provider request, mission, cron, migration, secret change or deployment was performed in this audit. Keep the global freeze and crons disabled until all safety gates are reviewed, merged and deployed with an owner-approved free-only request budget.
+
+## 30. Phase 2 closeout decision — still OPEN
+
+- **PASS:** text/voice capture foundation, private audio lifecycle, local Whisper transcription/save in Preview, Inbox review/organization/provenance, search/deduplication/trash, idempotent processing/scheduler in DEV, encrypted offline vault and owner-confirmed Android/PC offline flows, including PC interrupted retry.
+- **OPEN:** model-backed Inbox classification through an approved and budget-governed ARIA route; physical Android local-Whisper acceptance; and final owner re-open of Preview without another manual refresh after the latest build transition.
+- The ARIA Planner (daily prioritization/replanning) is Phase 3 and is not a Phase 2 blocker.
+- Do not mark Phase 2 100% or begin Phase 3 until the remaining open items are either implemented and evidenced or explicitly accepted by the owner as scope deferrals. No merge/production release is implied by this checkpoint.
 
