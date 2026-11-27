@@ -136,6 +136,11 @@ export default {
     if (isSttVendorAsset) {
       headers.set("Content-Type", "text/javascript; charset=utf-8");
       headers.set("X-Content-Type-Options", "nosniff");
+      // A module Worker created by the cross-origin-isolated lab must opt in
+      // to COEP itself; otherwise Chromium blocks its initialization with
+      // net::ERR_BLOCKED_BY_RESPONSE before the WASM pthread can start.
+      headers.set("Cross-Origin-Embedder-Policy", "credentialless");
+      headers.set("Cross-Origin-Resource-Policy", "same-origin");
     }
 
     // The isolated STT lab can be opened directly or precached by the service
