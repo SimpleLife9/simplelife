@@ -4679,7 +4679,7 @@ test('Inbox shows one local transcription action per saved private recording wit
     object_path: profile.id + '/019b7000-0000-7000-8000-000000000602/source.webm',
     created_at: '2026-11-26T17:00:00.000Z',
   };
-  const { voiceAssets, uploadedVoiceObjects, voiceFinalizeRequests, audioDownloadRequests } =
+  const { voiceAssets, uploadedVoiceObjects, voiceFinalizeRequests, audioDownloadRequests, queueRequests } =
     await mockSupabaseSession(page, { voiceAssets: [audioOne, audioTwo] });
   await page.goto('/');
   await page.getByLabel('Correo electrónico').fill(authUser.email);
