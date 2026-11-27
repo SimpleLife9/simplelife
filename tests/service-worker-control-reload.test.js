@@ -20,7 +20,7 @@ function makeServiceWorkerContainer(initialController = null) {
   };
 }
 
-test('reloads when a new Service Worker takes control after an initially uncontrolled page load', () => {
+test('does not force a reload when the first Service Worker claims an unowned page', () => {
   const serviceWorker = makeServiceWorkerContainer(null);
   let reloads = 0;
   reloadOnServiceWorkerControllerChange(serviceWorker, { reload: () => { reloads += 1; } });
@@ -29,7 +29,7 @@ test('reloads when a new Service Worker takes control after an initially uncontr
   serviceWorker.emit('controllerchange');
   serviceWorker.emit('controllerchange');
 
-  assert.equal(reloads, 1);
+  assert.equal(reloads, 0);
 });
 
 test('reloads once when an updated Service Worker replaces the existing controller', () => {
