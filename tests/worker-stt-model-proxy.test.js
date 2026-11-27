@@ -158,6 +158,36 @@ test('Worker marks mutable STT lab HTML and JavaScript as no-store', async () =>
 });
 
 
+test('Worker serves the pinned Whisper WASM runtime as immutable same-origin JavaScript', async () => {
+  const expectedPaths = [
+    '/vendor/whisper-wasm/0.1.1/index.es.js',
+    '/vendor/whisper-wasm/0.1.1/libmain-D9-QM3iM.mjs',
+  ];
+  for (const path of expectedPaths) {
+    let requestedPath;
+    const response = await worker.fetch(
+      new Request(ORIGIN + path),
+      {
+        ASSETS: {
+          fetch: async (request) => {
+            requestedPath = new URL(request.url).pathname;
+            return new Response('/* pinned same-origin runtime asset */', {
+              status: 200,
+              headers: { 'content-type': 'application/octet-stream' },
+            });
+          },
+        },
+      },
+    );
+    assert.equal(requestedPath, path);
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('cache-control'), /max-age=31536000/);
+    assert.match(response.headers.get('cache-control'), /immutable/);
+    assert.match(response.headers.get('content-type'), /javascript/);
+    assert.match(await response.text(), /pinned same-origin runtime asset/);
+  }
+});
+
 test('Worker app navigation documents are no-store so existing PWAs can discover updates', async () => {
   const response = await worker.fetch(
     new Request(ORIGIN + '/', {
