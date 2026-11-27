@@ -116,7 +116,10 @@ async function mockSupabaseSession(page, initialData = {}) {
       deleted_at: null,
     },
   ];
-  const captures = [...(initialData.captures || defaultCaptures)];
+  const captures = [...(initialData.captures || defaultCaptures)].map((capture) => ({
+    ...capture,
+    created_at: capture.created_at || capture.captured_at,
+  }));
   const updatedCaptures = [];
   const insertedCaptures = [];
   const insertedCaptureParts = [];
@@ -609,6 +612,25 @@ async function mockSupabaseSession(page, initialData = {}) {
           return words.every((word) => content.includes(word));
         });
       }
+      const orderColumns = (url.searchParams.get('order') || '')
+        .split(',').filter(Boolean).map((clause) => {
+          const [column, direction] = clause.split('.');
+          return { column, direction };
+        });
+      filtered.sort((left, right) => {
+        for (const { column, direction } of orderColumns) {
+          const leftValue = left[column];
+          const rightValue = right[column];
+          if (leftValue === rightValue) continue;
+          if (leftValue == null) return direction === 'desc' ? -1 : 1;
+          if (rightValue == null) return direction === 'desc' ? 1 : -1;
+          const comparison = typeof leftValue === 'number' && typeof rightValue === 'number'
+            ? leftValue - rightValue
+            : String(leftValue).localeCompare(String(rightValue));
+          if (comparison !== 0) return direction === 'desc' ? -comparison : comparison;
+        }
+        return 0;
+      });
       const pageRows = filtered.slice(start, end + 1);
       await json(200, pageRows, { 'content-range': pageRows.length ? `${start}-${start + pageRows.length - 1}/${filtered.length}` : `*/${filtered.length}`, 'accept-ranges': 'items' });
       return;
@@ -623,6 +645,7 @@ async function mockSupabaseSession(page, initialData = {}) {
         processing_status: row.processing_status || 'not_started',
         sync_status: row.sync_status || 'synced',
         captured_at: row.captured_at || new Date().toISOString(),
+        created_at: row.created_at || new Date().toISOString(),
         deleted_at: null,
       }));
       captures.unshift(...created);
@@ -1354,6 +1377,53 @@ test('mock-authenticated task creation uses the signed-in profile and Havana tim
   await expect(mobileEditor).toBeHidden();
 });
 
+
+
+test('Inbox orders newly saved voice transcripts by Inbox creation time and preserves original recording time', async ({ page }) => {
+  const previousCapture = {
+    id: '00000000-0000-7000-8000-000000000711',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    input_type: 'text',
+    content_original: 'Captura anterior del Inbox',
+    attention_status: 'needs_review',
+    processing_status: 'not_started',
+    sync_status: 'synced',
+    captured_at: '2026-11-26T10:00:00.000Z',
+    created_at: '2026-11-26T10:00:00.000Z',
+    deleted_at: null,
+  };
+  const recentlySavedTranscript = {
+    id: '00000000-0000-7000-8000-000000000712',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    input_type: 'voice',
+    content_original: 'Transcripción local ya guardada',
+    attention_status: 'needs_review',
+    processing_status: 'not_started',
+    sync_status: 'synced',
+    captured_at: '2026-11-25T02:13:15.000Z',
+    created_at: '2026-11-27T11:59:01.000Z',
+    deleted_at: null,
+  };
+  await mockSupabaseSession(page, {
+    captures: [previousCapture, recentlySavedTranscript],
+  });
+
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  await expect(page.getByRole('heading', { name: 'Añadido a Inbox recientemente' })).toBeVisible();
+  const captureRows = page.locator('.capture-row');
+  await expect(captureRows).toHaveCount(2);
+  await expect(captureRows.nth(0)).toContainText('Transcripción local ya guardada');
+  await expect(captureRows.nth(0)).toContainText('Grabado');
+  await expect(captureRows.nth(0)).toContainText('añadido');
+  await expect(captureRows.nth(1)).toContainText('Captura anterior del Inbox');
+});
 
 test('Inbox supports search, review states, archiving, restore and original capture preservation', async ({ page }) => {
   const { captures, updatedCaptures, insertedCaptures, insertedCaptureParts } = await mockSupabaseSession(page);

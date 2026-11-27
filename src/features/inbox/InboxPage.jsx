@@ -13,6 +13,12 @@ import { getOfflineVaultUserMessage } from './offline/offline-vault-errors.js';
 import { CapturePartPersistenceError, persistTextCapture } from './data/capture-repository.js';
 import { getSuggestedDestinationType, isInboxDestinationReady } from './domain/capture-pipeline.js';
 
+function formatCaptureTimestamp(value) {
+  return new Intl.DateTimeFormat('es', {
+    dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Havana',
+  }).format(new Date(value));
+}
+
 function normalizeCaptureForDuplicate(value) {
   return String(value || "").normalize("NFKC").toLocaleLowerCase("es")
     .replace(/[^\p{L}\p{N}]+/gu, " ").trim().replace(/\s+/g, " ");
@@ -294,7 +300,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
 
   const buildCaptureQuery = (offset) => {
     let query = supabase.from('capture').select('*', { count: 'exact' })
-      .order('captured_at', { ascending: false }).order('id', { ascending: false })
+      .order('created_at', { ascending: false }).order('id', { ascending: false })
       .range(offset, offset + 99);
     if (attentionFilter === 'trash') query = query.not('deleted_at', 'is', null);
     else query = query.is('deleted_at', null);
@@ -950,7 +956,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
       </section>
     )}
     <div className="inbox-list-wrap">
-      <SectionTitle detail={visibleCaptures.length + ' visibles · ' + rows.length + ' cargadas de ' + totalCount + ' coincidencias en el archivo'}>Capturado recientemente</SectionTitle>
+      <SectionTitle detail={visibleCaptures.length + ' visibles · ' + rows.length + ' cargadas de ' + totalCount + ' coincidencias en el archivo'}>Añadido a Inbox recientemente</SectionTitle>
       {captureRecoveryError && <div className="form-error" role="alert">{captureRecoveryError}</div>}
       <div className="capture-toolbar" aria-label="Buscar y revisar capturas">
         <label className="capture-toolbar-field capture-search-field">
@@ -988,7 +994,9 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
             <span className="capture-bullet">{confirmedLink ? '✓' : '✳'}</span>
             <div className="capture-row-content">
               <p>{capture.content_original}</p>
-              <small>{new Intl.DateTimeFormat('es', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Havana' }).format(new Date(capture.captured_at))}</small>
+              <small>{capture.input_type === 'voice'
+                ? 'Grabado ' + formatCaptureTimestamp(capture.captured_at) + ' · añadido ' + formatCaptureTimestamp(capture.created_at)
+                : formatCaptureTimestamp(capture.captured_at)}</small>
               {possibleDuplicate && <span className="capture-status capture-status-archived">Posible duplicado normalizado · revisar antes de combinar</span>}
               {parts.map((capturePart) => {
                 const proposal = proposals.find((item) => item.partIndex === capturePart.part_index) || proposals[capturePart.part_index];

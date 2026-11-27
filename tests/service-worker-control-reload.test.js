@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { reloadOnServiceWorkerControllerChange } from '../src/lib/reload-on-service-worker-control.js';
+import { createServiceWorkerScriptUrl, getAppShellBuildIdentity } from '../src/lib/service-worker-registration.js';
 
 function makeServiceWorkerContainer(initialController = null) {
   const listeners = new Map();
@@ -57,4 +58,40 @@ test('does not reload when the controller is removed or remains unchanged', () =
   serviceWorker.emit('controllerchange');
 
   assert.equal(reloads, 0);
+});
+
+
+test('build identity changes the Service Worker URL when a compiled JS or CSS asset changes', () => {
+  const makeDocument = (scriptSource, stylesheetSource) => ({
+    querySelector(selector) {
+      assert.equal(selector, 'script[type="module"][src]');
+      return { getAttribute: () => scriptSource };
+    },
+    querySelectorAll(selector) {
+      assert.equal(selector, 'link[rel="stylesheet"][href]');
+      return [{ getAttribute: () => stylesheetSource }];
+    },
+  });
+
+  const firstIdentity = getAppShellBuildIdentity(
+    makeDocument('/assets/index-old.js', '/assets/index-old.css'),
+  );
+  const nextIdentity = getAppShellBuildIdentity(
+    makeDocument('/assets/index-new.js', '/assets/index-old.css'),
+  );
+  const cssIdentity = getAppShellBuildIdentity(
+    makeDocument('/assets/index-old.js', '/assets/index-new.css'),
+  );
+
+  assert.notEqual(firstIdentity, nextIdentity);
+  assert.notEqual(firstIdentity, cssIdentity);
+  const firstUrl = new URL(createServiceWorkerScriptUrl('https://simplelife.test', firstIdentity));
+  const nextUrl = new URL(createServiceWorkerScriptUrl('https://simplelife.test', nextIdentity));
+  assert.equal(firstUrl.pathname, '/sw.js');
+  assert.equal(firstUrl.searchParams.get('build'), firstIdentity);
+  assert.notEqual(firstUrl.href, nextUrl.href);
+});
+
+test('keeps a plain same-origin Service Worker URL when no build identity is available', () => {
+  assert.equal(createServiceWorkerScriptUrl('https://simplelife.test', ''), 'https://simplelife.test/sw.js');
 });
