@@ -4581,6 +4581,49 @@ test('Inbox safely verifies a saved private recording and exposes its local tran
   expect(uploadedVoiceObjects).toHaveLength(0);
 });
 
+test('Inbox exposes one local transcription action per already-uploaded private recording without downloading it', async ({ page }) => {
+  const retentionUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  const firstAsset = {
+    id: '019b7200-0000-7000-8000-000000000601',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    capture_id: null,
+    bucket_id: 'inbox-voice-private',
+    object_path: profile.id + '/019b7200-0000-7000-8000-000000000601/source.webm',
+    mime_type: 'audio/webm',
+    file_size_bytes: 128,
+    sha256_hex: 'b'.repeat(64),
+    status: 'uploaded',
+    uploaded_at: new Date().toISOString(),
+    retention_until: retentionUntil,
+    created_at: new Date().toISOString(),
+  };
+  const secondAsset = {
+    ...firstAsset,
+    id: '019b7200-0000-7000-8000-000000000602',
+    object_path: profile.id + '/019b7200-0000-7000-8000-000000000602/source.webm',
+  };
+  const { voiceAssets, audioDownloadRequests } = await mockSupabaseSession(page, {
+    voiceAssets: [secondAsset, firstAsset],
+  });
+
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  const pending = page.getByRole('region', { name: 'Audios privados pendientes' });
+  await expect(pending).toContainText('listo para transcribir localmente');
+  const buttons = pending.getByRole('button', { name: 'Transcribir localmente' });
+  await expect(buttons).toHaveCount(2);
+  await expect(buttons.nth(0)).toBeEnabled();
+  await expect(buttons.nth(1)).toBeEnabled();
+
+  expect(voiceAssets.every((asset) => asset.status === 'uploaded')).toBe(true);
+  expect(audioDownloadRequests).toHaveLength(0);
+});
+
 test('mobile voice capture uploads a private original and offers local transcription in Inbox', async ({ page }) => {
   await page.addInitScript(() => {
     const track = { stop: () => { window.__voiceMicrophoneTrackStopped = true; } };

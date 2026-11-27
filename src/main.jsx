@@ -1,21 +1,13 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.jsx';
+import { reloadOnServiceWorkerControllerChange } from './lib/reload-on-service-worker-control.js';
 import './styles.css';
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
-  // If an already-installed PWA receives a newer worker while this document
-  // is open, reload once under the new controller. Fresh installs already
-  // fetched the current hashed bundle and do not need an extra reload.
-  const controllerAtStartup = navigator.serviceWorker.controller;
-  if (controllerAtStartup) {
-    let reloadingForControllerChange = false;
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (reloadingForControllerChange) return;
-      reloadingForControllerChange = true;
-      window.location.reload();
-    });
-  }
+  // Listen even when the page initially has no controller. A first-time
+  // activation can otherwise claim this tab after React loaded the old shell.
+  reloadOnServiceWorkerControllerChange(navigator.serviceWorker, window.location);
 
   // Register immediately instead of waiting for window.load. Then explicitly
   // check the script on every app launch: browsers may otherwise throttle

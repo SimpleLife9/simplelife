@@ -300,11 +300,42 @@ jobs:
                   } else if (coop.toLowerCase() !== 'same-origin' || coep.toLowerCase() !== 'credentialless') {
                     lastIssue = `Preview Whisper isolation headers are missing or incorrect: COOP=${coop || 'missing'}, COEP=${coep || 'missing'}`;
                   } else {
-                    console.log(`Preview serves the exact production asset manifest (${actual.assets.length} assets).`);
-                    console.log(`Preview serves the exact production Service Worker (sha256 ${actualServiceWorkerHash}).`);
-                    console.log(`Preview app document cache policy verified (${documentCacheControl}).`);
-                    console.log(`Preview isolation headers verified (COOP ${coop}; COEP ${coep}).`);
-                    process.exit(0);
+                    const expectedDocument = await readFile('dist/index.html', 'utf8');
+                    const actualDocument = await documentResponse.text();
+                    if (actualDocument !== expectedDocument) {
+                      lastIssue = 'Preview app document HTML does not exactly match the current CI build.';
+                    } else {
+                      // Verify the actual Inbox application bundle, not only
+                      // the manifest and Service Worker. A stale root document
+                      // or hashed JS/CSS bundle must never pass this gate.
+                      const appAssetPaths = [...expectedDocument.matchAll(/(?:src|href)="(\\/assets\\/[^"]+\\.(?:js|css))"/g)]
+                        .map((match) => match[1]);
+                      if (!appAssetPaths.some((path) => path.endsWith('.js'))) {
+                        throw new Error('The CI app document does not reference an application JavaScript bundle.');
+                      }
+                      for (const path of [...new Set(appAssetPaths)]) {
+                        const assetUrl = new URL(path, process.env.PWA_PREVIEW_URL);
+                        assetUrl.searchParams.set('ci_check', String(Date.now()));
+                        const assetResponse = await fetch(assetUrl, {
+                          cache: 'no-store',
+                          signal: AbortSignal.timeout(15_000),
+                        });
+                        if (!assetResponse.ok) {
+                          throw new Error('Preview application bundle ' + path + ' returned HTTP ' + assetResponse.status);
+                        }
+                        const actualAsset = await assetResponse.text();
+                        const expectedAsset = await readFile('dist' + path, 'utf8');
+                        if (actualAsset !== expectedAsset) {
+                          throw new Error('Preview application bundle does not exactly match the current CI build: ' + path);
+                        }
+                        console.log('Preview serves the exact current application bundle: ' + path);
+                      }
+                      console.log('Preview serves the exact production asset manifest (' + actual.assets.length + ' assets).');
+                      console.log('Preview serves the exact production Service Worker (sha256 ' + actualServiceWorkerHash + ').');
+                      console.log('Preview app document HTML matches dist/index.html byte-for-byte (' + documentCacheControl + ').');
+                      console.log('Preview isolation headers verified (COOP ' + coop + '; COEP ' + coep + ').');
+                      process.exit(0);
+                    }
                   }
                 } else {
                   lastIssue = 'Preview Service Worker is stale; its content hash does not match dist/sw.js.';
