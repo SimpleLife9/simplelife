@@ -305,7 +305,33 @@ test('PWA shell v13 replaces v12 cached application and same-origin STT runtime 
       );
     });
 
+    // The first Service Worker now deliberately reloads a page that it claims
+    // for the first time. Observe that automatic reload before inspecting the
+    // new document's Cache Storage, otherwise page.evaluate can race the
+    // navigation and lose its execution context.
+    const firstControllerReload = new Promise((resolve, reject) => {
+      const onLoad = async () => {
+        try {
+          const navigationType = await page.evaluate(
+            () => performance.getEntriesByType('navigation')[0]?.type || '',
+          );
+          if (navigationType === 'reload') {
+            page.off('load', onLoad);
+            resolve();
+          }
+        } catch {
+          // The initial document may be navigating while the reload starts.
+        }
+      };
+      page.on('load', onLoad);
+      setTimeout(() => {
+        page.off('load', onLoad);
+        reject(new Error('The first Service Worker controller did not trigger its one-time automatic reload.'));
+      }, 20_000);
+    });
+
     await page.goto(appURL, { waitUntil: 'load' });
+    await firstControllerReload;
     await page.waitForFunction(
       () => Boolean(navigator.serviceWorker.controller),
       null,
