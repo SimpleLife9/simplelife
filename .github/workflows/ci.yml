@@ -131,6 +131,9 @@ jobs:
       - name: Test durable Inbox voice transcription queue in ephemeral local Postgres
         run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/inbox-voice-transcription-queue.test.sql
 
+      - name: Test owner-scoped local Inbox voice transcript persistence in ephemeral local Postgres
+        run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/inbox-voice-local-transcription.test.sql
+
       - name: Test Inbox server-verified voice digest RPC privileges in ephemeral local Postgres
         run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/inbox-voice-server-digest.test.sql
 

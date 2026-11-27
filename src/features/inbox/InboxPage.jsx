@@ -567,6 +567,14 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
     if (processed.data?.status === 'not_claimable') throw new Error('El trabajo sigue en cola; vuelve a intentarlo.');
   };
 
+  const handleLocalVoiceCaptureSaved = async (captureId) => {
+    try {
+      await queueAndProcess(captureId);
+    } catch (failure) {
+      setCaptureRecoveryError('La transcripción ya está guardada en Inbox; no la repitas. Falló la preparación de sugerencias y puedes reintentarla desde la captura: ' + (failure?.message || 'servicio no disponible'));
+    }
+  };
+
   const processCapture = (capture) => {
     setProcessingErrorsByCapture((current) => {
       const next = { ...current };
@@ -917,13 +925,12 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
       onOfflineUnavailable={() => setOfflineVaultError('No hay conexión. Para guardar sin conexión, crea o desbloquea la bóveda privada primero.')}
     />
     <VoiceCapture profile={profile} busy={busy || offlineVaultBusy || profile?.offlineOnly === true} runAction={runAction} />
-    <LocalVoiceTranscriptionPanel busy={busy || offlineVaultBusy || profile?.offlineOnly === true} />
     {voiceAssets.filter((asset) => !asset.capture_id).length > 0 && (
       <section className="voice-asset-list" aria-label="Audios privados pendientes">
-        <strong>Audios privados pendientes</strong>
+        <strong>Audios privados pendientes · cada grabación se transcribe por separado</strong>
         {voiceAssets.filter((asset) => !asset.capture_id).map((asset) => (
-          <div className="voice-asset-row" key={asset.id}>
-            <span>Audio original · {asset.status === 'uploaded' ? 'esperando transcripción' : asset.status === 'failed' ? 'falló la preparación' : asset.status === 'uploading' ? 'verificación pendiente' : 'estado no disponible'}</span>
+          <div className="voice-asset-row" key={asset.id} data-testid={'private-voice-asset-' + asset.id}>
+            <span>Audio original · {asset.status === 'uploaded' ? 'listo para transcribir localmente' : asset.status === 'failed' ? 'falló la preparación' : asset.status === 'uploading' ? 'verificación pendiente' : 'estado no disponible'}</span>
             {asset.status === 'uploading' && (
               <div className="voice-asset-retry">
                 <small>Si la carga terminó pero se interrumpió la confirmación, puedes verificar el archivo existente sin volver a grabarlo ni subirlo.</small>
@@ -936,6 +943,15 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
                   {busy ? 'Verificando…' : 'Reintentar verificación'}
                 </button>
               </div>
+            )}
+            {asset.status === 'uploaded' && (
+              <LocalVoiceTranscriptionPanel
+                asset={asset}
+                profile={profile}
+                busy={busy || offlineVaultBusy || profile?.offlineOnly === true}
+                runAction={runAction}
+                onSaved={handleLocalVoiceCaptureSaved}
+              />
             )}
             {asset.retention_until && <small>Retención temporal hasta {new Intl.DateTimeFormat('es', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(asset.retention_until))}</small>}
           </div>
@@ -1060,7 +1076,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
       </div>}
       {duplicateCheckError && <p className="form-error" role="status">{duplicateCheckError}</p>}
     </div>
-    <div className="honest-note"><span>ⓘ</span><p>Las sugerencias actuales se generan con reglas locales deterministas (no con un modelo de IA) y son orientativas. Cada fragmento conserva el texto original; ningún destino se crea sin tu confirmación. Las grabaciones de voz se guardan en almacenamiento privado asociado a tu cuenta, pero todavía no se transcriben ni se envían a un modelo. El modo sin conexión cifra las capturas en este dispositivo; guarda tu clave de recuperación fuera del dispositivo y desbloquea la bóveda para consultar o sincronizar la cola al reconectar.</p></div>
+    <div className="honest-note"><span>ⓘ</span><p>Las sugerencias actuales se generan con reglas locales deterministas (no con un modelo de IA) y son orientativas. Cada fragmento conserva el texto original; ningún destino se crea sin tu confirmación. Las grabaciones de voz se conservan en almacenamiento privado. Solo se descarga el audio que eliges transcribir; la huella SHA-256 se verifica y Whisper se ejecuta en este dispositivo. Puedes corregir el texto antes de guardarlo como captura. El archivo original nunca se modifica ni se envía a un proveedor. Para recuperar el original privado necesitas conexión; el modo sin conexión cifra las capturas de texto en este dispositivo.</p></div>
 
     {selectedCapture && (
       <div className="task-editor-overlay capture-organizer-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) closeOrganizer(); }}>

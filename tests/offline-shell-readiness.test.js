@@ -75,21 +75,20 @@ test('the authenticated application shell does not mount the preparation banner 
   assert.doesNotMatch(authenticatedBranch, /<OfflinePreparationStatus\s*\/>/);
 });
 
-test('Inbox mounts a standalone local transcription panel outside the voice recorder', async () => {
-  const voice = await readFile(new URL('../src/features/inbox/components/VoiceCapture.jsx', import.meta.url), 'utf8');
+test('Inbox mounts a local transcription action inside each eligible private audio card', async () => {
   const inbox = await readFile(new URL('../src/features/inbox/InboxPage.jsx', import.meta.url), 'utf8');
   const panel = await readFile(new URL('../src/features/inbox/components/LocalVoiceTranscriptionPanel.jsx', import.meta.url), 'utf8');
+  const domain = await readFile(new URL('../src/features/inbox/domain/local-voice-transcription.js', import.meta.url), 'utf8');
   const styles = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
 
-  assert.match(inbox, /import\s*\{\s*VoiceCapture\s*\}\s*from\s*'\.\/components\/VoiceCapture\.jsx'/);
-  assert.match(inbox, /import\s*\{\s*LocalVoiceTranscriptionPanel\s*\}\s*from\s*'\.\/components\/LocalVoiceTranscriptionPanel\.jsx'/);
-  assert.match(inbox, /<VoiceCapture\b[\s\S]*?\/>\s*<LocalVoiceTranscriptionPanel\b/);
-  assert.doesNotMatch(voice, /Probar transcripción local en Inbox|Transcribir en este dispositivo/);
-  assert.match(panel, /Prueba de transcripción local/);
-  assert.match(panel, /Elegir audio de prueba/);
-  assert.match(panel, /Transcribir en este dispositivo/);
-  assert.match(panel, /getLocalVoiceTestFileError\(file\)/);
-  assert.match(panel, /transcribeLocalVoiceFile\(file/);
-  assert.match(panel, /data-testid="inbox-local-stt-panel"/);
-  assert.match(styles, /\.inbox-local-stt-panel\{/);
+  assert.ok(inbox.includes('<LocalVoiceTranscriptionPanel'));
+  assert.ok(inbox.includes('asset={asset}'));
+  assert.ok(inbox.includes('voiceAssets.filter((asset) => !asset.capture_id).map'));
+  assert.match(panel, /Transcribir localmente/);
+  assert.match(panel, /Guardar transcripción como captura/);
+  assert.ok(panel.includes("record_inbox_voice_transcription_local"));
+  assert.doesNotMatch(panel, /type="file"|Elegir audio de prueba/);
+  assert.ok(domain.includes(".download(expectedObjectPath)"));
+  assert.ok(domain.includes("sha256Hex(await blob.arrayBuffer())"));
+  assert.ok(styles.includes(".inbox-local-stt-panel{"));
 });

@@ -203,7 +203,7 @@ export function VoiceCapture({ profile, busy = false, runAction }) {
         const operation = async () => {
           try {
             const assetId = await savePrivateAudio(blob);
-            setNotice('Audio original guardado en almacenamiento privado. La transcripción permanece pendiente hasta configurar un proveedor aprobado.');
+            setNotice('Audio original guardado en privado. Puedes transcribirlo localmente desde su tarjeta en Inbox; el original no se modifica.');
             return assetId;
           } catch (failure) {
             throw new Error(getVoiceCaptureSaveErrorMessage(failure));

@@ -87,3 +87,113 @@ test("Inbox uses the same pinned whisper.cpp model revision and hash as the isol
   assert.equal(LOCAL_STT_MODEL.sha256, "818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7");
   assert.equal(LOCAL_STT_MODEL.modelUrl.startsWith("/__stt-whisper/"), true);
 });
+
+import { createHash } from "node:crypto";
+import { transcribeLocalVoiceAsset } from "../src/features/inbox/domain/local-voice-transcription.js";
+
+const PRIVATE_AUDIO_BYTES = Buffer.from("synthetic private Inbox voice bytes");
+const PRIVATE_AUDIO_SHA256 = createHash("sha256").update(PRIVATE_AUDIO_BYTES).digest("hex");
+
+function makePrivateVoiceAsset(overrides = {}) {
+  const ownerUserId = "019b7200-0000-7000-8000-000000000001";
+  const assetId = "019b7200-0000-7000-8000-000000000101";
+  return {
+    id: assetId,
+    owner_user_id: ownerUserId,
+    bucket_id: "inbox-voice-private",
+    object_path: ownerUserId + "/" + assetId + "/source.webm",
+    capture_id: null,
+    mime_type: "audio/webm",
+    file_size_bytes: PRIVATE_AUDIO_BYTES.byteLength,
+    sha256_hex: PRIVATE_AUDIO_SHA256,
+    status: "uploaded",
+    retention_until: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    created_at: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+function privateAudioClient(bytes = PRIVATE_AUDIO_BYTES, requests = []) {
+  return {
+    storage: {
+      from(bucket) {
+        assert.equal(bucket, "inbox-voice-private");
+        return {
+          async download(path) {
+            requests.push(path);
+            return { data: new Blob([bytes], { type: "audio/webm" }), error: null };
+          },
+        };
+      },
+    },
+  };
+}
+
+test("selected Inbox audio is owner-scoped, downloaded once, integrity-checked and passed to local Whisper", async () => {
+  const asset = makePrivateVoiceAsset();
+  const requests = [];
+  const statuses = [];
+  let localInferenceCalls = 0;
+  const result = await transcribeLocalVoiceAsset({
+    supabase: privateAudioClient(PRIVATE_AUDIO_BYTES, requests),
+    asset,
+    ownerUserId: asset.owner_user_id,
+    onStatus: (message) => statuses.push(message),
+    transcribeFile: async (file, options) => {
+      localInferenceCalls += 1;
+      assert.equal(file.name, "inbox-audio-" + asset.id + ".webm");
+      assert.equal(file.type, "audio/webm");
+      assert.deepEqual(Buffer.from(await file.arrayBuffer()), PRIVATE_AUDIO_BYTES);
+      options.onStatus("Whisper completó la inferencia local.");
+      return { text: "Comprar carne de cerdo y pavo.", durationSeconds: 3.5 };
+    },
+  });
+
+  assert.deepEqual(requests, [asset.object_path]);
+  assert.equal(localInferenceCalls, 1);
+  assert.deepEqual(result, { text: "Comprar carne de cerdo y pavo.", durationSeconds: 3.5 });
+  assert.ok(statuses.some((message) => message.includes("SHA-256")));
+});
+
+test("private audio metadata is rejected before Storage download when owner or lifecycle is invalid", async () => {
+  const asset = makePrivateVoiceAsset();
+  let downloads = 0;
+  const client = {
+    storage: {
+      from() {
+        return { async download() { downloads += 1; return { data: new Blob([PRIVATE_AUDIO_BYTES]), error: null }; } };
+      },
+    },
+  };
+  await assert.rejects(
+    transcribeLocalVoiceAsset({ supabase: client, asset, ownerUserId: "019b7200-0000-7000-8000-000000000099" }),
+    /no pertenece a la cuenta activa/,
+  );
+  await assert.rejects(
+    transcribeLocalVoiceAsset({ supabase: client, asset: makePrivateVoiceAsset({ status: "transcribed" }), ownerUserId: asset.owner_user_id }),
+    /ya no está pendiente/,
+  );
+  await assert.rejects(
+    transcribeLocalVoiceAsset({ supabase: client, asset: makePrivateVoiceAsset({ retention_until: new Date(Date.now() - 1000).toISOString() }), ownerUserId: asset.owner_user_id }),
+    /retención temporal.*venció/i,
+  );
+  assert.equal(downloads, 0);
+});
+
+test("SHA-256 mismatch blocks local inference and leaves the original source metadata untouched", async () => {
+  const asset = makePrivateVoiceAsset();
+  let inferenceCalls = 0;
+  const wrongBytes = Buffer.from("changed audio bytes");
+  await assert.rejects(
+    transcribeLocalVoiceAsset({
+      supabase: privateAudioClient(wrongBytes),
+      asset,
+      ownerUserId: asset.owner_user_id,
+      transcribeFile: async () => { inferenceCalls += 1; return { text: "no", durationSeconds: 1 }; },
+    }),
+    /SHA-256.*no coincide/,
+  );
+  assert.equal(inferenceCalls, 0);
+  assert.equal(asset.sha256_hex, PRIVATE_AUDIO_SHA256);
+  assert.equal(asset.status, "uploaded");
+});

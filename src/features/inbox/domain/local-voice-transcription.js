@@ -31,7 +31,7 @@ export function getLocalVoiceRuntimeCompatibilityError(environment = globalThis)
 }
 
 export function getLocalVoiceTestFileError(file) {
-  if (!file || typeof file !== "object") return "Selecciona un audio sintético o público para la prueba.";
+  if (!file || typeof file !== "object") return "No se recibió un archivo de audio válido."
   if (!Number.isFinite(file.size) || file.size < 1) return "El archivo de audio está vacío.";
   if (file.size > LOCAL_STT_MAX_AUDIO_BYTES) return "El audio supera el límite de 25 MiB.";
   const mimeType = String(file.type || "").split(";")[0].trim().toLowerCase();
@@ -185,3 +185,90 @@ export function createLocalVoiceTranscriber({
 }
 
 export const transcribeLocalVoiceFile = createLocalVoiceTranscriber();
+
+const VOICE_ASSET_EXTENSIONS = Object.freeze({
+  "audio/webm": "webm",
+  "audio/ogg": "ogg",
+  "audio/mp4": "m4a",
+  "audio/wav": "wav",
+  "audio/mpeg": "mp3",
+});
+
+let activeVoiceAssetTranscription = false;
+
+/** Download one explicitly selected private Inbox recording and verify it before local inference. */
+export async function transcribeLocalVoiceAsset({
+  supabase,
+  asset,
+  ownerUserId,
+  onStatus,
+  transcribeFile = transcribeLocalVoiceFile,
+  now = () => Date.now(),
+} = {}) {
+  if (activeVoiceAssetTranscription) {
+    throw new Error("Ya hay otra transcripción local en curso. Termina esa primero.");
+  }
+  activeVoiceAssetTranscription = true;
+  try {
+    if (!supabase?.storage?.from || typeof transcribeFile !== "function") {
+      throw new Error("No está disponible la conexión privada necesaria para recuperar este audio.");
+    }
+    if (!ownerUserId || !asset || asset.owner_user_id !== ownerUserId) {
+      throw new Error("Este audio no pertenece a la cuenta activa.");
+    }
+    if (asset.bucket_id !== "inbox-voice-private" || asset.capture_id != null
+      || asset.status !== "uploaded") {
+      throw new Error("Este audio ya no está pendiente o no está disponible para transcripción local.");
+    }
+
+    const mimeType = String(asset.mime_type || "").toLowerCase();
+    const extension = VOICE_ASSET_EXTENSIONS[mimeType];
+    if (!extension) throw new Error("El formato del audio guardado no es compatible con Whisper local.");
+
+    const expectedObjectPath = ownerUserId + "/" + asset.id + "/source." + extension;
+    if (asset.object_path !== expectedObjectPath) {
+      throw new Error("La ruta privada del audio no coincide con sus metadatos. No se descargó.");
+    }
+    if (!Number.isSafeInteger(asset.file_size_bytes) || asset.file_size_bytes < 1
+      || asset.file_size_bytes > LOCAL_STT_MAX_AUDIO_BYTES) {
+      throw new Error("El tamaño registrado del audio no es válido o supera 25 MiB.");
+    }
+    if (typeof asset.sha256_hex !== "string" || !/^[0-9a-f]{64}$/.test(asset.sha256_hex)) {
+      throw new Error("El audio no tiene una huella SHA-256 válida. No se descargó.");
+    }
+    const retention = Date.parse(asset.retention_until || "");
+    if (!Number.isFinite(retention) || retention <= now()) {
+      throw new Error("La retención temporal de este audio venció. No se descargó.");
+    }
+
+    onStatus?.("Descargando únicamente este audio desde el almacenamiento privado…");
+    const { data: blob, error } = await supabase.storage
+      .from("inbox-voice-private")
+      .download(expectedObjectPath);
+    if (error) throw new Error("No se pudo descargar el audio privado: " + String(error.message || error).slice(0, 180));
+    if (!(blob instanceof Blob) || blob.size !== asset.file_size_bytes) {
+      throw new Error("El tamaño del archivo descargado no coincide con el registro. No se ejecutó Whisper.");
+    }
+
+    onStatus?.("Verificando la integridad SHA-256 del audio original…");
+    const actualHash = await sha256Hex(await blob.arrayBuffer());
+    if (actualHash !== asset.sha256_hex) {
+      throw new Error("La huella SHA-256 del audio no coincide con el original registrado. No se ejecutó Whisper.");
+    }
+
+    onStatus?.("Audio verificado. La transcripción se ejecutará dentro de este dispositivo…");
+    const file = new File(
+      [blob],
+      "inbox-audio-" + asset.id + "." + extension,
+      { type: mimeType, lastModified: Date.parse(asset.created_at || "") || now() },
+    );
+    const result = await transcribeFile(file, { onStatus });
+    if (!result || typeof result.text !== "string"
+      || !Number.isFinite(result.durationSeconds) || result.durationSeconds <= 0) {
+      throw new Error("Whisper devolvió un resultado de audio no válido.");
+    }
+    return result;
+  } finally {
+    activeVoiceAssetTranscription = false;
+  }
+}

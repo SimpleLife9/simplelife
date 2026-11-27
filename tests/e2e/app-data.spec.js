@@ -145,6 +145,7 @@ async function mockSupabaseSession(page, initialData = {}) {
   const insertedVoiceAssets = [];
   const uploadedVoiceObjects = [];
   const voiceFinalizeRequests = [];
+  const audioDownloadRequests = [];
   const voiceAssets = [...(initialData.voiceAssets || [])];
   const captureLinks = [...(initialData.captureLinks || [])];
   const insertedCaptureLinks = [];
@@ -1154,6 +1155,17 @@ async function mockSupabaseSession(page, initialData = {}) {
       return;
     }
 
+    const privateAudioDownloadPrefix = '/storage/v1/object/authenticated/inbox-voice-private/';
+    if (url.pathname.startsWith(privateAudioDownloadPrefix) && method === 'GET') {
+      audioDownloadRequests.push(decodeURIComponent(url.pathname.slice(privateAudioDownloadPrefix.length)));
+      await route.fulfill({
+        status: 200,
+        headers: { ...corsHeaders, 'content-type': 'audio/webm' },
+        body: Buffer.from('synthetic private voice fixture bytes'),
+      });
+      return;
+    }
+
     if (url.pathname === '/functions/v1/inbox-voice-finalize' && method === 'POST') {
       const payload = request.postDataJSON();
       voiceFinalizeRequests.push(payload);
@@ -1161,6 +1173,7 @@ async function mockSupabaseSession(page, initialData = {}) {
       if (asset) {
         asset.status = 'uploaded';
         asset.uploaded_at = '2026-11-25T00:00:00.000Z';
+        asset.retention_until = asset.retention_until || '2026-12-02T23:00:00.000Z';
       }
       await json(200, { verified: true, assetId: payload.assetId });
       return;
@@ -1174,7 +1187,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     await json(404, { message: `Unexpected mocked Supabase request: ${method} ${url.pathname}` });
   });
 
-  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, protectedTimeBlocks, protectedTimeMutationRequests, protectedTimeConflicts, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, processingRuns, queueRequests, processingRequests, reviewRequests, reviewAuditEvents, trashRequests, offlineSyncRequests, offlineSyncReplayFlags, offlineSyncedCaptures, insertedVoiceAssets, uploadedVoiceObjects, voiceFinalizeRequests, voiceAssets, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
+  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, protectedTimeBlocks, protectedTimeMutationRequests, protectedTimeConflicts, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, processingRuns, queueRequests, processingRequests, reviewRequests, reviewAuditEvents, trashRequests, offlineSyncRequests, offlineSyncReplayFlags, offlineSyncedCaptures, insertedVoiceAssets, uploadedVoiceObjects, voiceFinalizeRequests, audioDownloadRequests, voiceAssets, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
 }
 
 test('mock-authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
@@ -1353,27 +1366,15 @@ test('Inbox supports search, review states, archiving, restore and original capt
   await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
   await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
   await expect(page.getByRole('heading', { name: 'Inbox', exact: true })).toBeVisible();
-  const localSttPanel = page.getByRole('region', { name: 'Prueba de transcripción local' });
-  await expect(localSttPanel).toBeVisible();
-  await expect(localSttPanel.getByRole('heading', { name: 'Prueba de transcripción local' })).toBeVisible();
-  await expect(localSttPanel.getByRole('button', { name: 'Elegir audio de prueba' })).toBeVisible();
-  const transcribeButton = localSttPanel.getByRole('button', { name: 'Transcribir en este dispositivo' });
-  await expect(transcribeButton).toBeVisible();
-  await expect(transcribeButton).toBeDisabled();
-  const testAudioInput = localSttPanel.getByLabel('Audio sintético o público de prueba');
-  await testAudioInput.setInputFiles({
-    name: 'audio-sintetico-prueba.wav',
-    mimeType: 'audio/wav',
-    buffer: Buffer.from('synthetic public test audio'),
-  });
-  await expect(transcribeButton).toBeEnabled();
+  await expect(page.getByRole('region', { name: 'Prueba de transcripción local' })).toHaveCount(0);
+  await expect(page.locator('input[type="file"]')).toHaveCount(0);
 
 
   // The capability notice must match the implemented private voice/offline behavior.
   const capabilityNotice = page.locator('.honest-note');
   await expect(capabilityNotice).toContainText('reglas locales deterministas (no con un modelo de IA)');
   await expect(capabilityNotice).toContainText('grabaciones de voz se guardan en almacenamiento privado');
-  await expect(capabilityNotice).toContainText('todavía no se transcriben ni se envían a un modelo');
+  await expect(capabilityNotice).toContainText('la huella SHA-256 se verifica y Whisper se ejecuta en este dispositivo');
   await expect(capabilityNotice).toContainText('modo sin conexión cifra las capturas en este dispositivo');
   await expect(capabilityNotice).toContainText('clave de recuperación fuera del dispositivo');
 
@@ -4622,7 +4623,9 @@ test('mobile voice capture uploads a private original and leaves transcription p
   await voicePanel.getByRole('button', { name: 'Detener y guardar' }).click();
 
   await expect(voicePanel)
-    .toContainText('La transcripción permanece pendiente hasta configurar un proveedor aprobado.');
+    .toContainText('Puedes transcribirlo localmente desde su tarjeta en Inbox');
+  const savedVoiceCard = page.getByTestId('private-voice-asset-' + insertedVoiceAssets[0]?.id);
+  await expect(savedVoiceCard.getByRole('button', { name: 'Transcribir localmente' })).toBeEnabled();
   expect(insertedVoiceAssets).toHaveLength(1);
   expect(uploadedVoiceObjects).toHaveLength(1);
   expect(voiceFinalizeRequests).toHaveLength(1);
@@ -4645,29 +4648,46 @@ test('mobile voice capture uploads a private original and leaves transcription p
 });
 
 
-test('Inbox local voice transcription test selects audio without uploading or saving it', async ({ page }) => {
-  const { insertedVoiceAssets, uploadedVoiceObjects, voiceFinalizeRequests } =
-    await mockSupabaseSession(page);
+test('Inbox shows one local transcription action per saved private recording without downloading automatically', async ({ page }) => {
+  const audioOne = {
+    id: '019b7000-0000-7000-8000-000000000601',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    capture_id: null,
+    bucket_id: 'inbox-voice-private',
+    object_path: profile.id + '/019b7000-0000-7000-8000-000000000601/source.webm',
+    mime_type: 'audio/webm',
+    file_size_bytes: 64,
+    sha256_hex: '0'.repeat(64),
+    status: 'uploaded',
+    retention_until: '2026-12-02T23:00:00.000Z',
+    created_at: '2026-11-26T18:00:00.000Z',
+  };
+  const audioTwo = {
+    ...audioOne,
+    id: '019b7000-0000-7000-8000-000000000602',
+    object_path: profile.id + '/019b7000-0000-7000-8000-000000000602/source.webm',
+    created_at: '2026-11-26T17:00:00.000Z',
+  };
+  const { voiceAssets, uploadedVoiceObjects, voiceFinalizeRequests, audioDownloadRequests } =
+    await mockSupabaseSession(page, { voiceAssets: [audioOne, audioTwo] });
   await page.goto('/');
   await page.getByLabel('Correo electrónico').fill(authUser.email);
   await page.getByLabel('Contraseña').fill('not-a-real-password');
   await page.getByRole('button', { name: 'Iniciar sesión' }).click();
   await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
 
-  const localSttPanel = page.getByRole('region', { name: 'Prueba de transcripción local' });
-  await expect(localSttPanel).toBeVisible();
-  const audioInput = localSttPanel.getByLabel('Audio sintético o público de prueba');
-  await audioInput.setInputFiles({
-    name: 'simplelife-synthetic-test.wav',
-    mimeType: 'audio/wav',
-    buffer: Buffer.from('synthetic audio fixture only'),
-  });
+  const pending = page.getByRole('region', { name: 'Audios privados pendientes' });
+  await expect(pending).toBeVisible();
+  const cards = pending.getByTestId(/private-voice-asset-/);
+  await expect(cards).toHaveCount(2);
+  await expect(pending.getByRole('button', { name: 'Transcribir localmente' })).toHaveCount(2);
+  await expect(pending.locator('input[type="file"]')).toHaveCount(0);
+  await expect(pending).toContainText('listo para transcribir localmente');
 
-  await expect(localSttPanel).toContainText('Audio seleccionado: simplelife-synthetic-test.wav');
-  await expect(localSttPanel.getByRole('button', { name: 'Transcribir en este dispositivo' })).toBeEnabled();
-  await expect(localSttPanel).toContainText('no se sube, no se guarda y no crea una captura');
-
-  expect(insertedVoiceAssets).toHaveLength(0);
+  // Opening Inbox must not download, re-upload or send any recording to a server worker.
+  expect(voiceAssets).toHaveLength(2);
   expect(uploadedVoiceObjects).toHaveLength(0);
   expect(voiceFinalizeRequests).toHaveLength(0);
+  expect(audioDownloadRequests).toHaveLength(0);
 });

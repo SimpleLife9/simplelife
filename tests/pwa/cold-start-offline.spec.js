@@ -40,7 +40,7 @@ async function prepareOnlineShell(page) {
   expect(isolation).toEqual({ isolated: true, sharedMemory: true });
 
   const cacheAudit = await page.evaluate(async () => {
-    const cache = await caches.open('simplelife-shell-v11');
+    const cache = await caches.open('simplelife-shell-v12');
     const manifestResponse = await cache.match(
       new URL('/precache-manifest.json', window.location.origin).href,
       { ignoreVary: true },
@@ -242,7 +242,7 @@ test('PWA shell v11 replaces v10 cached application and same-origin STT runtime 
 
     const result = await page.evaluate(async () => {
       const names = await caches.keys();
-      const cache = await caches.open('simplelife-shell-v11');
+      const cache = await caches.open('simplelife-shell-v12');
       const document = await cache.match(
         new URL('/experiments/stt-local/index.html', window.location.origin),
         { ignoreVary: true },
@@ -269,7 +269,7 @@ test('PWA shell v11 replaces v10 cached application and same-origin STT runtime 
       };
     });
 
-    expect(result.names).toContain('simplelife-shell-v11');
+    expect(result.names).toContain('simplelife-shell-v12');
     expect(result.names).not.toContain('simplelife-shell-v10');
     expect(result.scriptStatus).toBe(200);
     expect(result.runtimeModuleStatus).toBe(200);
@@ -347,7 +347,7 @@ test('isolated local STT lab reopens from the service-worker cache while offline
     await expect(onlinePage.getByRole('button', { name: 'Descargar y preparar motor' })).toBeEnabled();
 
     const cachedLab = await onlinePage.evaluate(async () => {
-      const cache = await caches.open('simplelife-shell-v11');
+      const cache = await caches.open('simplelife-shell-v12');
       const origin = window.location.origin;
       const documentResponse = await cache.match(new URL('/experiments/stt-local/index.html', origin));
       const scriptResponse = await cache.match(new URL('/experiments/stt-local/app.js', origin));

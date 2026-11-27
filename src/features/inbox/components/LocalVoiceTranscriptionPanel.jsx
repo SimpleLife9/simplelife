@@ -1,103 +1,160 @@
-import { useRef, useState } from 'react';
-import { getLocalVoiceTestFileError, transcribeLocalVoiceFile } from '../domain/local-voice-transcription.js';
+import { useState } from 'react';
+import { supabase } from '../../../lib/supabase.js';
+import { uuidv7 } from '../../../lib/uuidv7.js';
+import { transcribeLocalVoiceAsset } from '../domain/local-voice-transcription.js';
 
-export function LocalVoiceTranscriptionPanel({ busy = false }) {
-  const inputRef = useRef(null);
-  const [file, setFile] = useState(null);
+export function LocalVoiceTranscriptionPanel({
+  asset,
+  profile,
+  busy = false,
+  runAction,
+  onSaved,
+}) {
   const [transcribing, setTranscribing] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState('');
-  const [result, setResult] = useState('');
+  const [transcript, setTranscript] = useState('');
   const [error, setError] = useState('');
 
-  const handleFileChange = (event) => {
-    const selected = event.target.files?.[0] || null;
-    setFile(selected);
-    setError('');
-    setResult('');
-    setStatus(selected
-      ? 'Audio seleccionado: ' + selected.name + ' (' + Math.ceil(selected.size / 1024) + ' KiB). Sigue únicamente en este dispositivo.'
-      : '');
-  };
+  const retentionTime = Date.parse(asset?.retention_until || '');
+  const retained = Number.isFinite(retentionTime) && retentionTime > Date.now();
+  const canTranscribe = asset?.status === 'uploaded' && asset?.capture_id == null
+    && retained && globalThis.navigator?.onLine !== false && Boolean(profile?.id);
 
   const handleTranscribe = async () => {
-    const validationError = getLocalVoiceTestFileError(file);
-    if (validationError) {
-      setError(validationError);
-      return;
-    }
+    if (!canTranscribe || busy || transcribing) return;
     setTranscribing(true);
     setError('');
-    setResult('');
-    setStatus('Preparando la transcripción local en este dispositivo…');
+    setTranscript('');
+    setStatus('Preparando el audio privado seleccionado…');
     try {
-      const transcription = await transcribeLocalVoiceFile(file, {
+      const result = await transcribeLocalVoiceAsset({
+        supabase,
+        asset,
+        ownerUserId: profile.id,
         onStatus: setStatus,
       });
-      setResult(transcription.text || 'No se detectó voz reconocible en el audio.');
-      setStatus(
-        'Prueba completada en este dispositivo · '
-        + transcription.durationSeconds.toFixed(1)
-        + ' s de audio. El archivo no se guardó ni se envió.',
-      );
+      if (!result.text.trim()) {
+        setStatus('Whisper terminó en este dispositivo, pero no detectó voz reconocible. El audio original sigue intacto.');
+        return;
+      }
+      if (result.text.length > 20000) {
+        throw new Error('El texto reconocido supera el límite de 20 000 caracteres. No se guardó ninguna captura.');
+      }
+      setTranscript(result.text);
+      setStatus('Transcripción local completada · ' + result.durationSeconds.toFixed(1)
+        + ' s · revisa y corrige el texto antes de guardarlo.');
     } catch (failure) {
-      setError(failure?.message || 'No se pudo completar la transcripción local.');
-      setStatus('La prueba no se completó. No se hizo fallback remoto.');
+      setError(failure?.message || 'No se pudo transcribir este audio en el dispositivo.');
+      setStatus('No se guardó ninguna captura. El audio original permanece intacto.');
     } finally {
       setTranscribing(false);
+    }
+  };
+
+  const handleSave = async () => {
+    const text = transcript.trim();
+    if (!text || text.length > 20000 || saving || busy) return;
+    setSaving(true);
+    setError('');
+    const operation = async () => {
+      const proposedCaptureId = uuidv7();
+      const proposedPartId = uuidv7();
+      const { data, error: rpcError } = await supabase.rpc('record_inbox_voice_transcription_local', {
+        p_asset_id: asset.id,
+        p_capture_id: proposedCaptureId,
+        p_part_id: proposedPartId,
+        p_transcript_text: text,
+      });
+      if (rpcError) throw rpcError;
+      const receipt = Array.isArray(data) ? data[0] : data;
+      if (!receipt?.capture_id || !receipt?.part_id
+        || (receipt.replayed !== true && receipt.capture_id !== proposedCaptureId)) {
+        throw new Error('El servidor no confirmó la captura de voz vinculada al original.');
+      }
+      await onSaved?.(receipt.capture_id);
+      setStatus('Transcripción guardada como captura de Inbox. El original se conserva.');
+    };
+
+    try {
+      if (runAction) {
+        await runAction(operation, 'Transcripción guardada como captura de Inbox.', {
+          onError: (failure) => setError(failure?.message || 'No se pudo guardar la transcripción.'),
+        });
+      } else {
+        await operation();
+      }
+    } catch (failure) {
+      setError(failure?.message || 'No se pudo guardar la transcripción.');
+    } finally {
+      setSaving(false);
     }
   };
 
   return (
     <section
       className="inbox-local-stt-panel"
-      aria-label="Prueba de transcripción local"
+      aria-label="Transcripción local del audio"
       data-testid="inbox-local-stt-panel"
     >
       <div className="inbox-local-stt-copy">
-        <h3>Prueba de transcripción local</h3>
+        <strong>Transcribir esta grabación en este dispositivo</strong>
         <p>
-          Comprueba Whisper.cpp con un audio sintético o público. Se procesa en este dispositivo:
-          no se sube, no se guarda y no crea una captura. No uses tus grabaciones privadas.
+          Solo se descarga este original privado al pulsar el botón. Se verifica su integridad
+          y Whisper lo procesa localmente en español. No se envía a un proveedor ni se modifica el original.
         </p>
       </div>
-      <div className="inbox-local-stt-controls">
-        <input
-          ref={inputRef}
-          id="inbox-local-stt-audio"
-          className="inbox-local-stt-input"
-          type="file"
-          accept="audio/*"
-          aria-label="Audio sintético o público de prueba"
-          onChange={handleFileChange}
-          disabled={busy || transcribing}
-        />
-        <button
-          type="button"
-          className="capture-action-button"
-          onClick={() => inputRef.current?.click()}
-          disabled={busy || transcribing}
-        >
-          Elegir audio de prueba
-        </button>
+      {!transcript && (
         <button
           type="button"
           className="capture-action-button inbox-local-stt-primary"
           onClick={handleTranscribe}
-          disabled={!file || busy || transcribing}
+          disabled={!canTranscribe || busy || transcribing}
         >
-          {transcribing ? 'Transcribiendo localmente…' : 'Transcribir en este dispositivo'}
+          {transcribing ? 'Transcribiendo localmente…' : 'Transcribir localmente'}
         </button>
-      </div>
-      {file && <p className="inbox-local-stt-selected">Archivo seleccionado: {file.name}</p>}
+      )}
+      {globalThis.navigator?.onLine === false && (
+        <small className="inbox-local-stt-status">Conéctate para descargar de forma privada el audio seleccionado; la inferencia se ejecuta aquí.</small>
+      )}
+      {asset?.status === 'uploaded' && !retained && (
+        <small className="inbox-local-stt-status">La ventana de retención de este audio venció. No se intentará descargarlo.</small>
+      )}
       {status && <p className="inbox-local-stt-status" role="status">{status}</p>}
       {error && <p className="form-error" role="alert">{error}</p>}
-      {result && (
-        <div className="inbox-local-stt-result" aria-live="polite">
-          <strong>Texto reconocido</strong>
-          <p>{result}</p>
+      {transcript && (
+        <div className="inbox-local-stt-result">
+          <label htmlFor={'local-voice-transcript-' + asset.id}>Texto reconocido · puedes corregirlo</label>
+          <textarea
+            id={'local-voice-transcript-' + asset.id}
+            aria-label="Texto reconocido"
+            rows={4}
+            maxLength={20000}
+            value={transcript}
+            onChange={(event) => setTranscript(event.target.value)}
+            disabled={busy || saving}
+          />
+          <div className="inbox-local-stt-controls">
+            <button
+              type="button"
+              className="capture-action-button inbox-local-stt-primary"
+              onClick={handleSave}
+              disabled={!transcript.trim() || busy || saving || transcribing}
+            >
+              {saving ? 'Guardando captura…' : 'Guardar transcripción como captura'}
+            </button>
+            <button
+              type="button"
+              className="capture-action-button"
+              onClick={() => { setTranscript(''); setStatus('Puedes volver a transcribir el mismo original.'); setError(''); }}
+              disabled={busy || saving || transcribing}
+            >
+              Descartar texto y repetir
+            </button>
+          </div>
         </div>
       )}
-      <small>La descarga del motor y del modelo comienza solo al pulsar «Transcribir en este dispositivo». No se envía audio a Supabase ni al worker de voz.</small>
+      <small>El audio original no se reemplaza ni se elimina. El modelo Whisper se prepara solo al solicitar la transcripción.</small>
     </section>
   );
 }
