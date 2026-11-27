@@ -77,7 +77,12 @@ export function LocalVoiceTranscriptionPanel({
     try {
       if (runAction) {
         await runAction(operation, 'Transcripción guardada como captura de Inbox.', {
-          onError: (failure) => setError(failure?.message || 'No se pudo guardar la transcripción.'),
+          onError: (failure) => {
+          const message = String(failure?.message || '');
+          setError(/record_inbox_voice_transcription_local|schema cache|PGRST202|function .* not found/i.test(message)
+            ? 'La transcripción local terminó, pero falta instalar la función segura de guardado en este proyecto. El texto sigue visible y el audio original no se modificó.'
+            : (message || 'No se pudo guardar la transcripción.'));
+        },
         });
       } else {
         await operation();

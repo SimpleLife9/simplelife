@@ -38,8 +38,33 @@ BEGIN
      OR has_function_privilege('anon',
        'public.record_inbox_voice_transcription_local(uuid,uuid,uuid,text)','EXECUTE')
      OR has_function_privilege('service_role',
-       'public.record_inbox_voice_transcription_local(uuid,uuid,uuid,text)','EXECUTE') THEN
-    RAISE EXCEPTION 'Local transcript persistence must be executable only by the authenticated owner role';
+       'public.record_inbox_voice_transcription_local(uuid,uuid,uuid,text)','EXECUTE')
+     OR NOT has_function_privilege('authenticated',
+       'private.record_inbox_voice_transcription_local_impl(uuid,uuid,uuid,text)','EXECUTE')
+     OR has_function_privilege('anon',
+       'private.record_inbox_voice_transcription_local_impl(uuid,uuid,uuid,text)','EXECUTE')
+     OR has_function_privilege('service_role',
+       'private.record_inbox_voice_transcription_local_impl(uuid,uuid,uuid,text)','EXECUTE')
+     OR NOT has_schema_privilege('authenticated','private','USAGE') THEN
+    RAISE EXCEPTION 'Local transcript RPC privileges do not match the authenticated-only wrapper contract';
+  END IF;
+
+  IF (
+    SELECT p.prosecdef
+    FROM pg_catalog.pg_proc AS p
+    JOIN pg_catalog.pg_namespace AS n ON n.oid=p.pronamespace
+    WHERE n.nspname='public' AND p.proname='record_inbox_voice_transcription_local'
+  ) IS DISTINCT FROM false THEN
+    RAISE EXCEPTION 'The public Data API wrapper must be SECURITY INVOKER';
+  END IF;
+
+  IF (
+    SELECT p.prosecdef
+    FROM pg_catalog.pg_proc AS p
+    JOIN pg_catalog.pg_namespace AS n ON n.oid=p.pronamespace
+    WHERE n.nspname='private' AND p.proname='record_inbox_voice_transcription_local_impl'
+  ) IS DISTINCT FROM true THEN
+    RAISE EXCEPTION 'Only the private implementation may use SECURITY DEFINER';
   END IF;
   IF has_table_privilege('authenticated','public.capture_audio_asset','UPDATE')
      OR has_table_privilege('authenticated','public.capture_audio_asset','DELETE') THEN

@@ -2,7 +2,8 @@
 -- This RPC never downloads audio, calls a provider, or changes the private Storage object.
 BEGIN;
 
-CREATE OR REPLACE FUNCTION public.record_inbox_voice_transcription_local(
+-- The privileged implementation lives outside the exposed Data API schemas.
+CREATE OR REPLACE FUNCTION private.record_inbox_voice_transcription_local_impl(
   p_asset_id uuid,
   p_capture_id uuid,
   p_part_id uuid,
@@ -12,7 +13,7 @@ RETURNS TABLE(capture_id uuid, part_id uuid, replayed boolean)
 LANGUAGE plpgsql
 VOLATILE
 SECURITY DEFINER
-SET search_path = pg_catalog, public, private
+SET search_path = pg_catalog
 AS $function$
 DECLARE
   v_owner_profile_id uuid;
@@ -31,15 +32,15 @@ BEGIN
   END IF;
 
   IF p_asset_id IS NULL OR p_capture_id IS NULL OR p_part_id IS NULL
-     OR (get_byte(uuid_send(p_asset_id),6) >> 4)<>7
-     OR (get_byte(uuid_send(p_asset_id),8) & 192)<>128
-     OR (get_byte(uuid_send(p_capture_id),6) >> 4)<>7
-     OR (get_byte(uuid_send(p_capture_id),8) & 192)<>128
-     OR (get_byte(uuid_send(p_part_id),6) >> 4)<>7
-     OR (get_byte(uuid_send(p_part_id),8) & 192)<>128
+     OR (pg_catalog.get_byte(pg_catalog.uuid_send(p_asset_id),6) >> 4)<>7
+     OR (pg_catalog.get_byte(pg_catalog.uuid_send(p_asset_id),8) & 192)<>128
+     OR (pg_catalog.get_byte(pg_catalog.uuid_send(p_capture_id),6) >> 4)<>7
+     OR (pg_catalog.get_byte(pg_catalog.uuid_send(p_capture_id),8) & 192)<>128
+     OR (pg_catalog.get_byte(pg_catalog.uuid_send(p_part_id),6) >> 4)<>7
+     OR (pg_catalog.get_byte(pg_catalog.uuid_send(p_part_id),8) & 192)<>128
      OR p_transcript_text IS NULL
-     OR length(btrim(p_transcript_text))=0
-     OR length(p_transcript_text)>20000 THEN
+     OR pg_catalog.length(pg_catalog.btrim(p_transcript_text))=0
+     OR pg_catalog.length(p_transcript_text)>20000 THEN
     RAISE EXCEPTION 'Local voice transcription arguments are invalid' USING ERRCODE='22023';
   END IF;
 
@@ -70,7 +71,7 @@ BEGIN
   IF v_asset.status<>'uploaded'
      OR v_asset.capture_id IS NOT NULL
      OR v_asset.retention_until IS NULL
-     OR v_asset.retention_until<=clock_timestamp() THEN
+     OR v_asset.retention_until<=pg_catalog.clock_timestamp() THEN
     RAISE EXCEPTION 'Private audio is no longer eligible for local transcription' USING ERRCODE='55000';
   END IF;
 
@@ -91,13 +92,45 @@ BEGIN
       transcription_model='ggml-tiny-q5_1@0b364b566045a405be7225ee1e415a073e04da77',
       transcription_region='device-local',
       status='transcribed',
-      transcribed_at=clock_timestamp(),
+      transcribed_at=pg_catalog.clock_timestamp(),
       retention_until=NULL,
-      updated_at=clock_timestamp()
+      updated_at=pg_catalog.clock_timestamp()
   WHERE aa.id=p_asset_id AND aa.owner_user_id=v_owner_profile_id;
 
   RETURN QUERY SELECT p_capture_id,p_part_id,false;
 END;
+$function$;
+
+ALTER FUNCTION private.record_inbox_voice_transcription_local_impl(uuid,uuid,uuid,text)
+  OWNER TO postgres;
+REVOKE ALL PRIVILEGES
+ON FUNCTION private.record_inbox_voice_transcription_local_impl(uuid,uuid,uuid,text)
+FROM PUBLIC, anon, authenticated, service_role;
+
+-- The Data API sees only this invoker wrapper in public. The owner-bound
+-- SECURITY DEFINER implementation is not in an exposed schema.
+REVOKE ALL ON SCHEMA private FROM PUBLIC, anon, authenticated, service_role;
+GRANT USAGE ON SCHEMA private TO authenticated;
+GRANT EXECUTE
+ON FUNCTION private.record_inbox_voice_transcription_local_impl(uuid,uuid,uuid,text)
+TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.record_inbox_voice_transcription_local(
+  p_asset_id uuid,
+  p_capture_id uuid,
+  p_part_id uuid,
+  p_transcript_text text
+)
+RETURNS TABLE(capture_id uuid, part_id uuid, replayed boolean)
+LANGUAGE sql
+VOLATILE
+SECURITY INVOKER
+SET search_path = pg_catalog
+AS $function$
+  SELECT result.capture_id,result.part_id,result.replayed
+  FROM private.record_inbox_voice_transcription_local_impl(
+    p_asset_id,p_capture_id,p_part_id,p_transcript_text
+  ) AS result;
 $function$;
 
 ALTER FUNCTION public.record_inbox_voice_transcription_local(uuid,uuid,uuid,text)
