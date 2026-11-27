@@ -1,5 +1,5 @@
 import { chromium, test, expect } from '@playwright/test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -432,35 +432,24 @@ test('isolated local STT lab reopens from the service-worker cache while offline
 });
 
 
-function createSilentWavBuffer(durationSeconds = 1) {
-  const sampleRate = 16_000;
-  const channels = 1;
-  const bitsPerSample = 16;
-  const dataBytes = Math.round(sampleRate * durationSeconds) * channels * bitsPerSample / 8;
-  const buffer = Buffer.alloc(44 + dataBytes);
-  buffer.write('RIFF', 0, 'ascii');
-  buffer.writeUInt32LE(36 + dataBytes, 4);
-  buffer.write('WAVE', 8, 'ascii');
-  buffer.write('fmt ', 12, 'ascii');
-  buffer.writeUInt32LE(16, 16);
-  buffer.writeUInt16LE(1, 20);
-  buffer.writeUInt16LE(channels, 22);
-  buffer.writeUInt32LE(sampleRate, 24);
-  buffer.writeUInt32LE(sampleRate * channels * bitsPerSample / 8, 28);
-  buffer.writeUInt16LE(channels * bitsPerSample / 8, 32);
-  buffer.writeUInt16LE(bitsPerSample, 34);
-  buffer.write('data', 36, 'ascii');
-  buffer.writeUInt32LE(dataBytes, 40);
-  return buffer;
-}
-
-test('hosted Preview initializes Whisper.cpp and completes synthetic-audio inference locally', async ({ page }) => {
-  test.skip(!process.env.PWA_BASE_URL, 'Runs once against the hosted Preview to verify the actual WASM runtime.');
+test('hosted Preview initializes Whisper.cpp and recognizes synthetic Spanish speech locally', async ({ page }) => {
+  test.skip(!process.env.PWA_BASE_URL, 'Runs once against the hosted Preview to verify actual Spanish speech recognition.');
   test.setTimeout(360_000);
   const pageErrors = [];
   const workerScripts = [];
+  const externalRequests = [];
+  const appOrigin = new URL(baseURL).origin;
   page.on('pageerror', (error) => pageErrors.push(error.message));
   page.on('worker', (worker) => workerScripts.push(worker.url()));
+  page.on('request', (request) => {
+    try {
+      const requestUrl = new URL(request.url());
+      if ((requestUrl.protocol === 'http:' || requestUrl.protocol === 'https:')
+        && requestUrl.origin !== appOrigin) {
+        externalRequests.push(requestUrl.origin + requestUrl.pathname);
+      }
+    } catch { /* Ignore non-HTTP browser-internal URLs. */ }
+  });
 
   await page.goto(new URL('/experiments/stt-local/index.html', baseURL).toString(), { waitUntil: 'load' });
   const isolation = await page.evaluate(() => ({
@@ -472,13 +461,26 @@ test('hosted Preview initializes Whisper.cpp and completes synthetic-audio infer
   await page.getByRole('button', { name: 'Descargar y preparar motor' }).click();
   await expect(page.locator('#status')).toContainText('Modelo listo y verificado', { timeout: 240_000 });
 
+  const speechFixture = await readFile(
+    new URL('../fixtures/audio/synthetic-spanish-voice.wav', import.meta.url),
+  );
   await page.locator('#audio-file').setInputFiles({
-    name: 'simplelife-synthetic-silence.wav',
+    name: 'simplelife-synthetic-spanish-speech.wav',
     mimeType: 'audio/wav',
-    buffer: createSilentWavBuffer(),
+    buffer: speechFixture,
   });
   await page.getByRole('button', { name: 'Transcribir localmente' }).click();
   await expect(page.locator('#status')).toContainText('Prueba terminada en el dispositivo', { timeout: 120_000 });
+
+  const transcript = await page.locator('#transcription').innerText();
+  const normalizedTranscript = transcript.normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLocaleLowerCase('es')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ');
+  expect(normalizedTranscript).toContain('manana');
+  expect(normalizedTranscript).toMatch(/\bcompr(?:o|a|ar)\b/);
+  expect(normalizedTranscript).toContain('leche');
   expect(workerScripts.some((url) => url.includes('/vendor/whisper-wasm/0.1.1/libmain-D9-QM3iM.mjs'))).toBe(true);
   expect(pageErrors).toEqual([]);
+  expect(externalRequests).toEqual([]);
 });
