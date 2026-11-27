@@ -311,7 +311,6 @@ jobs:
                       const appAssetPaths = [...expectedDocument.matchAll(/(?:src|href)="([^"]+)"/g)]
                         .map((match) => match[1])
                         .filter((path) => path.startsWith('/assets/') && (path.endsWith('.js') || path.endsWith('.css')));
-                        .map((match) => match[1]);
                       if (!appAssetPaths.some((path) => path.endsWith('.js'))) {
                         throw new Error('The CI app document does not reference an application JavaScript bundle.');
                       }
