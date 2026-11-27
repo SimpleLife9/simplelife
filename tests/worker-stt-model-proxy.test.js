@@ -184,6 +184,8 @@ test('Worker serves the pinned Whisper WASM runtime as immutable same-origin Jav
     assert.match(response.headers.get('cache-control'), /max-age=31536000/);
     assert.match(response.headers.get('cache-control'), /immutable/);
     assert.match(response.headers.get('content-type'), /javascript/);
+    assert.equal(response.headers.get('cross-origin-embedder-policy'), 'credentialless');
+    assert.equal(response.headers.get('cross-origin-resource-policy'), 'same-origin');
     assert.match(await response.text(), /pinned same-origin runtime asset/);
   }
 });
