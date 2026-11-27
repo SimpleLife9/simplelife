@@ -51,8 +51,8 @@ test('an unavailable shell gives offline-only recovery guidance', () => {
 
 test('online Service Worker navigations bypass the browser HTTP cache before refreshing the shell', async () => {
   const worker = await readFile(new URL('../public/sw.js', import.meta.url), 'utf8');
-  assert.match(worker, /const navigationRequest = new Request\\(request, \\{ cache: 'no-store' \\}\\)/);
-  assert.match(worker, /fetch\\(navigationRequest\\)/);
+  assert.ok(worker.includes("const navigationRequest = new Request(request, { cache: 'no-store' });"));
+  assert.ok(worker.includes('fetch(navigationRequest)'));
 });
 
 test('the app entry point explicitly checks for Service Worker updates on every launch', async () => {
