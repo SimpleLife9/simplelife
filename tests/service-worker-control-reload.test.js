@@ -21,16 +21,16 @@ function makeServiceWorkerContainer(initialController = null) {
   };
 }
 
-test('does not force a reload when the first Service Worker claims an unowned page', () => {
+test('reloads once when the first Service Worker claims a page without a controller', () => {
   const serviceWorker = makeServiceWorkerContainer(null);
   let reloads = 0;
   reloadOnServiceWorkerControllerChange(serviceWorker, { reload: () => { reloads += 1; } });
 
-  serviceWorker.controller = { scriptURL: '/sw.js?v=12' };
+  serviceWorker.controller = { scriptURL: '/sw.js?v=13' };
   serviceWorker.emit('controllerchange');
   serviceWorker.emit('controllerchange');
 
-  assert.equal(reloads, 0);
+  assert.equal(reloads, 1);
 });
 
 test('reloads once when an updated Service Worker replaces the existing controller', () => {
