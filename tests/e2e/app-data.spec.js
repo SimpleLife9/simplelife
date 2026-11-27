@@ -1373,7 +1373,7 @@ test('Inbox supports search, review states, archiving, restore and original capt
   // The capability notice must match the implemented private voice/offline behavior.
   const capabilityNotice = page.locator('.honest-note');
   await expect(capabilityNotice).toContainText('reglas locales deterministas (no con un modelo de IA)');
-  await expect(capabilityNotice).toContainText('grabaciones de voz se guardan en almacenamiento privado');
+  await expect(capabilityNotice).toContainText('grabaciones de voz se conservan en almacenamiento privado');
   await expect(capabilityNotice).toContainText('la huella SHA-256 se verifica y Whisper se ejecuta en este dispositivo');
   await expect(capabilityNotice).toContainText('modo sin conexión cifra las capturas en este dispositivo');
   await expect(capabilityNotice).toContainText('clave de recuperación fuera del dispositivo');
