@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { supabase } from '../../../lib/supabase.js';
-import { uuidv7 } from '../../../lib/uuidv7.js';
 import { transcribeLocalVoiceAsset } from '../domain/local-voice-transcription.js';
+import { persistLocalVoiceTranscript } from '../domain/local-voice-transcript-persistence.js';
 
 export function LocalVoiceTranscriptionPanel({
   asset,
@@ -57,21 +57,15 @@ export function LocalVoiceTranscriptionPanel({
     setSaving(true);
     setError('');
     const operation = async () => {
-      const proposedCaptureId = uuidv7();
-      const proposedPartId = uuidv7();
-      const { data, error: rpcError } = await supabase.rpc('record_inbox_voice_transcription_local', {
-        p_asset_id: asset.id,
-        p_capture_id: proposedCaptureId,
-        p_part_id: proposedPartId,
-        p_transcript_text: text,
+      const receipt = await persistLocalVoiceTranscript({
+        supabase,
+        asset,
+        ownerUserId: profile.id,
+        transcriptText: text,
       });
-      if (rpcError) throw rpcError;
-      const receipt = Array.isArray(data) ? data[0] : data;
-      if (!receipt?.capture_id || !receipt?.part_id
-        || (receipt.replayed !== true && receipt.capture_id !== proposedCaptureId)) {
-        throw new Error('El servidor no confirmó la captura de voz vinculada al original.');
-      }
-      setStatus('Transcripción guardada como captura de Inbox. El original se conserva.');
+      setStatus(receipt.replayed
+        ? 'La captura de esta transcripción ya estaba guardada. No se creó un duplicado.'
+        : 'Transcripción guardada como captura de Inbox. El original se conserva.');
     };
 
     try {
