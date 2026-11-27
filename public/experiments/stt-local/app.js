@@ -1,4 +1,4 @@
-const WHISPER_WASM_MODULE = "https://cdn.jsdelivr.net/npm/@timur00kh/whisper.wasm@0.1.1/+esm";
+const WHISPER_WASM_MODULE = "/vendor/whisper-wasm/0.1.1/index.es.js";
 const MODEL_REVISION = "0b364b566045a405be7225ee1e415a073e04da77";
 const MODEL_PATH = "ggerganov/whisper.cpp/resolve/" + MODEL_REVISION + "/ggml-tiny-q5_1.bin";
 const WHISPER_CPP_MODEL_URL = "/__stt-whisper/" + MODEL_PATH;
@@ -7,7 +7,7 @@ const MODEL_SIZE_LABEL = "32.2 MB";
 const SAMPLE_RATE = 16_000;
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 const MAX_DURATION_SECONDS = 120;
-const ALLOWED_FETCH_HOSTS = new Set([location.hostname, "cdn.jsdelivr.net"]);
+const RUNTIME_ASSET_PREFIX = "/vendor/whisper-wasm/0.1.1/";
 
 const $ = (id) => document.getElementById(id);
 const state = {
@@ -117,8 +117,8 @@ function installReadOnlyFetchGuard() {
     );
     const isModelProxy = originalUrl.origin === location.origin
       && originalUrl.pathname === WHISPER_CPP_MODEL_URL;
-    const isRuntimeAsset = originalUrl.hostname === "cdn.jsdelivr.net"
-      && originalUrl.protocol === "https:";
+    const isRuntimeAsset = originalUrl.origin === location.origin
+      && originalUrl.pathname.startsWith(RUNTIME_ASSET_PREFIX);
     if (!isModelProxy && !isRuntimeAsset) {
       throw new Error("STT_REMOTE_HOST_NOT_ALLOWLISTED: " + originalUrl.hostname);
     }
@@ -126,8 +126,7 @@ function installReadOnlyFetchGuard() {
     try {
       const response = await nativeFetch(input, init);
       const finalUrl = response.url ? new URL(response.url) : originalUrl;
-      const finalAllowed = finalUrl.origin === location.origin
-        || (finalUrl.protocol === "https:" && ALLOWED_FETCH_HOSTS.has(finalUrl.hostname));
+      const finalAllowed = finalUrl.origin === location.origin;
       if (!finalAllowed) {
         throw new Error("STT_REDIRECT_HOST_NOT_ALLOWLISTED: " + finalUrl.hostname);
       }
@@ -169,7 +168,7 @@ $("load-model").addEventListener("click", async () => {
       runtime = await import(WHISPER_WASM_MODULE);
     } catch (error) {
       throw new Error(
-        "STT_RUNTIME_IMPORT_FAILED [cdn.jsdelivr.net]: "
+        "STT_RUNTIME_IMPORT_FAILED [mismo origen]: "
           + String(error?.message || error).slice(0, 180),
       );
     }
