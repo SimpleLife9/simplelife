@@ -64,3 +64,14 @@ This experiment changes no production UI, Supabase schema/data/RLS, Edge Functio
 - No audio is sent to this Worker. The request contract only exposes static model artifacts; the audio still decodes and runs in-tab on WebAssembly.
 - Preview CI now probes the live same-origin proxy against the actual pinned Hugging Face `config.json`, in addition to the browser regression proving that an attempted direct Hub URL is rewritten to the same-origin Worker path.
 - This remains an isolated experiment. No new Worker, project, secret, hosted Supabase change, inference endpoint or paid provider is introduced. The existing Worker will route the proxy path only in this PR Preview until a separate production authorization.
+
+
+## Same-origin Whisper runtime package and offline Worker fix (27 November 2026)
+
+- CI on the prior revision exposed the browser error: `Failed to construct 'Worker'` for `libmain-D9-QM3iM.mjs` while it was served by `cdn.jsdelivr.net`. The module creates its Emscripten pthread Worker using `new Worker(new URL("", import.meta.url), { type: "module" })`; browsers reject that cross-origin Worker from the SimpleLife Preview.
+- The pinned upstream `@timur00kh/whisper.wasm@0.1.1` browser ESM entrypoint and its Emscripten module are now vendored under `public/vendor/whisper-wasm/0.1.1/`, with the upstream MIT license and SHA-256 provenance. The module and its Worker entrypoint resolve to the SimpleLife origin.
+- Both Inbox and the isolated laboratory load `/vendor/whisper-wasm/0.1.1/index.es.js`; runtime imports and the model download use only the same origin. The browser no longer needs jsDelivr for Whisper execution.
+- The existing Worker adds immutable JavaScript caching for exactly the two versioned runtime files; it remains a closed asset path, not a general proxy.
+- PWA shell v11 precaches the laboratory document/controller plus the two runtime files. The service worker retains offline launch, and the offline regression now verifies both runtime files can be read from Cache Storage after clearing HTTP cache and disconnecting the browser.
+- CI adds Preview checks for the JavaScript MIME type, immutable cache headers and same-origin bundle paths, followed by the hosted synthetic-audio inference test. Do not mark the STT task PASS until the hosted test completes actual inference.
+- No Supabase-hosted data, private Inbox audio, audio queue, production Worker or production deployment is involved. The model remains downloaded only after an explicit user action, via the fixed read-only model route.
