@@ -55,10 +55,12 @@ test('the app entry point explicitly checks for Service Worker updates on every 
   assert.match(entry, /updateViaCache:\s*'none'/);
 });
 
-test('a newly activated Service Worker reloads the page once so old bundles cannot remain mounted', async () => {
+test('the app listens for Service Worker controller changes even on an initially uncontrolled page', async () => {
   const entry = await readFile(new URL('../src/main.jsx', import.meta.url), 'utf8');
-  assert.match(entry, /addEventListener\('controllerchange'/);
-  assert.match(entry, /window\.location\.reload\(\)/);
+  const helper = await readFile(new URL('../src/lib/reload-on-service-worker-control.js', import.meta.url), 'utf8');
+  assert.match(entry, /reloadOnServiceWorkerControllerChange\(navigator\.serviceWorker, window\.location\)/);
+  assert.match(helper, /addEventListener\('controllerchange'/);
+  assert.match(helper, /location\.reload\(\)/);
 });
 
 test('the status notice stays in document flow instead of covering mobile navigation', async () => {
