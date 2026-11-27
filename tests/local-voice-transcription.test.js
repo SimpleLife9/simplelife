@@ -20,7 +20,7 @@ test("local voice test accepts supported synthetic audio and enforces the 25 MiB
   assert.equal(getLocalVoiceTestFileError({
     name: "synthetic-speech.mp3", type: "audio/mpeg", size: 128,
   }), null);
-  assert.match(getLocalVoiceTestFileError(null), /Selecciona un audio/);
+  assert.match(getLocalVoiceTestFileError(null), /archivo de audio válido/);
   assert.match(getLocalVoiceTestFileError({
     name: "empty.wav", type: "audio/wav", size: 0,
   }), /vacío/);
@@ -183,7 +183,7 @@ test("private audio metadata is rejected before Storage download when owner or l
 test("SHA-256 mismatch blocks local inference and leaves the original source metadata untouched", async () => {
   const asset = makePrivateVoiceAsset();
   let inferenceCalls = 0;
-  const wrongBytes = Buffer.from("changed audio bytes");
+  const wrongBytes = Buffer.from(PRIVATE_AUDIO_BYTES).map((value, index) => index === 0 ? value ^ 1 : value);
   await assert.rejects(
     transcribeLocalVoiceAsset({
       supabase: privateAudioClient(wrongBytes),
