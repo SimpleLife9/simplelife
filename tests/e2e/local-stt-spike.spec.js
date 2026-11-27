@@ -20,7 +20,9 @@ test('isolated STT lab uses whisper.cpp locally and performs no download before 
   const appResponse = await page.request.get('/experiments/stt-local/app.js');
   expect(appResponse.ok()).toBe(true);
   const appSource = await appResponse.text();
-  expect(appSource).toContain('@timur00kh/whisper.wasm@0.1.1/+esm');
+  expect(appSource).toContain('const WHISPER_WASM_MODULE = "/vendor/whisper-wasm/0.1.1/index.es.js";');
+  expect(appSource).toContain('const RUNTIME_ASSET_PREFIX = "/vendor/whisper-wasm/0.1.1/";');
+  expect(appSource).not.toContain('cdn.jsdelivr.net');
   expect(appSource).toContain('"/__stt-whisper/" + MODEL_PATH');
   expect(appSource).toContain('818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7');
   expect(appSource).toContain('state.session.streaming(samples');
