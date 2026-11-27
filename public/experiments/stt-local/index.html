@@ -32,7 +32,7 @@
   <h1>Transcripción local de voz</h1>
   <p>Laboratorio con <strong>whisper.cpp + WebAssembly SIMD</strong>. Usa el modelo Tiny multilingüe cuantizado Q5_1 (32,2 MB): se descarga una vez y queda guardado en IndexedDB para reutilizarlo sin volver a consumir descarga en cada sesión.</p>
   <div class="notice"><strong>Usa únicamente audio sintético o público de prueba.</strong> No selecciones audios privados ni grabaciones personales. Este laboratorio no está aprobado para procesar originales.</div>
-  <div class="privacy" style="margin-top:12px"><strong>Privacidad:</strong> el audio se decodifica y procesa en esta pestaña. Nunca se envía al Worker ni a un servicio de inferencia. El Worker existente solo transmite el archivo público del modelo, de una revisión fija, mediante GET/HEAD. El motor se obtiene de jsDelivr al pulsar preparar; no se usa micrófono, Supabase, ARIA ni un servicio de transcripción remoto.</div>
+  <div class="privacy" style="margin-top:12px"><strong>Privacidad:</strong> el audio se decodifica y procesa en esta pestaña. Nunca se envía al Worker ni a un servicio de inferencia. El Worker existente solo transmite el archivo público del modelo, de una revisión fija, mediante GET/HEAD. El runtime WASM está empaquetado con SimpleLife y se carga desde el mismo origen; el modelo público se descarga solo al pulsar preparar. No se usa micrófono, Supabase, ARIA ni un servicio de transcripción remoto.</div>
 
   <h2 style="margin-top:24px">1. Preparar motor y modelo</h2>
   <p class="small">Modelo: <code>ggml-tiny-q5_1.bin</code> · revisión fija <code>0b364b56</code> · SHA-256 verificado antes de inicializar · CPU local, 2 hilos.</p>
