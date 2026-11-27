@@ -83,6 +83,7 @@ test("invalid local audio is rejected before loading the Whisper model", async (
 test("Inbox uses the same pinned whisper.cpp model revision and hash as the isolated lab", () => {
   assert.equal(LOCAL_STT_MODEL.revision, "0b364b566045a405be7225ee1e415a073e04da77");
   assert.equal(LOCAL_STT_MODEL.modelPath.endsWith("/ggml-tiny-q5_1.bin"), true);
+  assert.equal(LOCAL_STT_MODEL.runtimeModule, "/vendor/whisper-wasm/0.1.1/index.es.js");
   assert.equal(LOCAL_STT_MODEL.sha256, "818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7");
   assert.equal(LOCAL_STT_MODEL.modelUrl.startsWith("/__stt-whisper/"), true);
 });
