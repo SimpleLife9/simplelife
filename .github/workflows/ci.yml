@@ -308,7 +308,9 @@ jobs:
                       // Verify the actual Inbox application bundle, not only
                       // the manifest and Service Worker. A stale root document
                       // or hashed JS/CSS bundle must never pass this gate.
-                      const appAssetPaths = [...expectedDocument.matchAll(/(?:src|href)="(\\/assets\\/[^"]+\\.(?:js|css))"/g)]
+                      const appAssetPaths = [...expectedDocument.matchAll(/(?:src|href)="([^"]+)"/g)]
+                        .map((match) => match[1])
+                        .filter((path) => path.startsWith('/assets/') && (path.endsWith('.js') || path.endsWith('.css')));
                         .map((match) => match[1]);
                       if (!appAssetPaths.some((path) => path.endsWith('.js'))) {
                         throw new Error('The CI app document does not reference an application JavaScript bundle.');
