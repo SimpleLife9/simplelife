@@ -316,6 +316,8 @@ test('Cloudflare Preview serves the vendored Whisper runtime from the same origi
     const response = await request.get(new URL(path, baseURL).toString(), { timeout: 30_000 });
     expect(response.status()).toBe(200);
     expect(response.headers()['content-type']).toMatch(/javascript/i);
+    expect(response.headers()['cross-origin-embedder-policy']).toBe('credentialless');
+    expect(response.headers()['cross-origin-resource-policy']).toBe('same-origin');
     expect(response.headers()['cache-control']).toMatch(/max-age=31536000/);
     expect(response.headers()['cache-control']).toMatch(/immutable/i);
     const body = await response.text();
@@ -456,7 +458,9 @@ test('hosted Preview initializes Whisper.cpp and completes synthetic-audio infer
   test.skip(!process.env.PWA_BASE_URL, 'Runs once against the hosted Preview to verify the actual WASM runtime.');
   test.setTimeout(360_000);
   const pageErrors = [];
+  const workerScripts = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
+  page.on('worker', (worker) => workerScripts.push(worker.url()));
 
   await page.goto(new URL('/experiments/stt-local/index.html', baseURL).toString(), { waitUntil: 'load' });
   const isolation = await page.evaluate(() => ({
@@ -475,5 +479,6 @@ test('hosted Preview initializes Whisper.cpp and completes synthetic-audio infer
   });
   await page.getByRole('button', { name: 'Transcribir localmente' }).click();
   await expect(page.locator('#status')).toContainText('Prueba terminada en el dispositivo', { timeout: 120_000 });
+  expect(workerScripts.some((url) => url.includes('/vendor/whisper-wasm/0.1.1/libmain-D9-QM3iM.mjs'))).toBe(true);
   expect(pageErrors).toEqual([]);
 });
