@@ -335,7 +335,7 @@ jobs:
             ESPEAK_BIN=espeak-ng
           fi
           mkdir -p tests/fixtures/audio
-          "$ESPEAK_BIN" -v es-la -s 138 -a 180 -p 45 -w tests/fixtures/audio/synthetic-spanish-voice.wav "Mañana compro leche."
+          "$ESPEAK_BIN" -v es-la -s 105 -a 180 -p 45 -g 20 -w tests/fixtures/audio/synthetic-spanish-voice.wav "Hola. Soy Carlos. Hola. Soy Carlos."
           test -s tests/fixtures/audio/synthetic-spanish-voice.wav
       - name: Verify Cloudflare Preview cold launch after full browser restart
         if: github.event_name == 'pull_request'

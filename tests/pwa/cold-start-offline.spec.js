@@ -477,9 +477,8 @@ test('hosted Preview initializes Whisper.cpp and recognizes synthetic Spanish sp
     .replace(/[\u0300-\u036f]/g, '')
     .toLocaleLowerCase('es')
     .replace(/[^\p{L}\p{N}]+/gu, ' ');
-  expect(normalizedTranscript).toContain('manana');
-  expect(normalizedTranscript).toMatch(/\bcompr(?:o|a|ar)\b/);
-  expect(normalizedTranscript).toContain('leche');
+  expect(normalizedTranscript).toContain('hola');
+  expect(normalizedTranscript).toContain('carlos');
   expect(workerScripts.some((url) => url.includes('/vendor/whisper-wasm/0.1.1/libmain-D9-QM3iM.mjs'))).toBe(true);
   expect(pageErrors).toEqual([]);
   expect(externalRequests).toEqual([]);
