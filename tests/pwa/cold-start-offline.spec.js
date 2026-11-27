@@ -309,8 +309,8 @@ test('Cloudflare Preview streams the pinned Whisper.cpp tiny-q5_1 model through 
 test('Cloudflare Preview serves the vendored Whisper runtime from the same origin', async ({ request }) => {
   test.skip(!process.env.PWA_BASE_URL, 'Requires the deployed Cloudflare Preview Worker.');
   const assets = [
-    ['/vendor/whisper-wasm/0.1.1/index.es.js', /libmain-D9-QM3iM\\.mjs/],
-    ['/vendor/whisper-wasm/0.1.1/libmain-D9-QM3iM.mjs', /new Worker\\(new URL/],
+    ['/vendor/whisper-wasm/0.1.1/index.es.js', './libmain-D9-QM3iM.mjs'],
+    ['/vendor/whisper-wasm/0.1.1/libmain-D9-QM3iM.mjs', 'new Worker(new URL'],
   ];
   for (const [path, expectedContent] of assets) {
     const response = await request.get(new URL(path, baseURL).toString(), { timeout: 30_000 });
@@ -319,7 +319,7 @@ test('Cloudflare Preview serves the vendored Whisper runtime from the same origi
     expect(response.headers()['cache-control']).toMatch(/max-age=31536000/);
     expect(response.headers()['cache-control']).toMatch(/immutable/i);
     const body = await response.text();
-    expect(body).toMatch(expectedContent);
+    expect(body).toContain(expectedContent);
     expect(body).not.toContain('cdn.jsdelivr.net');
   }
 });
