@@ -1,4 +1,4 @@
-const WHISPER_WASM_MODULE = "https://cdn.jsdelivr.net/npm/@timur00kh/whisper.wasm@0.1.1/+esm";
+const WHISPER_WASM_MODULE = "/vendor/whisper-wasm/0.1.1/index.es.js";
 const MODEL_REVISION = "0b364b566045a405be7225ee1e415a073e04da77";
 const MODEL_PATH = "ggerganov/whisper.cpp/resolve/" + MODEL_REVISION + "/ggml-tiny-q5_1.bin";
 
@@ -83,7 +83,7 @@ async function createVerifiedWhisperSession(onStatus) {
 
   let stage = 'runtime_import';
   try {
-    onStatus?.('Cargando runtime Whisper.cpp desde jsDelivr…');
+    onStatus?.('Cargando runtime Whisper.cpp local empaquetado…');
     let runtime;
     try {
       runtime = await import(/* @vite-ignore */ WHISPER_WASM_MODULE);
