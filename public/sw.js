@@ -1,4 +1,4 @@
-const CACHE_NAME = 'simplelife-shell-v12';
+const CACHE_NAME = 'simplelife-shell-v13';
 // Cloudflare's SPA asset handler redirects /index.html to /. Precache the
 // canonical root document, then store a separate /index.html alias below.
 const STT_LAB_DOCUMENT = '/experiments/stt-local/index.html';
@@ -134,7 +134,11 @@ self.addEventListener('fetch', (event) => {
       }
 
       try {
-        const response = await fetch(request);
+        // Navigation requests must bypass the browser HTTP cache as well as
+        // Cloudflare's document cache policy. This protects an already-installed
+        // PWA if an intermediary or prior response accidentally retained old HTML.
+        const navigationRequest = new Request(request, { cache: 'no-store' });
+        const response = await fetch(navigationRequest);
         if (response.ok && isSttLabNavigation) {
           try {
             const cache = await caches.open(CACHE_NAME);

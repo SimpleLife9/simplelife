@@ -1,5 +1,6 @@
 import { chromium, test, expect } from '@playwright/test';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -32,7 +33,7 @@ async function prepareOnlineShell(page) {
   expect(isolation).toEqual({ isolated: true, sharedMemory: true });
 
   const cacheAudit = await page.evaluate(async () => {
-    const cache = await caches.open('simplelife-shell-v12');
+    const cache = await caches.open('simplelife-shell-v13');
     const manifestResponse = await cache.match(
       new URL('/precache-manifest.json', window.location.origin).href,
       { ignoreVary: true },
@@ -205,13 +206,96 @@ test('hosted app document bypasses HTTP cache while hashed bundles remain immuta
 
 
 
-test('PWA shell v11 replaces v10 cached application and same-origin STT runtime assets', async ({ browser }) => {
+
+test('an already-controlled PWA fetches the newest document instead of a stale HTTP-cache entry', async ({ browser }) => {
+  const workerSource = await readFile(new URL('../../public/sw.js', import.meta.url), 'utf8');
+  let buildVersion = 'build-1';
+  let rootDocumentRequests = 0;
+
+  const server = createServer((request, response) => {
+    const pathname = new URL(request.url || '/', 'http://127.0.0.1').pathname;
+    const send = (body, contentType, cacheControl = 'public, max-age=31536000, immutable') => {
+      response.writeHead(200, {
+        'content-type': contentType,
+        'cache-control': cacheControl,
+      });
+      response.end(body);
+    };
+
+    if (pathname === '/sw.js') {
+      send(workerSource, 'text/javascript; charset=utf-8', 'no-store');
+      return;
+    }
+    if (pathname === '/') {
+      rootDocumentRequests += 1;
+      send(
+        `<!doctype html><html><head><meta charset="utf-8"></head><body><main id="build-version">${buildVersion}</main><script>navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).catch(() => {});</script></body></html>`,
+        'text/html; charset=utf-8',
+      );
+      return;
+    }
+    if (pathname === '/precache-manifest.json') {
+      send(JSON.stringify({ version: 1, assets: [] }), 'application/json; charset=utf-8', 'no-store');
+      return;
+    }
+    if (pathname === '/manifest.webmanifest') {
+      send(JSON.stringify({ name: 'SimpleLife test' }), 'application/manifest+json');
+      return;
+    }
+    if (pathname === '/leaf.svg') {
+      send('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"></svg>', 'image/svg+xml');
+      return;
+    }
+    if (pathname === '/experiments/stt-local/index.html') {
+      send('<!doctype html><title>STT test</title>', 'text/html; charset=utf-8', 'no-store');
+      return;
+    }
+    if (pathname.endsWith('.mjs') || pathname.endsWith('.js')) {
+      send('/* same-origin runtime fixture */', 'text/javascript; charset=utf-8');
+      return;
+    }
+    send('ok', 'text/plain; charset=utf-8');
+  });
+
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+
+  const address = server.address();
+  const testOrigin = `http://127.0.0.1:${address.port}/`;
+  const context = await browser.newContext({ serviceWorkers: 'allow' });
+  try {
+    const page = await context.newPage();
+    await page.goto(testOrigin, { waitUntil: 'load' });
+    await page.waitForFunction(
+      () => Boolean(navigator.serviceWorker.controller),
+      null,
+      { timeout: 15_000 },
+    );
+    await expect(page.locator('#build-version')).toHaveText('build-1');
+
+    // Deliberately change the origin's HTML while its prior response still has
+    // a one-year HTTP freshness lifetime. A plain fetch(request) would reuse
+    // build-1 from the browser cache; the no-store navigation fetch must see 2.
+    const requestsBeforeNewBuild = rootDocumentRequests;
+    buildVersion = 'build-2';
+    await page.goto(testOrigin, { waitUntil: 'load' });
+    await expect(page.locator('#build-version')).toHaveText('build-2');
+    expect(rootDocumentRequests).toBeGreaterThan(requestsBeforeNewBuild);
+  } finally {
+    await context.close();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('PWA shell v13 replaces v12 cached application and same-origin STT runtime assets', async ({ browser }) => {
   const context = await browser.newContext({ serviceWorkers: 'allow' });
   try {
     const page = await context.newPage();
     await page.goto(new URL('/experiments/stt-local/index.html', baseURL).toString(), { waitUntil: 'load' });
     await page.evaluate(async () => {
-      const legacy = await caches.open('simplelife-shell-v10');
+      const legacy = await caches.open('simplelife-shell-v12');
       await legacy.put(
         new URL('/experiments/stt-local/app.js', window.location.origin),
         new Response('/* stale STT lab script from the previous deployment */', {
@@ -230,7 +314,7 @@ test('PWA shell v11 replaces v10 cached application and same-origin STT runtime 
 
     const result = await page.evaluate(async () => {
       const names = await caches.keys();
-      const cache = await caches.open('simplelife-shell-v12');
+      const cache = await caches.open('simplelife-shell-v13');
       const document = await cache.match(
         new URL('/experiments/stt-local/index.html', window.location.origin),
         { ignoreVary: true },
@@ -257,8 +341,8 @@ test('PWA shell v11 replaces v10 cached application and same-origin STT runtime 
       };
     });
 
-    expect(result.names).toContain('simplelife-shell-v12');
-    expect(result.names).not.toContain('simplelife-shell-v10');
+    expect(result.names).toContain('simplelife-shell-v13');
+    expect(result.names).not.toContain('simplelife-shell-v12');
     expect(result.scriptStatus).toBe(200);
     expect(result.runtimeModuleStatus).toBe(200);
     expect(result.workerModuleStatus).toBe(200);
@@ -331,7 +415,7 @@ test('isolated local STT lab reopens from the service-worker cache while offline
     await expect(onlinePage.getByRole('button', { name: 'Descargar y preparar motor' })).toBeEnabled();
 
     const cachedLab = await onlinePage.evaluate(async () => {
-      const cache = await caches.open('simplelife-shell-v12');
+      const cache = await caches.open('simplelife-shell-v13');
       const origin = window.location.origin;
       const documentResponse = await cache.match(new URL('/experiments/stt-local/index.html', origin));
       const scriptResponse = await cache.match(new URL('/experiments/stt-local/app.js', origin));
