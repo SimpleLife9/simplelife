@@ -75,3 +75,15 @@ This experiment changes no production UI, Supabase schema/data/RLS, Edge Functio
 - PWA shell v11 precaches the laboratory document/controller plus the two runtime files. The service worker retains offline launch, and the offline regression now verifies both runtime files can be read from Cache Storage after clearing HTTP cache and disconnecting the browser.
 - CI adds Preview checks for the JavaScript MIME type, immutable cache headers and same-origin bundle paths, followed by the hosted synthetic-audio inference test. Do not mark the STT task PASS until the hosted test completes actual inference.
 - No Supabase-hosted data, private Inbox audio, audio queue, production Worker or production deployment is involved. The model remains downloaded only after an explicit user action, via the fixed read-only model route.
+
+## CI #995 — same-origin Emscripten Worker + COEP PASS (27 November 2026 UTC)
+
+- **Certified HEAD:** `1f05c3b09f914e3eacfe3ed45e9ca2a02e9d250e`.
+- **CI #995:** [SUCCESS](https://github.com/SimpleLife9/simplelife/actions/runs/45930338370), all 49 required steps completed successfully.
+- Root cause of the final runtime issue: the Emscripten pthread Worker script was same-origin and JavaScript, but its response had no `Cross-Origin-Embedder-Policy`. Chromium blocked its second fetch with `net::ERR_BLOCKED_BY_RESPONSE` under the isolated lab document.
+- Worker now adds `Cross-Origin-Embedder-Policy: credentialless` and `Cross-Origin-Resource-Policy: same-origin` only to the two vendored runtime module responses.
+- Tests require both headers and confirm Chromium actually creates the Worker from `/vendor/whisper-wasm/0.1.1/libmain-D9-QM3iM.mjs` during the hosted Preview test.
+- Hosted Preview PWA: **8 passed**, including v10→v11 cache upgrade, vendor assets/CORP+COEP, offline lab reopen, and hosted Whisper initialization plus synthetic WAV inference. The 1-second synthetic sample is silence, so Whisper correctly returned no transcript text; the acceptance assertion is that the local inference completes on-device without page errors or external inference requests.
+- Other checks: 57 browser tests passed, Deno tests/type-check passed, ephemeral Postgres/RLS passed, Edge Runtime passed, production build/PWA cold-start passed, exact Cloudflare Preview build/Service Worker passed.
+- **Not certified by this run:** transcription accuracy against spoken Spanish. Validate later with a synthetic/public speech sample on desktop and Android. The Inbox panel visibility/select-WAV browser check passes, but this run's actual model inference is performed by the isolated lab route.
+- No private Inbox audios were opened, downloaded or transmitted. No Supabase-hosted mutation, production deploy, provider/account/secret, paid endpoint or billing. Private voice queue remains disabled/fail-closed. PR #97 remains OPEN / DRAFT / NOT MERGED.
