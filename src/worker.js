@@ -1,4 +1,8 @@
 const STT_CPP_MODEL_ROUTE = "/__stt-whisper/";
+const STT_VENDOR_ASSETS = new Set([
+  "/vendor/whisper-wasm/0.1.1/index.es.js",
+  "/vendor/whisper-wasm/0.1.1/libmain-D9-QM3iM.mjs",
+]);
 const STT_CPP_MODEL_REVISION = "0b364b566045a405be7225ee1e415a073e04da77";
 const STT_CPP_MODEL_PREFIX = "ggerganov/whisper.cpp/resolve/" + STT_CPP_MODEL_REVISION + "/";
 const STT_CPP_MODEL_FILE = "ggml-tiny-q5_1.bin";
@@ -114,18 +118,24 @@ export default {
       && response.ok
       && (isSttLabDocument
         || url.pathname === "/experiments/stt-local/app.js");
+    const isSttVendorAsset = request.method === "GET"
+      && response.ok
+      && STT_VENDOR_ASSETS.has(url.pathname);
 
-    if (!isAppNavigation && !isHashedBuildAsset && !isSttLabAsset) return response;
+    if (!isAppNavigation && !isHashedBuildAsset && !isSttLabAsset && !isSttVendorAsset) return response;
 
     const headers = new Headers(response.headers);
     if (isSttLabAsset) {
-      // These stable public paths are deliberately mutable between Preview
-      // revisions. Never let the browser/CDN retain a previous lab build.
+      // Stable lab HTML and controller script must refresh between Preview revisions.
       headers.set("Cache-Control", "no-store");
     } else if (isAppNavigation) {
       headers.set("Cache-Control", "no-store");
     } else {
       headers.set("Cache-Control", "public, max-age=31536000, immutable");
+    }
+    if (isSttVendorAsset) {
+      headers.set("Content-Type", "text/javascript; charset=utf-8");
+      headers.set("X-Content-Type-Options", "nosniff");
     }
 
     // The isolated STT lab can be opened directly or precached by the service
