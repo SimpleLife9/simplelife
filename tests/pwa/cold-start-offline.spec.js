@@ -18,14 +18,6 @@ async function prepareOnlineShell(page) {
   });
 
   const documentResponse = await page.goto(appURL, { waitUntil: 'load' });
-  await page.evaluate(async () => {
-    await navigator.serviceWorker.ready;
-  });
-
-  if (!await page.evaluate(() => Boolean(navigator.serviceWorker.controller))) {
-    await page.reload({ waitUntil: 'load' });
-  }
-
   await page.waitForFunction(
     () => Boolean(navigator.serviceWorker.controller),
     null,
@@ -230,10 +222,6 @@ test('PWA shell v11 replaces v10 cached application and same-origin STT runtime 
     });
 
     await page.goto(appURL, { waitUntil: 'load' });
-    await page.evaluate(() => navigator.serviceWorker.ready);
-    if (!await page.evaluate(() => Boolean(navigator.serviceWorker.controller))) {
-      await page.reload({ waitUntil: 'load' });
-    }
     await page.waitForFunction(
       () => Boolean(navigator.serviceWorker.controller),
       null,
@@ -331,10 +319,6 @@ test('isolated local STT lab reopens from the service-worker cache while offline
   try {
     const onlinePage = await context.newPage();
     await onlinePage.goto(appURL, { waitUntil: 'load' });
-    await onlinePage.evaluate(() => navigator.serviceWorker.ready);
-    if (!await onlinePage.evaluate(() => Boolean(navigator.serviceWorker.controller))) {
-      await onlinePage.reload({ waitUntil: 'load' });
-    }
     await onlinePage.waitForFunction(
       () => Boolean(navigator.serviceWorker.controller),
       null,
