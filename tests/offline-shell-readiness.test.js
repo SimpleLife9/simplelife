@@ -13,7 +13,7 @@ test('the app readiness check uses the active Service Worker cache namespace', a
 });
 
 test('the app and isolated Whisper pages receive cross-origin isolation headers', async () => {
-  const headers = await readFile(new URL('../public/_headers', import.meta.url), 'utf8');
+  const headers = (await readFile(new URL('../public/_headers', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
   const blocks = headers.trim().split(/\n(?=\/)/);
   for (const route of ['/', '/index.html', '/experiments/stt-local/index.html']) {
     const section = blocks.find((value) => value.split('\n')[0] === route);
