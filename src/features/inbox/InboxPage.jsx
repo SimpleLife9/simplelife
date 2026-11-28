@@ -1004,7 +1004,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
                 const categoryLabels = { task: 'Tarea', event: 'Evento', request: 'Solicitud', habit: 'Hábito', goal_subgoal: 'Meta', project: 'Proyecto', note_idea: 'Nota / idea', list: 'Lista' };
                 return <div className="capture-part-review" key={capturePart.id}>
                   <div className="capture-part-heading"><strong>{categoryLabels[capturePart.category] || 'Fragmento'}</strong>
-                    {proposal && <span className="capture-part-confidence">Afinidad heurística: {Math.round(proposal.confidence * 100)}%{proposal.requiresClarification ? ' · necesita aclaración' : ''}</span>}
+                    {proposal && <span className="capture-part-confidence">Puntuación orientativa: {Math.round(proposal.confidence * 100)}%{proposal.requiresClarification ? ' · necesita aclaración' : ''}</span>}
                     {capturePart.review_status === 'accepted' || capturePart.review_status === 'edited' ? <span className="capture-part-confirmed">Confirmado</span> : null}
                   </div>
                   {capturePart.review_status !== 'unreviewed' && <div className="capture-part-history">
@@ -1075,7 +1075,7 @@ export function InboxPage({ profile, refreshKey, runAction, busy, setActivePage,
       </div>}
       {duplicateCheckError && <p className="form-error" role="status">{duplicateCheckError}</p>}
     </div>
-    <div className="honest-note"><span>ⓘ</span><p>Las sugerencias actuales se generan con reglas locales deterministas (no con un modelo de IA) y son orientativas. Cada fragmento conserva el texto original; ningún destino se crea sin tu confirmación. Las grabaciones de voz se conservan en almacenamiento privado. Solo se descarga el audio que eliges transcribir; la huella SHA-256 se verifica y Whisper se ejecuta en este dispositivo. Puedes corregir el texto antes de guardarlo como captura. El archivo original nunca se modifica ni se envía a un proveedor. Para recuperar el original privado necesitas conexión; el modo sin conexión cifra las capturas en este dispositivo. Guarda tu clave de recuperación fuera del dispositivo.</p></div>
+    <div className="honest-note"><span>ⓘ</span><p>Las sugerencias usan un clasificador estadístico de primera parte (no es un chat de IA ni envía tus notas a proveedores externos). El texto se procesa dentro del entorno de SimpleLife. Sus puntuaciones son orientativas, no probabilidades, y pueden equivocarse. Cada fragmento conserva el texto original y queda pendiente de tu revisión; ningún destino se crea sin tu confirmación. Las grabaciones de voz se conservan en almacenamiento privado. Solo se descarga el audio que eliges transcribir; la huella SHA-256 se verifica y Whisper se ejecuta en este dispositivo. Puedes corregir el texto antes de guardarlo como captura. El archivo original nunca se modifica ni se envía a un proveedor. Para recuperar el original privado necesitas conexión; el modo sin conexión cifra las capturas en este dispositivo. Guarda tu clave de recuperación fuera del dispositivo.</p></div>
 
     {selectedCapture && (
       <div className="task-editor-overlay capture-organizer-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) closeOrganizer(); }}>

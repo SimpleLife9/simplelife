@@ -963,17 +963,17 @@ async function mockSupabaseSession(page, initialData = {}) {
         return;
       }
       part.category = 'task';
-      part.interpretation = 'Sugerencia heurística; requiere confirmación.';
+      part.interpretation = 'Sugerencia estadística; requiere confirmación.';
       part.review_status = 'unreviewed';
       run.status = 'succeeded';
       run.result = {
-        engine: 'deterministic-rules',
-        processorVersion: 'inbox-rules-v1',
+        engine: 'first-party-statistical-hybrid',
+        processorVersion: 'inbox-tfidf-hybrid-v1',
         classification: 'advisory-only',
         proposals: [{ partIndex: 0, category: 'task', confidence: 0.68, requiresClarification: false }],
       };
       capture.processing_status = 'processed';
-      await json(200, { status: 'succeeded', engine: 'deterministic-rules', proposalCount: 1 });
+      await json(200, { status: 'succeeded', engine: 'first-party-statistical-hybrid', proposalCount: 1 });
       return;
     }
 
@@ -1661,7 +1661,7 @@ test('Inbox runs advisory processing, records review, and restores soft-deleted 
   expect(queueRequests).toHaveLength(1);
   expect(processingRequests).toHaveLength(1);
   expect(processingRuns[0].result).toMatchObject({
-    engine: 'deterministic-rules',
+    engine: 'first-party-statistical-hybrid',
     classification: 'advisory-only',
   });
   expect(captureParts[0]).toMatchObject({ category: 'task', review_status: 'unreviewed', original_fragment: original });

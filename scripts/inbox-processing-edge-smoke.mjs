@@ -299,8 +299,8 @@ try {
   equal(processResponse.status, 200, "owner-authenticated processing bridge status");
   const processBody = await responseJson(processResponse, "owner-authenticated process bridge");
   equal(processBody.status, "succeeded", "process bridge terminal state");
-  equal(processBody.engine, "deterministic-rules", "processor identity");
-  equal(processBody.processorVersion, "inbox-rules-v1", "processor version");
+  equal(processBody.engine, "first-party-statistical-hybrid", "processor identity");
+  equal(processBody.processorVersion, "inbox-tfidf-hybrid-v1", "processor version");
   equal(sqlScalar(
     "SELECT pr.status || ':' || c.processing_status FROM public.processing_run pr " +
     "JOIN public.capture c ON c.id=pr.capture_id WHERE pr.id='" + processQueueBody.runId + "'::uuid",

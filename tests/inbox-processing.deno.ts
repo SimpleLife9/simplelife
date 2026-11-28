@@ -280,8 +280,8 @@ Deno.test("authenticated process bridge keeps owner-scoped processing flow intac
   assertEquals(await body(response), {
     accepted: true,
     status: "succeeded",
-    engine: "deterministic-rules",
-    processorVersion: "inbox-rules-v1",
+    engine: "first-party-statistical-hybrid",
+    processorVersion: "inbox-tfidf-hybrid-v1",
     proposalCount: 1,
   }, "process bridge response");
   assertEquals(tables, ["user_profile", "processing_run"], "owner-scoped lookups");

@@ -1,4 +1,4 @@
-import { classifyInboxCapture, INBOX_RULE_PROCESSOR_VERSION } from "../_shared/inbox-rule-classifier.ts";
+import { classifyInboxCapture, INBOX_MODEL_PROCESSOR_VERSION } from "../_shared/inbox-rule-classifier.ts";
 import { uuidv7 } from "../_shared/uuidv7.ts";
 
 export const MAX_REQUEST_BYTES = 2 * 1024;
@@ -221,10 +221,10 @@ export async function handleRequest(
     }
 
     const resultPayload = {
-      engine: "deterministic-rules",
-      processorVersion: INBOX_RULE_PROCESSOR_VERSION,
+      engine: "first-party-statistical-hybrid",
+      processorVersion: INBOX_MODEL_PROCESSOR_VERSION,
       classification: "advisory-only",
-      confidenceMeaning: "heuristic-affinity-not-probability",
+      confidenceMeaning: "uncalibrated-softmax-ranking-score;explicit-category-cues-may-override",
       generatedAt: new Date().toISOString(),
       proposals,
     };

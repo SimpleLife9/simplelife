@@ -502,3 +502,32 @@ Read-only inspection was performed against the connected ARIA Supabase project `
 ### Closeout decision
 
 Phase 2 remains OPEN. The outstanding owner gates are: (1) unlock Android and private vault locally to review/save the three pending voice transcripts before the earliest 2026-12-02 02:03:15 UTC retention deadline; (2) choose a privacy-compatible model route and authorize a dedicated Inbox scope plus LIVE mission-budget/quota enforcement deployment; and (3) independent review and release approval for PR #97. No provider request, secret read, mission creation, migration, deployment, cron change or production data mutation occurred during this audit.
+
+## 17. Owner acceptance update — 28 November 2026
+
+### Verified on physical Android
+- [x] Owner unlocked the private offline vault locally; no passphrase or recovery key was shared.
+- [x] Three owner-authorized private recordings were transcribed on-device with the pinned Whisper.cpp WASM model.
+- [x] The resulting transcript text was explicitly saved as three new Inbox voice captures; the three captures remain in the normal user-review state.
+- [x] Two encrypted local/offline captures were synchronized using the app's normal **Sincronizar ahora** action.
+- [x] Read-only DEV verification: three new voice captures have unique IDs, `sync_status=synced`, `processing_status=not_started`, `attention_status=needs_review`, and exactly one source part each. Three audio assets are `transcribed` by `whisper.cpp-local`; five total voice assets are linked to five voice captures.
+- [x] Original audio was not replaced or deleted. No transcript text, passphrase, recovery key, or secret was exported into the audit output. No external provider request was made.
+
+### Privacy decision and Inbox classifier
+The owner delegated the route choice. Use a first-party statistical classifier inside the existing SimpleLife Supabase Edge Functions; do not send private Inbox content to external model providers. This is a TF-IDF + multinomial logistic regression model, **not** a generative LLM. Its artifact is synthetic-only, its scores are uncalibrated ranking metadata, and every suggestion remains advisory/unreviewed. See `docs/INBOX_LOCAL_CLASSIFIER_MODEL_CARD.md`.
+
+- Local targeted classifier tests: 7/7 PASS.
+- Full local Windows Node test suite: 207/207 PASS.
+- Local Vite production asset build: PASS (exit 0).
+- Exact-HEAD Edge Runtime, dispatcher/Deno tests and Preview checks: **pending** until this patch is committed and pushed.
+- No DEV or production deployment has yet been made for this model patch; no third-party inference, billing, provider secret, quota, ARIA mission, or mission-unpause action was performed.
+
+- [x] Browser-level Android offline cold reload: a fresh Chrome target was reloaded under DevTools offline network conditions; navigator.onLine=false, the Service Worker remained in control, simplelife-shell-v13 was cached, and the PWA rendered its offline state and Inbox navigation. The original owner Inbox tab was preserved. This does not toggle physical Android radios.
+
+### Remaining exit gates (not waived)
+1. Exact-SHA CI for the classifier artifact import, owner worker, scheduled dispatcher, Edge Runtime, SQL lifecycle and Preview.
+2. DEV deployment only after CI is fully green, followed by synthetic classification and owner-review workflow verification without creating destinations automatically.
+3. Physical Android airplane-mode cold-start, reconnect/idempotent sync retry after radio-off and recovery-key restore/rotation. Browser-level DevTools offline emulation passed, but physical radio-off behavior and recovery-key restore/rotation remain unverified.
+4. Independent human code review and merge/release decision for PR #97. Repository history currently shows only the owner as a code contributor; the PR has no independent review. The author must not self-approve.
+
+**Closeout remains OPEN.** A passing Node suite/build is not an Edge Runtime deployment, and a physical transcript save does not certify the remaining Android offline/recovery flows. Production remains untouched.

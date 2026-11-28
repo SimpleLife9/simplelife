@@ -2,14 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { classifyInboxCapture } from "../supabase/functions/_shared/inbox-rule-classifier.ts";
 
-test("rules engine proposes conservative category labels", () => {
+test("hybrid classifier proposes conservative categories using explicit cues and a statistical model", () => {
   assert.equal(classifyInboxCapture("Comprar leche")[0].category, "task");
   assert.equal(classifyInboxCapture("Mañana a las 9 reunión con Ana")[0].category, "event");
   assert.equal(classifyInboxCapture("Mi objetivo es correr 5 km")[0].category, "goal_subgoal");
   assert.equal(classifyInboxCapture("No olvidar la idea del menú")[0].category, "note_idea");
 });
 
-test("all eight Inbox categories have explicit deterministic classification coverage", () => {
+test("all eight Inbox categories have explicit classification coverage", () => {
   const cases = [
     ["task", "Comprar leche"],
     ["event", "Mañana reunión con Ana"],
@@ -26,6 +26,25 @@ test("all eight Inbox categories have explicit deterministic classification cove
     assert.ok(proposal.confidence >= 0 && proposal.confidence <= 1, source);
     assert.equal(typeof proposal.requiresClarification, "boolean", source);
   }
+});
+
+test("high-margin statistical predictions are available when no explicit cue exists", () => {
+  const source = "Una idea para explorar sería simplificar la experiencia de compra.";
+  const [proposal] = classifyInboxCapture(source);
+  assert.equal(proposal.category, "note_idea");
+  assert.ok(proposal.confidence > 0.55);
+  assert.equal(proposal.requiresClarification, false);
+  assert.match(proposal.interpretation, /no probabilidad calibrada/i);
+});
+
+test("low-score and overlapping predictions require clarification", () => {
+  const [unclassified] = classifyInboxCapture("No olvidar la idea del menú");
+  assert.equal(unclassified.requiresClarification, true);
+  assert.match(unclassified.clarificationPrompt, /qué quieres hacer o recordar/i);
+
+  const [overlapping] = classifyInboxCapture("Mañana comprar leche");
+  assert.equal(overlapping.requiresClarification, true);
+  assert.match(overlapping.clarificationPrompt, /más de una categoría/i);
 });
 
 test("multi-bullet input is split into reviewable parts without changing a character", () => {
@@ -46,19 +65,11 @@ test("leading and trailing whitespace around a multi-line capture is preserved e
   assert.equal(parts.at(-1).originalFragment.endsWith("\n  "), true);
 });
 
-
-test("ambiguous category matches return a contextual clarification prompt", () => {
-  const [overlapping] = classifyInboxCapture("Mañana comprar leche");
-  assert.equal(overlapping.requiresClarification, true);
-  assert.match(overlapping.clarificationPrompt, /más de una categoría/);
-
-  const [unclassified] = classifyInboxCapture("No olvidar la idea del menú");
-  assert.equal(unclassified.requiresClarification, true);
-  assert.match(unclassified.clarificationPrompt, /qué quieres hacer o recordar/i);
-});
-
-test("clear category matches do not request unnecessary clarification", () => {
-  const [task] = classifyInboxCapture("Comprar leche");
-  assert.equal(task.requiresClarification, false);
-  assert.equal(task.clarificationPrompt, null);
+test("classification remains advisory and never constructs a destination", () => {
+  const source = "El viernes tenemos cumpleaños en casa de mi madre.";
+  const [proposal] = classifyInboxCapture(source);
+  assert.equal(proposal.originalFragment, source);
+  assert.equal("destinationId" in proposal, false);
+  assert.equal("destination" in proposal, false);
+  assert.equal(typeof proposal.requiresClarification, "boolean");
 });

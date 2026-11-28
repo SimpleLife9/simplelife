@@ -1,4 +1,4 @@
-import { classifyInboxCapture, INBOX_RULE_PROCESSOR_VERSION } from "../_shared/inbox-rule-classifier.ts";
+import { classifyInboxCapture, INBOX_MODEL_PROCESSOR_VERSION } from "../_shared/inbox-rule-classifier.ts";
 import { uuidv7 } from "../_shared/uuidv7.ts";
 
 export const MAX_REQUEST_BYTES = 64 * 1024;
@@ -106,10 +106,10 @@ export async function handleRequest(
       return json({ error: "INBOX_CLASSIFICATION_FAILED" }, 503);
     }
     const resultPayload = {
-      engine: "deterministic-rules",
-      processorVersion: INBOX_RULE_PROCESSOR_VERSION,
+      engine: "first-party-statistical-hybrid",
+      processorVersion: INBOX_MODEL_PROCESSOR_VERSION,
       classification: "advisory-only",
-      confidenceMeaning: "heuristic-affinity-not-probability",
+      confidenceMeaning: "uncalibrated-softmax-ranking-score;explicit-category-cues-may-override",
       generatedAt: new Date().toISOString(),
       proposals,
     };
@@ -125,8 +125,8 @@ export async function handleRequest(
       return json({ error: "INBOX_PROPOSAL_PERSIST_FAILED" }, 503);
     }
     return completed.data === true
-      ? json({ accepted: true, status: "succeeded", engine: "deterministic-rules",
-          processorVersion: INBOX_RULE_PROCESSOR_VERSION, proposalCount: proposals.length }, 200)
+      ? json({ accepted: true, status: "succeeded", engine: "first-party-statistical-hybrid",
+          processorVersion: INBOX_MODEL_PROCESSOR_VERSION, proposalCount: proposals.length }, 200)
       : json({ error: "PROCESSING_LEASE_STALE" }, 409);
   }
 
