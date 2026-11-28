@@ -1,6 +1,6 @@
 # Phase 2 — Universal Inbox and Intelligent Capture
 
-**Status (27 November 2026):** PR #97 remains OPEN / DRAFT / NOT MERGED. Exact HEAD `8430ea182e73a633ac44c52b0b9a0d2d881d4e1f` passed CI #1017 (51/51 steps; 205 unit, 59 browser/mobile and 8 Preview PWA cold-launch checks). Owner confirmed two locally transcribed voice captures now appear in Inbox. Newest details are recorded in Section 15; older checkpoints below remain historical.  
+**Status (27 November 2026 AST):** PR #97 remains OPEN / DRAFT / NOT MERGED. Exact HEAD `21b6d228dfe7f9105bbb2635bffd8270c3247af7`; [CI #1024 SUCCESS](https://github.com/SimpleLife9/simplelife/actions/runs/46095529104). Windows ROBVG exact-SHA `npm test` 206/206 and `npm run build` PASS. CI passed unit, browser/mobile, ephemeral Postgres/RLS/migrations, actual Inbox/Agenda Edge Runtime, production build, offline PWA cold-start and Cloudflare Preview cold-launch after a full browser restart. Physical Android: Samsung SM-A165M / Android 17 / Chrome 158.0.8127.92; Whisper.cpp local transcription 3/3 on owner-authorized private recordings; no transcript was saved as a new capture and originals remain unchanged. Fresh owner-session Preview tab → Dashboard → Inbox PASS without manual refresh. Section 16 supersedes older device-specific checkpoints. Model-backed classification remains OPEN because the active processor is still `inbox-rules-v1` and ARIA mission-budget enforcement is not deployed LIVE. No production deploy or provider request.
 **Integration dependency:** Event destinations remain disabled until Agenda PR #93 is integrated and the authenticated Event writer is available. The provider-independent capture foundation in this PR does not depend on Agenda code.  
 **Source of product requirements:** ChatBending Master, Vision Phase B, and `docs/PRODUCT_PHASE_ROADMAP.md`.
 
@@ -222,3 +222,27 @@ The finalization RPC is service-role-only. The legacy authenticated RPC that acc
 - Model-backed classification remains OPEN. The Phase 2 classification implementation is still heuristic. Phase 2 must not be labelled 100% while the approved product requirement for model-assisted classification is left unresolved, unless the owner explicitly accepts deterministic-only classification as the final Phase 2 scope.
 - ARIA Planner remains Phase 3, not part of this Inbox release.
 
+
+
+## 16. Physical Android Whisper acceptance and Windows exact-SHA verification — 27 November 2026 AST
+
+### Windows test portability
+
+- Exact branch HEAD: `21b6d228dfe7f9105bbb2635bffd8270c3247af7`; [GitHub Actions CI #1024](https://github.com/SimpleLife9/simplelife/actions/runs/46095529104) SUCCESS.
+- Local Windows ROBVG test: `npm test` 206/206 PASS; `npm run build` PASS.
+- A local false failure was caused by Windows `core.autocrlf=true` converting `public/_headers` from LF to CRLF while the unit-test parser expected LF. The test now normalizes CRLF to LF before parsing sections. The committed header file and application runtime are unchanged by this correction.
+
+### Physical Android inference
+
+- Device: Samsung SM-A165M, Android 17 / SDK 37, Chrome 158.0.8127.92.
+- The owner had explicitly authorized all three private audio recordings to be transcribed. Each was selected individually in SimpleLife Preview and processed on-device with the pinned Whisper.cpp runtime; result: 3/3 local transcriptions completed.
+- The owner did not press **Guardar transcripción como captura**. The transcribed review text was not persisted as new Inbox captures. After re-entering Inbox, the original cards were again ready to transcribe. The original audio objects were not modified or deleted; no audio or transcript was sent to a remote provider.
+- A separate new tab opened the Preview directly, retained the owner session, reached a Service Worker-controlled page and navigated Dashboard → Inbox without a manual refresh. The original tab was preserved. ADB remained connected; temporary CDP port-forward 9222 was removed.
+
+### Current exit gates
+
+- Model-backed classification remains mandatory under the approved product scope; `inbox-rules-v1` is deterministic/heuristic, not a model.
+- ARIA PRs #1474–#1476 and #1478–#1484 remain OPEN/DRAFT/not merged. Their CI results are not LIVE deployment evidence. The latest recorded LIVE state retains `MISSION_EXECUTION_PAUSED=true` and lacks deployed mission-budget reservation enforcement.
+- No numeric budget policy or policy row was created, no provider request was made, and no private Inbox text was sent externally. The exact free-only request/token limits proposed for a synthetic test still require explicit owner approval before creating the policy or enabling a model route.
+- PR #97 remains OPEN/DRAFT/not merged and Preview-only. No production migration, hosted data write, secret change or deployment occurred.
+- **Verdict:** local Android Whisper inference PASS 3/3; Windows local suite PASS 206/206; exact-SHA CI #1024 PASS; PWA offline cold-start and Preview full-browser-restart PASS. Phase 2 remains OPEN for model-backed classification governance and Android transcript save/persistence acceptance.
