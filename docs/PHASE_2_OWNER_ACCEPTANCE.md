@@ -475,3 +475,30 @@ Keep the transcription worker disabled/fail-closed. The five private originals r
 - **OPEN:** explicit physical Android transcript review/save persistence; dedicated privacy-approved model classification route and LIVE budget enforcement; independent review/merge/release decision for PR #97.
 - The owner must unlock the Android device and the SimpleLife private vault locally before the physical transcript-save acceptance can be performed. Never send the passphrase or recovery key in chat. No original audio has been changed or deleted.
 - No merge, production deploy, hosted migration, secret/billing change, provider request, ARIA unpause or cron reactivation occurred.
+
+
+## 34. Direct ARIA LIVE database/runtime audit — 28 November 2026 AST
+
+### Verified deployed state
+
+Read-only inspection was performed against the connected ARIA Supabase project `icuqsstxfdbvjytkhlog` (ACTIVE_HEALTHY, us-east-1), not the SimpleLife DEV project.
+
+- Deployed Edge Functions: `aria-execution-runtime-v1` v237, `aria-mission-intake-v1` v194, `aria-app-api-v3` v395. Their deployed source still sets `MISSION_EXECUTION_PAUSED=true`.
+- The LIVE mission-intake function only admits Mission Wonder 2 A4/A5 scope rows while paused. A genuine canonical mission issuer exists (`aria_mission_create(p_mission jsonb)`), but no dedicated SimpleLife Inbox scope exists.
+- The LIVE execution runtime has no mission-budget guard import or reserve/settle calls. It still uses `quota_reserve_model_request_v1`.
+- LIVE schema: 4,490 mission_state rows, 0 running; 4,776 mission_steps; 130 historical quota reservations. `mission_budget_policy_v1` and `mission_budget_reservations_v1` are absent; no mission-budget reserve/settle function exists. Cron jobs 48, 49 and 50 are inactive.
+
+### Provider capacity and privacy gates
+
+- Google Gemini Free Direct account/model are enabled and marked available; capability is verified for `text_generation` only. Its LIVE quota row records 124 requests / 57,914 tokens, but numeric ceilings and period/reset timestamps are NULL; last update 15 Nov 2026. The model registry notes the 2 Oct current certification attempt did not produce a valid completion.
+- OpenRouter Nemotron `:free` is enabled and historically verified for `text_generation`, but the model registry explicitly blocks route selection until a new LIVE completion succeeds. Its account-wide free quota snapshot is from 7 Nov 2026 and stale; current usage is unknown.
+- LIVE SQL definition of `quota_reserve_model_request_v1` has an unknown-quota weakness for Google: when `limits_requests IS NULL`, it enters the unbounded branch and increments usage without enforcing a verified numeric ceiling. Do not route provider calls through this function until a fail-closed quota guard and budget enforcement are deployed. The router-gating PR #1476 is not LIVE.
+- Public $0 pricing is not sufficient to authorize personal Inbox content. Google's Free Tier states content may be used to improve products; OpenRouter's free-model guidance warns against confidential/personal data. No provider GET/POST or inference was performed.
+
+### CI on documentation commit
+
+- Documentation-only PR head `03c5f71feac2616863e283b88e4ae4cc3069a859` passed CI run #1026 (`46103610532`): all 48 steps completed successfully. The tested application code tree remains the previously certified code SHA `2087544cd4cf3c3fda0bba10a1be13628cf5e1cf`; the new commit only updates this acceptance document.
+
+### Closeout decision
+
+Phase 2 remains OPEN. The outstanding owner gates are: (1) unlock Android and private vault locally to review/save the three pending voice transcripts before the earliest 2026-12-02 02:03:15 UTC retention deadline; (2) choose a privacy-compatible model route and authorize a dedicated Inbox scope plus LIVE mission-budget/quota enforcement deployment; and (3) independent review and release approval for PR #97. No provider request, secret read, mission creation, migration, deployment, cron change or production data mutation occurred during this audit.
