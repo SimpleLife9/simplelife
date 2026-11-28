@@ -48,8 +48,8 @@ async function readBoundedBody(request: Request): Promise<string | null> {
 
 /**
  * Server-to-server queue worker contract. The secret key is accepted only in
- * the apikey header by @supabase/server. The process action uses local
- * deterministic rules and never creates destinations or calls an external provider.
+ * the apikey header by @supabase/server. The process action uses a bundled
+ * first-party statistical model, never creates destinations, and never calls an external provider.
  */
 export async function handleRequest(
   request: Request,
