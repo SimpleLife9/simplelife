@@ -444,3 +444,34 @@ Keep the transcription worker disabled/fail-closed. The five private originals r
 - PR #97 remains OPEN / DRAFT / NOT MERGED. Preview only; no production deploy, hosted database write/migration, secret change or provider request.
 - ARIA safety chain #1474–#1476 and #1478–#1484 remains OPEN / DRAFT / NOT MERGED; current PR workflows inspected in this audit were successful, but CI is not deployment evidence. The latest recorded LIVE state remains `MISSION_EXECUTION_PAUSED=true` with no LIVE mission-budget reservation enforcement. No budget policy row was created and no model call was made; an explicitly approved numeric free-only policy and deployed guard remain prerequisites.
 - **Verdict:** Windows test portability PASS; 206/206 local tests PASS; CI #1024 PASS; production build PASS; Android local inference PASS 3/3; Android fresh Preview navigation PASS. Phase 2 remains OPEN for model-backed classification governance, Android transcript save/persistence acceptance, and PR review/merge/release.
+
+
+## 33. Windows Inbox E2E 23/23 and ARIA classification scope audit — 28 November 2026 AST
+
+### Exact-HEAD Windows Inbox E2E — PASS
+
+- Exact code HEAD under test: `2087544cd4cf3c3fda0bba10a1be13628cf5e1cf` (PR #97 branch `feat/phase2-inbox-completion-v1`).
+- On the authorized ROBVG PC, using already-installed Chrome 158.0.8127.92 and the repository's local Vite app server, ran the 23 Playwright tests matching `Inbox` in `tests/e2e/app-data.spec.js` with one worker and synthetic browser mocks. Final reporter: **23 passed (3.0m)**.
+- Coverage includes transcript ordering, Inbox search/review/archive/restore, partial-save retry/idempotency, processing lifecycle, owner clarification, pagination, project/goal provenance, duplicate detection, event conversion, private voice asset checks, and mobile voice capture/transcription controls.
+- The first isolated attempt used port 5199, but the mock's CORS response is deliberately hard-coded to `http://127.0.0.1:5173`; those failures were caused by the test harness origin mismatch. Re-running on the repository's canonical 5173 origin passed all 23 Inbox tests. No hosted DEV/production writes or provider calls occurred.
+- The broader 59-test run is **NOT CERTIFIED**: it hit an unrelated task-form label locator in the first non-Inbox test and did not produce a complete final summary. Do not claim all 59 passed. CI #1025 remains exact-HEAD SUCCESS for the committed pipeline gates.
+- Cleanup: temporary Playwright config/results removed; only the Vite test server started by this audit was terminated; ports 5173 and 5199 have no listening test server; git worktree clean and HEAD unchanged after the test.
+
+### ARIA mission issuer — corrected finding
+
+- A genuine canonical ARIA mission-intake chain exists: `aria-app-api-v3 → aria-direct-v1 → aria-mission-intake-v1 → aria_mission_create`. The earlier audit statement that no legitimate ARIA mission issuer existed was too broad.
+- This does not provide a valid SimpleLife Inbox classification path today. With `MISSION_EXECUTION_PAUSED=true`, the existing intake/runtime paths remain limited to Mission Wonder 2 A4/A5 read-only scopes, the separate Gate 3 one-shot probe, Cloudflare read-only plan preview, and strict conversation-only requests. Gate 3 is bound to its own mission/step, Human Gate, short fixed probe and one-call scope; none is a general Inbox classification route.
+- Normal mission execution requires a real persisted mission/step plus budget reservation. The mission-budget ledger/runtime enforcement PR chain remains OPEN/DRAFT and is not confirmed deployed LIVE. The missing component is a dedicated authorized Inbox classification scope and deployed budget enforcement, not all ARIA mission issuance.
+
+### $0 model route and privacy — research only, not an authorization
+
+- Google's official pricing currently lists `gemini-3.5-flash-lite` Standard Free Tier input/output as free of charge, but also states Free Tier content may be used to improve Google's products. It is not approved for personal Inbox content under privacy-by-default without explicit owner acceptance. Source: https://ai.google.dev/gemini-api/docs/pricing
+- OpenRouter currently lists `nvidia/nemotron-3.5-lightning:free` at $0 input/output; its current free-model guidance warns against sending confidential/personal data and notes free capacity/rate limits vary. Synthetic fixtures only. Sources: https://openrouter.ai/es/nvidia/nemotron-3.5-lightning%3Afree and https://openrouter.ai/blog/insights/nemotron-3-5-lightning/
+- Public pricing does not prove the connected account's remaining quota, route availability, current ARIA registry state, or a live budget reservation. No key was read; no provider GET/POST or inference was performed. The previously approved one-request synthetic test remains blocked until those account-specific gates and the dedicated Inbox scope are verified.
+
+### Current owner gates — Phase 2 remains OPEN
+
+- **PASS:** exact-HEAD CI #1025; Windows unit 206/206 and build; Windows Inbox Playwright 23/23; Android local Whisper inference 3/3; fresh Android Preview Dashboard → Inbox navigation.
+- **OPEN:** explicit physical Android transcript review/save persistence; dedicated privacy-approved model classification route and LIVE budget enforcement; independent review/merge/release decision for PR #97.
+- The owner must unlock the Android device and the SimpleLife private vault locally before the physical transcript-save acceptance can be performed. Never send the passphrase or recovery key in chat. No original audio has been changed or deleted.
+- No merge, production deploy, hosted migration, secret/billing change, provider request, ARIA unpause or cron reactivation occurred.
