@@ -6,10 +6,16 @@ const USER_PASSWORD = "Agenda-Edge-CI-Only-Password-2026!";
 
 function fail(message) { throw new Error(message); }
 
+function redactSensitiveOutput(value) {
+  return String(value)
+    .replace(/\b(sb_secret|sb_publishable)_[A-Za-z0-9_-]+/g, "$1_[REDACTED]")
+    .replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "[REDACTED_JWT]");
+}
+
 function run(command, args) {
   const result = spawnSync(command, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   if (result.status !== 0) {
-    fail(command + " " + args.join(" ") + " failed (exit " + result.status + "):\n" + result.stdout + "\n" + result.stderr);
+    fail(command + " " + args.join(" ") + " failed (exit " + result.status + "):\n" + redactSensitiveOutput(result.stdout + "\n" + result.stderr));
   }
   return result.stdout + result.stderr;
 }

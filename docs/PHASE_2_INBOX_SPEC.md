@@ -1,0 +1,265 @@
+# Phase 2 — Universal Inbox and Intelligent Capture
+
+**Status (27 November 2026 AST):** PR #97 remains OPEN / DRAFT / NOT MERGED. Exact HEAD `21b6d228dfe7f9105bbb2635bffd8270c3247af7`; [CI #1024 SUCCESS](https://github.com/SimpleLife9/simplelife/actions/runs/46095529104). Windows ROBVG exact-SHA `npm test` 206/206 and `npm run build` PASS. CI passed unit, browser/mobile, ephemeral Postgres/RLS/migrations, actual Inbox/Agenda Edge Runtime, production build, offline PWA cold-start and Cloudflare Preview cold-launch after a full browser restart. Physical Android: Samsung SM-A165M / Android 17 / Chrome 158.0.8127.92; Whisper.cpp local transcription 3/3 on owner-authorized private recordings; no transcript was saved as a new capture and originals remain unchanged. Fresh owner-session Preview tab → Dashboard → Inbox PASS without manual refresh. Section 16 supersedes older device-specific checkpoints. Model-backed classification remains OPEN because the active processor is still `inbox-rules-v1` and ARIA mission-budget enforcement is not deployed LIVE. No production deploy or provider request.
+**Integration dependency:** Event destinations remain disabled until Agenda PR #93 is integrated and the authenticated Event writer is available. The provider-independent capture foundation in this PR does not depend on Agenda code.  
+**Source of product requirements:** ChatBending Master, Vision Phase B, and `docs/PRODUCT_PHASE_ROADMAP.md`.
+
+## 1. Objective
+
+Make the Inbox the single, low-friction entry point for things the user wants to remember or act on. A capture must remain traceable to its original input, recoverable after processing failures, and safe to correct. Classification is advisory until the user confirms an organization action.
+
+Phase 2 is not the ARIA planner. It does not select what the user should do next, schedule tasks, move commitments, or autonomously change the user's day; those belong to Phase 3.
+
+## 2. Approved product scope
+
+- Global quick capture by text and voice.
+- Transcribe voice while preserving the original capture.
+- Split one capture containing multiple ideas into independently reviewable parts without losing or rewriting the original.
+- Suggest the eight approved category groups: task, event, request, habit, goal/subgoal, project, note/idea, and list.
+- Use contextual confidence; ask only when ambiguity is material. Never silently create an incorrect destination.
+- Show proposed destinations and preserve the link from every confirmed destination back to its source capture.
+- Provide views for clarification, authorization, processing/synchronization, recent activity, and all captures.
+- Support correction history, assisted duplicate detection/merge proposals, recoverable trash, search, archive, and explicit permanent deletion.
+- Design offline capture, recovery, retry and idempotent synchronization so that loss or duplicate creation is prevented before enabling offline writes.
+
+## 3. Existing baseline — reuse, do not duplicate
+
+The first core migration already defines:
+
+- `capture`: owner and creator, input type (`text|voice|file|import`), original content, capture timestamp, processing/attention/sync states and soft-delete/retention fields.
+- `capture_part`: indexed fragments, interpretation, the eight category values and review state.
+- `processing_run`: processor version, state, attempt number, idempotency key and JSON result/error evidence.
+- `capture_link`: suggested/confirmed/rejected links with confidence and one existing destination FK.
+- Existing destination tables for tasks, goals/subgoals, projects, notes/ideas and lists/list items.
+
+The present Inbox already supports manual text capture, original-content search, review/archive/restore, and manual organization as a task, note/idea or list. Phase 2 must extend that flow rather than replace it or create a parallel capture table.
+
+### Destination readiness boundary
+
+Classification and destination creation are different operations.
+
+- Existing destinations may be proposed and confirmed only through their existing validated creation paths.
+- An Event may be a supported destination only after Agenda PR #93 is integrated and the authenticated Event contract is available.
+- Habit and Request can be classified as suggestions, but cannot create records until their product phases and destination contracts exist.
+- A category suggestion must never be represented as a confirmed link when the destination does not exist.
+
+## 4. Processing contract
+
+1. Capture the raw input and persist it before any AI work. A failed processor must never erase the capture.
+2. Keep `content_original` unchanged. Transcription, normalized text, fragments, interpretations and corrections are separate derived data.
+3. Run classification through a server-controlled processor. Browser code must not contain provider credentials.
+4. Treat model output as untrusted input: validate category, confidence, fragment boundaries, ownership context and destination readiness before it is stored or displayed.
+5. Persist proposals as unreviewed. Even a high model confidence value is not user consent.
+6. Create or link a destination only after explicit user confirmation; revalidate owner scope and destination constraints at the write boundary.
+7. Make retries idempotent using the existing processing-run key and destination idempotency boundaries. Replaying a completed attempt must not create extra parts or destination rows.
+8. Record processor version, state, result and safe error metadata. Do not store secrets, raw prompts containing credentials, or unnecessary sensitive information in logs.
+
+## 5. Multi-item splitting and provenance
+
+The original capture remains the canonical source. Each proposed part has a stable index and an exact substring of the original, using JavaScript UTF-16 string offsets at the client/domain boundary. Part ranges must be contiguous, non-overlapping and cover the full original string; separators and whitespace are retained as part of adjacent fragments. If the processor cannot establish a lossless split, it must return one whole-capture part or request review rather than dropping text.
+
+Every confirmed destination must retain a traceable `capture_link`. Corrections and future merges must preserve source identity and history; merging is a proposal, never a destructive automatic rewrite.
+
+## 6. Confidence and clarification
+
+The model's numeric confidence is metadata, not a calibrated probability or authorization. Do not invent a universal confidence threshold in this phase kickoff. The processor may mark an interpretation as materially ambiguous and provide a concise clarification prompt. The UI must keep the part unreviewed until the user accepts, edits, rejects or resolves it.
+
+## 7. Voice and media boundary
+
+The schema accepts `input_type='voice'`, while `content_original` remains text. The integration branch implements a private audio-object lifecycle in DEV: a non-public `inbox-voice-private` bucket, owner/asset-scoped object paths, an upload state that cannot be promoted by the browser, and bounded retention for abandoned/unlinked audio. The browser-provided SHA-256 is only an expected digest: after upload, the authenticated `inbox-voice-finalize` Edge Function downloads the private object, checks its actual byte size, recomputes SHA-256 server-side and finalizes only on a match. The finalization RPC is service-role-only; the legacy client-callable digest RPC is revoked. The UI records audio but never places raw bytes or a public media URL in `content_original`.
+
+**Current implementation — local Whisper.cpp (27 November 2026):** speech-to-text is implemented in the browser using the pinned Whisper.cpp WASM runtime and model. The owner explicitly selects an eligible private recording; the browser downloads only that object, checks its expected SHA-256 and runs inference on-device. Audio bytes are not sent to ARIA, Cloudflare Workers AI, Google, OpenRouter or another STT provider. The reviewed transcript is saved only after the owner presses **Guardar transcripción como captura**, through the authenticated owner-scoped DEV RPC; a new Inbox capture and source part are linked to the original audio asset. The original object is not replaced or deleted. This closes the external-provider requirement for transcription; it does not implement model-backed classification.
+
+## 8. Security, privacy and reliability guardrails
+
+- Preserve RLS and owner isolation across capture, part, processing-run and link joins; add two-user tests for reads and writes.
+- The browser must not write processor-owned state or audit records that are meant to be server-controlled.
+- Use authenticated Edge Functions/RPC for privileged processing and destination writes; validate the user JWT and derive owner/actor IDs from the verified identity.
+- Keep processing credentials server-side. Never add provider keys to Vite variables, browser bundles, Git, or client-visible logs.
+- Do not widen grants, weaken RLS, expose public storage, or bypass append-only audit.
+- Offline private capture is implemented behind the user-unlocked vault in the integration branch: AES-GCM ciphertext in IndexedDB, passphrase-derived key wrapping, a one-time 256-bit recovery key, stable capture/part IDs and acknowledgement-gated local deletion. Automated encryption/recovery/sync tests and SQL owner/idempotency tests pass in CI. Keep platform acceptance, conflict/recovery behavior on real devices and final owner sign-off as open gates; never bypass the locked-vault boundary.
+- Permanent deletion is a separate explicit action with recoverability/retention safeguards; it is never an incidental side effect of archive or merge.
+
+## 9. Delivery slices
+
+1. **Contract and pure-domain validation (this kickoff):** define categories, lossless part boundaries, unreviewed proposal semantics and the provider-independent boundary.
+2. **Text capture foundation:** extract the composer/capture flow into Inbox feature modules without changing behavior; test persistence, source preservation, double-submit protection and owner isolation.
+3. **Processing pipeline:** authenticated server-side queue/claim/complete/retry lifecycle backed by `processing_run`; validate outputs and idempotency in ephemeral PostgreSQL/Edge Runtime tests.
+4. **Review and destination flow:** confidence-aware suggestions, clarification, correction history and explicit confirmation; gate destinations that are not yet implemented.
+5. **Voice capture/transcription:** private voice recording/storage and browser-local Whisper.cpp transcription are implemented in DEV/Preview. The owner-reviewed transcript is saved into Inbox through an owner-scoped RPC; no STT provider is used. The current manual acceptance and remaining device-specific checks are recorded in Section 15.
+6. **Search, deduplication and recoverable deletion:** traceable proposals and explicit confirmation; no destructive auto-merge.
+7. **Offline and synchronization:** the encrypted local vault and idempotent sync path are implemented and covered by automated tests; finish owner acceptance on desktop and physical Android, including airplane-mode reopen, recovery-key rotation, reconnect and duplicate-free retry.
+
+Each slice should be a focused PR with exact-SHA CI. The phase closes only when the full end-to-end capability is usable and the required manual acceptance is recorded.
+
+## 10. Acceptance criteria
+
+- Text and voice captures preserve their original source and can be recovered after a processing failure.
+- Multi-item captures split without omissions, overlaps or altered source text.
+- All eight classifications are validated; suggestions never silently become confirmed destinations.
+- Clarification is requested only for materially ambiguous cases; the user can correct or reject proposals.
+- Every created destination has a verified owner-scoped provenance link to the original capture.
+- Retried processing and synchronization do not duplicate parts, links or destinations.
+- Two-user isolation, server-only processor permissions, audit integrity and deletion/retention rules pass automated tests.
+- Desktop and physical Android acceptance are recorded separately from Playwright viewport tests.
+- No feature is called offline-ready or voice-complete without its platform-specific tests and evidence.
+
+## 11. Explicitly out of scope
+
+- ARIA daily prioritization, scheduling and "my day changed" replanning (Phase 3).
+- Habit tracking and exercise logging as a destination system (Phase 4).
+- Request acceptance/shared participant workflows (Phase 7).
+- Guaranteed background recording, offline private synchronization or push delivery (Phase 9).
+- Automatic creation of Event, Habit or Request records before their destination contracts are integrated.
+
+
+## 12. Implementation checkpoint — 23 November 2026
+
+**Status: OPEN / DRAFT / NOT MERGED; Phase 2 is not owner-accepted or closed.** Consolidated delivery is tracked in [PR #97](https://github.com/SimpleLife9/simplelife/pull/97). The 24 November DEV baseline and its evidence are recorded below; every subsequent branch commit still requires exact-SHA CI.
+
+### Delivered in the integration branch
+
+- Lossless text capture foundation, with original text retained and first fragment persisted.
+- Secure processing_run queue with owner-scoped enqueue, UUIDv7 idempotency keys, leases, claim/complete/fail lifecycle, bounded retry state and stale-lease rejection.
+- Owner-authenticated processing bridge. The browser can only request a run visible through its own RLS-scoped client; service-role operations remain server-side.
+- Provider-free deterministic rules processor (inbox-rules-v1) that proposes the eight categories. This is explicitly **heuristic processing, not an AI model**; confidence is heuristic affinity, not a probability.
+- Multi-item splitting only at explicit list/bullet boundaries. The SQL completion RPC validates that concatenating every stored fragment reconstructs content_original exactly. Parts remain unreviewed.
+- Inbox UI processing/retry control, per-part review, manual correction, rejection, and explicit task, Agenda Event, existing Goal/Subgoal, Project, note/idea and list destination confirmation. Existing objectives are linked rather than duplicated; no destination is created by classification.
+- Owner-scoped, audited, recoverable trash with a 30-day retention window and idempotent restore/trash RPCs.
+- Authenticated Inbox → Agenda Event creation through the existing idempotent Agenda writer, with a single-target owner-scoped provenance link to `calendar_event`.
+- Indexed full-text search across the complete capture archive, paginated in 100-row pages rather than limited to the latest 250 captures.
+- Normalized duplicate discovery across all active captures belonging to the owner. Duplicates are never merged or deleted automatically.
+- Secret-only bounded retry dispatcher (maximum 10 jobs per invocation) that reclaims due/expired leases, persists proposals atomically and marks transient failures retryable. Its scheduled invocation is now configured in `Simplelife_dev` through `pg_cron` and a Vault-held token; production remains untouched.
+- CI coverage for classifier and worker contracts, browser desktop/mobile, ephemeral PostgreSQL RLS/lifecycle/audit, Edge Runtime smoke, Deno type checks and production build.
+
+
+- All capture-level attention transitions (needs review → reviewed/archived and return to pending) now use an owner-authenticated, idempotent RPC with before/after audit. Repeating the same state is a no-op and does not duplicate audit records.
+- Processed captures re-fetch their proposal metadata by capture ID before opening the review confirmation gate; confirmation is disabled while verification is pending or unavailable. This avoids relying on only the latest 100 queue rows and fails closed on missing metadata.
+- Trash, restore and part-review RPCs validate UUIDv7 audit IDs. Part review locks the parent capture before its part so review cannot race past trash or retention deletion.
+- Per-fragment correction history is exposed in the Inbox UI; it shows the prior/new category, interpretation and review status with timestamp. Audit reads are constrained by owner RLS.
+- Proposals marked as materially ambiguous carry a concise contextual clarification question and require a non-empty owner-provided answer in the review dialog before confirmation; the answer is written to the audited interpretation field while `content_original` stays unchanged. Request/Habit suggestions remain their own unimplemented destination types and cannot be confirmed as Tasks by default.
+
+### Remaining exit gates — reconciled 24 November 2026
+
+1. **Transcription + model-backed classification:** voice recording is stored privately, but no speech-to-text or external classification call is active. The owner authorized Cloudflare Workers AI as a fallback, with ARIA's canonical Model Routing preferred after its planned recovery on 26 November. Provider integration remains deferred; maintain deterministic rules as the safe baseline. No paid usage is authorized.
+2. **Offline owner acceptance:** encrypted IndexedDB vault, passphrase/recovery-key wrapping, stable IDs and idempotent sync are implemented; CI covers the cryptographic and SQL contracts. Desktop and physical Android acceptance are still pending, including secure recovery-key storage, airplane-mode restart, reconnect and duplicate-free retry.
+3. **Scheduler E2E with a real owner-owned DEV capture: PASS — 24/11/2026.** The real scheduled cron processed one disposable owner capture (`claimed=1`, `succeeded=1`), preserved the source exactly, left both parts unreviewed and created zero destinations. Terminal idempotency was verified and all fixture rows were removed. A separate manual trigger returned one transient 503; the next scheduled cycle passed.
+4. **Hosted retention E2E:** text-capture purge is PASS — 24/11/2026, with deletion of a disposable expired capture and a content-free audit receipt. Physical Storage deletion of an expired voice object remains unverified; the Deno suite covers Storage failure, malformed response and retry ordering, but that is not a hosted-object E2E.
+5. **Voice staging retention policy:** client INSERT is bounded to a non-NULL window no longer than seven days; the migration repairs any legacy unlinked staging row with missing or overlong expiry. SQL RLS regressions reject NULL and eight-day client values.
+5. **Manual acceptance:** desktop and physical Android acceptance remain pending. Playwright desktop/mobile viewports do not replace the owner's real devices.
+6. **Provider/privacy record:** before the first AI/audio request, record the exact model, provider route, data region, retention terms, quota/free-only guard, timeout and fallback behavior. Do not send private capture/audio to a provider before that preflight.
+7. **Destination readiness:** Inbox can link to existing Goal/Subgoal and Project records and create Events through Agenda. Habit and Request remain proposals only because their owning destination workflows belong to later product phases.
+
+### DEV technical evidence — 24 November 2026
+
+- Repository branch `feat/phase2-inbox-completion-v1`; deployed backend baseline SHA `5be9e0509d09d85ade9079a65960fa629635e997`; GitHub Actions [CI #775](https://github.com/SimpleLife9/simplelife/actions/runs/45314068626) SUCCESS, 44/44 steps, including Playwright desktop/mobile, Deno/type checks, 10 Inbox SQL suites, five Edge Runtime checks and production build. Later UI/documentation commits require their own exact-SHA CI.
+- `Simplelife_dev` (`iybnjrnysiikbtokyshg`) reports all 21 repository migrations applied. Queue/worker/process/dispatcher/scheduled functions are ACTIVE. The private `inbox-voice-private` storage bucket is non-public.
+- `simplelife-inbox-dispatcher` is active on `* * * * *`; the scheduler token exists in Vault without being read into owner-facing output. Recent cron runs report `succeeded`; scheduled Edge logs show repeated `POST 200` responses.
+- This is DEV-only evidence. It does not certify production, physical Android behavior, actual transcription, or model-backed AI.
+
+No production migration, production Edge deployment, provider request, billing change, merge, release or production data write was performed. Do not mark Phase 2 closed until required exit gates are implemented and evidenced or explicitly accepted as deferrals by the owner.
+
+
+## 13. DEV checkpoint — 24 November 2026
+
+- **Exact-SHA CI #781:** SUCCESS on `bcec3df93893c2ffa21f4bae2baf35313bc3e4d5`. CI #782 is validating the subsequent Storage-purge response and failure-recovery changes; record its final result separately.
+- **Hosted scheduler E2E:** PASS. The real one-minute cron processed a disposable owner-owned capture on `Simplelife_dev`; one run succeeded, the exact source was reconstructed, parts remained unreviewed, and no destination was created. Replaying the terminal idempotency key returned the same run; a new key was rejected. Fixture data and audio metadata were removed.
+- **Hosted text retention E2E:** PASS. The scheduled dispatcher deleted a disposable capture whose 30-day recovery window had expired and preserved only a content-free `capture.purged` system audit receipt.
+- **Voice Storage boundary:** audio is uploaded directly by the authenticated browser to the private owner-scoped bucket; no provider request occurs. The server checks the stored object size before finalization. The SHA-256 field is currently a browser-computed value and is not independently recomputed server-side. Physical hosted deletion of a disposable audio object remains a separate acceptance gate.
+- **Private audio purge:** the dispatcher deletes the Storage object before completing metadata/audit removal. It now requires Storage's documented array response; Storage errors or malformed responses fail closed. If Storage deletion succeeded but metadata completion failed, the next run repeats Storage removal before retrying metadata completion. Deno tests exercise these paths; CI #782 supplies the exact-SHA result.
+- **Offline vault:** five automated tests passed in CI #781. Desktop and physical Android owner acceptance remain open.
+- **Provider boundary:** transcription and model-backed classification remain disabled until ARIA Model Routing is available on 26 November and the provider/model/region/retention/free-quota/fallback checks are completed. Cloudflare Workers AI remains an approved but inactive fallback. No paid billing, production migration, deploy, merge or release is authorized by this checkpoint.
+
+
+## 8. Server-verified voice asset integrity
+
+The browser may calculate a SHA-256 value as an expected upload digest, but that value is not proof of object integrity. After upload, the browser invokes the owner-authenticated `inbox-voice-finalize` Edge Function with only the staging asset ID. The server resolves the active owner from the verified JWT, reads the corresponding owner-scoped metadata, downloads the object from `inbox-voice-private`, checks its actual byte size, and computes SHA-256 from the downloaded bytes. It must match the registered digest before any status transition. Repeating the request after a successful but unacknowledged response downloads and verifies the same object again, then returns an idempotent replay receipt; it never trusts the `uploaded` status alone.
+
+The finalization RPC is service-role-only. The legacy authenticated RPC that accepted a browser-provided digest is revoked. A mismatch, missing object, malformed metadata, or Storage failure must fail closed and leave the asset unfinalized for bounded staging retention cleanup. No transcription/provider calls are part of this path.
+
+
+## 14. Current exit-gate status — 24 November 2026 (AST)
+
+- **Current exact-SHA CI: PASS.** [CI #45524632163](https://github.com/SimpleLife9/simplelife/actions/runs/45524632163) finished SUCCESS, 46/46 steps, on `49b5e2dab27fdb1000569e22d49dbfced7cfde14`. It includes the latest connectivity indicator and vault-error localization tests, browser/mobile E2E, SQL/migrations, Deno, Edge Runtime and production build.
+- **Cloudflare Preview build: PASS** for the same SHA in `simplelife-inbox-p2-preview`. The owner confirmed the manual Preview checks for the new connectivity labels and incorrect-passphrase message.
+- **Hosted DEV voice retention: PASS.** On 24 Nov, the scheduled endpoint request 864 returned HTTP 200 with `audioPurgedCount=1` and `audioPurgeFailed=false`. Read-back verified zero matching private Storage objects, zero audio metadata rows and one content-free append-only `capture.audio_purged` receipt. This supersedes the earlier checkpoint that listed hosted physical voice deletion as pending.
+- **Offline owner acceptance: PARTIAL PASS.** Android encrypted two synthetic captures while offline, auto-locked when backgrounded, then synchronized after reconnect; the queue returned to zero and both captures appeared once. The Android one-time recovery key was not saved, so recovery/rotation was not verified; force-close/reopen offline is also still open. Desktop connectivity indication was manually tested with Chrome DevTools per-tab Offline, but a complete desktop offline-save/reconnect/interrupted-retry E2E is not separately evidenced.
+- **Still OPEN:** Android recovery-key safekeeping and restore test; Android force-close/reopen in airplane mode; desktop offline capture and retry owner acceptance; physical Android voice-recording/privacy/control acceptance; ARIA Model Routing and transcription. Scheduler failure visibility is PASS in DEV logs; observed intermittent DNS timeouts remain an operational watch item. The owner prefers ARIA's canonical routing after its planned recovery on 26 Nov. Cloudflare Workers AI is an approved but inactive fallback. Do not send user captures/audio to a provider before model, region, retention, free quota and fallback behavior are reviewed; no paid billing is authorized.
+- **Release boundary:** PR #97 is OPEN / DRAFT / NOT MERGED; DEV/Preview only. No production migration or deployment, provider request, paid billing, merge or release.
+
+
+## 15. Desktop offline sync retry E2E and scheduler observability — 25 Nov 2026 (AST)
+
+- A Playwright desktop E2E was added to create/unlock the private vault, save a synthetic capture while browser connectivity is offline, restore connectivity, simulate a committed server write whose acknowledgement is lost, and retry with the same capture/part UUIDs. The fixture asserts one capture, one part and a replay receipt rather than a duplicate. Exact-SHA CI is pending.
+- Scheduler observability in hosted DEV is PASS: non-200 Edge responses and DNS timeouts are visible in Edge access logs and `net._http_response`. The cron `succeeded` status alone records enqueue execution, so delivery diagnosis uses the network response table. Eight transient DNS timeouts were observed in 24 hours; subsequent requests recovered. No capture/audio body or raw secret was needed for diagnosis.
+
+
+## 15. Current phase checkpoint — local voice transcription, PWA freshness and ARIA boundary — 27 November 2026
+
+### Delivered and verified
+
+- Exact branch HEAD: `8430ea182e73a633ac44c52b0b9a0d2d881d4e1f`; [CI #1017 SUCCESS](https://github.com/SimpleLife9/simplelife/actions/runs/45996562112), 51/51 steps.
+- Unit tests 205/205; browser/mobile 59/59; hosted Preview cold-launch after full browser restart 8/8. Ephemeral PostgreSQL/RLS, migration suite, Deno, Edge Runtime and production build passed.
+- Cloudflare Preview serves the exact CI build: application JS `/assets/index-BYUFEqLt.js`, CSS `/assets/index-DqGuvou2.css`, two-asset manifest, exact HTML shell with `Cache-Control: no-store`, and Service Worker SHA-256 `34ed605f5d9d19737554c3d11578425e74d40daf26f52f9e0f2547cf28d3c834`.
+- The app fingerprints its compiled JavaScript/CSS when registering the Service Worker. A new compiled shell therefore changes the registered script URL and triggers the worker update lifecycle. No local cache, IndexedDB, localStorage or encrypted vault data is cleared.
+- Inbox orders by `created_at` (when a capture entered Inbox) instead of the original recording timestamp; voice rows preserve and display both timestamps.
+- Owner confirmed that two new locally transcribed captures now appear in Inbox. Read-only DEV audit: 2 of 5 private audio assets are `transcribed`; each is linked to one `voice` capture and one source part, with `sync_status=synced` and `attention_status=needs_review`. The other three assets remain `uploaded`. No audio object bytes were read, listened to or changed.
+
+### ARIA relationship and remaining model-classification gate
+
+- Phase 2 is the universal Inbox; the ARIA Planner that schedules/replans a person's day is Phase 3. This follows the product contract and is not a Phase 2 exit criterion.
+- Model-backed Inbox classification remains a distinct Phase 2 gate. The deployed processor is still `inbox-rules-v1`, a deterministic heuristic and **not** an AI model.
+- Current ARIA DEV/LIVE registry has 26 capability rows and every row is `text_generation` (16 verified, 10 unknown); there is no `speech_to_text` capability. Voice transcription does not depend on that missing route because Whisper.cpp runs locally.
+- ARIA's deployed runtime/agent code keeps `MISSION_EXECUTION_PAUSED=true`; autonomy cron jobs 48/49/50 are disabled and the read-only DB audit found zero running missions. Gemini usage counters exist, but numeric quota ceilings/reset windows are unknown; the OpenRouter quota snapshot is dated 7 November and is stale for a current remaining-capacity claim.
+- ARIA safety PRs #1474, #1475, #1476, #1478 and #1479 are still OPEN/DRAFT/not merged. The LIVE ARIA project does not yet contain the mission-budget policy/reservation tables from #1478. Their CI successes do not mean the budget guard is deployed.
+- Therefore no model-backed classification request is enabled. Do not unfreeze ARIA, call a remote model, route private Inbox text externally, or activate a fallback until the circuit-breaker, quota-observability, unknown-capacity deny and mission-budget guard are merged/deployed in a reviewed order with an approved free-only budget policy.
+
+### Release boundary and exact open gates
+
+- PR #97 remains OPEN / DRAFT / NOT MERGED. No production deploy or production migration has been performed.
+- The owner reports one final manual refresh was still needed when first opening the new Preview after this rollout. Automated CI verifies the exact Preview and clean cold launch, but another owner navigation without manual refresh has not yet been independently confirmed. Do not delete site data or the offline vault to force an update.
+- Local Whisper capture/save is owner-accepted in Preview; Android-specific local transcription on a physical phone has not been separately identified/accepted.
+- Model-backed classification remains OPEN. The Phase 2 classification implementation is still heuristic. Phase 2 must not be labelled 100% while the approved product requirement for model-assisted classification is left unresolved, unless the owner explicitly accepts deterministic-only classification as the final Phase 2 scope.
+- ARIA Planner remains Phase 3, not part of this Inbox release.
+
+
+
+## 16. Physical Android Whisper acceptance and Windows exact-SHA verification — 27 November 2026 AST
+
+### Windows test portability
+
+- Exact branch HEAD: `21b6d228dfe7f9105bbb2635bffd8270c3247af7`; [GitHub Actions CI #1024](https://github.com/SimpleLife9/simplelife/actions/runs/46095529104) SUCCESS.
+- Local Windows ROBVG test: `npm test` 206/206 PASS; `npm run build` PASS.
+- A local false failure was caused by Windows `core.autocrlf=true` converting `public/_headers` from LF to CRLF while the unit-test parser expected LF. The test now normalizes CRLF to LF before parsing sections. The committed header file and application runtime are unchanged by this correction.
+
+### Physical Android inference
+
+- Device: Samsung SM-A165M, Android 17 / SDK 37, Chrome 158.0.8127.92.
+- The owner had explicitly authorized all three private audio recordings to be transcribed. Each was selected individually in SimpleLife Preview and processed on-device with the pinned Whisper.cpp runtime; result: 3/3 local transcriptions completed.
+- The owner did not press **Guardar transcripción como captura**. The transcribed review text was not persisted as new Inbox captures. After re-entering Inbox, the original cards were again ready to transcribe. The original audio objects were not modified or deleted; no audio or transcript was sent to a remote provider.
+- A separate new tab opened the Preview directly, retained the owner session, reached a Service Worker-controlled page and navigated Dashboard → Inbox without a manual refresh. The original tab was preserved. ADB remained connected; temporary CDP port-forward 9222 was removed.
+
+### Current exit gates
+
+- Model-backed classification remains mandatory under the approved product scope; `inbox-rules-v1` is deterministic/heuristic, not a model.
+- ARIA PRs #1474–#1476 and #1478–#1484 remain OPEN/DRAFT/not merged. Their CI results are not LIVE deployment evidence. The latest recorded LIVE state retains `MISSION_EXECUTION_PAUSED=true` and lacks deployed mission-budget reservation enforcement.
+- No numeric budget policy or policy row was created, no provider request was made, and no private Inbox text was sent externally. The exact free-only request/token limits proposed for a synthetic test still require explicit owner approval before creating the policy or enabling a model route.
+- PR #97 remains OPEN/DRAFT/not merged and Preview-only. No production migration, hosted data write, secret change or deployment occurred.
+- **Verdict:** local Android Whisper inference PASS 3/3; Windows local suite PASS 206/206; exact-SHA CI #1024 PASS; PWA offline cold-start and Preview full-browser-restart PASS. Phase 2 remains OPEN for model-backed classification governance and Android transcript save/persistence acceptance.
+
+## 17. First-party statistical Inbox classifier — 28 November 2026
+
+**Architecture decision:** keep personal capture text out of third-party inference APIs. The owner delegated selection of the privacy-compatible route. The implementation is a bundled first-party statistical classifier inside SimpleLife's existing Supabase Edge Functions; it is **not** a generative LLM. It sends no text to Google, OpenRouter, Workers AI, ARIA, Hugging Face Inference, or another model vendor, and requires no provider secret, quota, or paid inference.
+
+- Processor version: `inbox-tfidf-hybrid-v1`; engine label: `first-party-statistical-hybrid`.
+- The JSON model artifact is trained only on 614 synthetic Spanish/English examples. It has 256 word features, 256 character features and eight output classes. Model card and artifact SHA are in `docs/INBOX_LOCAL_CLASSIFIER_MODEL_CARD.md`.
+- Evaluation is intentionally reported as synthetic-only: 90.24% random-split holdout accuracy (205 examples); separate 80-phrase synthetic Spanish/English set 77.50% accuracy. Under score ≥0.55 and top-vs-second margin ≥0.12, 41/80 were eligible and 92.68% of eligible predictions were correct. These are not real-user metrics and softmax outputs are not calibrated probabilities.
+- The implementation combines the statistical ranking with a small explicit-cue layer. Multiple competing cues or low statistical score/margin ask for clarification. Every result is advisory, remains unreviewed and cannot create a destination. Source strings, lossless part offsets, RLS, provenance and idempotent processing boundaries remain unchanged.
+- Current local verification on Windows ROBVG: targeted classifier tests 7/7 PASS; full `npm test` 207/207 PASS; `npm run build` exit 0. Edge Runtime/Deno/dispatcher verification is pending exact-HEAD CI after this patch is pushed.
+- This patch has **not** been deployed to DEV or production. The branch Preview/CI must validate the Deno JSON module import, worker and scheduled dispatcher before a DEV deployment. Production is excluded.
+
+### Physical Android closeout — 28 November 2026
+
+The owner unlocked the private vault locally. On Samsung SM-A165M / Android 17 / Chrome 158, all three previously pending private audio assets were transcribed with the pinned local Whisper.cpp WASM model and each transcript was saved through the explicit **Guardar transcripción como captura** action. Two encrypted pending offline captures were synchronized through the app's normal owner action. A read-only DEV catalog query confirms three new voice captures, each synced, each with exactly one source part, each still `needs_review`; all three associated private audio assets are `transcribed` with provider `whisper.cpp-local`. Five total voice assets are linked to five voice captures. Original private audio objects were not read into the audit output, replaced, or deleted; no external STT/provider was called. The private transcript contents were not copied into logs or the audit record.
+
+**Additional Android offline evidence (browser-level):** On the Samsung SM-A165M, a newly created Chrome target was reloaded with DevTools network conditions explicitly offline. The PWA completed the cold reload with navigator.onLine=false, its Service Worker controlling the page, cache simplelife-shell-v13 present, document title SimpleLife, and Inbox navigation available; the offline status UI was visible. The original Inbox tab was preserved. This is a real Android Chrome/Service Worker cold reload under browser-level offline network emulation, not a device airplane-mode/radio-off test. **Still outstanding:** true hardware airplane-mode cold start and reconnect/idempotent retry after that hardware-offline restart; recovery-key restore/rotation has not been evidenced.

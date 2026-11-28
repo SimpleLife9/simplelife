@@ -21,3 +21,31 @@ verify_jwt = true
 
 [functions.agenda-protected-time-mutate]
 verify_jwt = true
+
+# User-authenticated queue entry point.
+[functions.inbox-processing-queue]
+verify_jwt = true
+
+# Internal worker; @supabase/server validates the secret apikey header.
+[functions.inbox-processing-worker]
+verify_jwt = false
+
+# Owner-authenticated processing bridge; service credentials stay server-side.
+[functions.inbox-processing-process]
+verify_jwt = true
+
+# Scheduled internal queue dispatcher; @supabase/server validates the secret apikey header.
+[functions.inbox-processing-dispatcher]
+verify_jwt = false
+
+# Cron entrypoint validates a separate Vault token before internal service calls.
+[functions.inbox-processing-scheduled]
+verify_jwt = false
+
+# Owner-authenticated voice finalizer recomputes SHA-256 from private Storage bytes.
+[functions.inbox-voice-finalize]
+verify_jwt = true
+
+# Internal transcription worker; @supabase/server validates the secret API key.
+[functions.inbox-voice-transcription-worker]
+verify_jwt = false

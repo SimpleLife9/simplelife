@@ -26,6 +26,11 @@ const authUser = {
   created_at: '2026-11-19T00:00:00.000Z',
   updated_at: '2026-11-19T00:00:00.000Z',
 };
+function normalizeCaptureForDuplicate(value) {
+  return String(value || '').normalize('NFKC').toLocaleLowerCase('es')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ').trim().replace(/\s+/g, ' ');
+}
+
 const profile = {
   id: '00000000-0000-7000-8000-000000000081',
   auth_user_id: authUser.id,
@@ -73,7 +78,7 @@ async function mockSupabaseSession(page, initialData = {}) {
   const contributionRelations = [...(initialData.contributionRelations || [])];
   const insertedContributionRelations = [];
   const updatedContributionRelations = [];
-  const captures = [
+  const defaultCaptures = [
     {
       id: '00000000-0000-7000-8000-000000000101',
       owner_user_id: profile.id,
@@ -111,6 +116,10 @@ async function mockSupabaseSession(page, initialData = {}) {
       deleted_at: null,
     },
   ];
+  const captures = [...(initialData.captures || defaultCaptures)].map((capture) => ({
+    ...capture,
+    created_at: capture.created_at || capture.captured_at,
+  }));
   const updatedCaptures = [];
   const insertedCaptures = [];
   const insertedCaptureParts = [];
@@ -124,6 +133,23 @@ async function mockSupabaseSession(page, initialData = {}) {
     review_status: 'unreviewed',
   })))];
   const updatedCaptureParts = [];
+  const processingRuns = [...(initialData.processingRuns || [])];
+  const queueRequests = [];
+  const processingRequests = [];
+  const reviewRequests = [];
+  const reviewAuditEvents = [];
+  const trashRequests = [];
+  const offlineSyncRequests = [];
+  const offlineSyncReplayFlags = [];
+  const offlineSyncedCaptures = new Map();
+  let offlineSyncFailuresRemaining = Number.isInteger(initialData.offlineSyncFailures)
+    ? Math.max(0, initialData.offlineSyncFailures)
+    : 0;
+  const insertedVoiceAssets = [];
+  const uploadedVoiceObjects = [];
+  const voiceFinalizeRequests = [];
+  const audioDownloadRequests = [];
+  const voiceAssets = [...(initialData.voiceAssets || [])];
   const captureLinks = [...(initialData.captureLinks || [])];
   const insertedCaptureLinks = [];
   const noteIdeas = [...(initialData.noteIdeas || [])];
@@ -147,6 +173,8 @@ async function mockSupabaseSession(page, initialData = {}) {
       'access-control-allow-origin': 'http://127.0.0.1:5173',
       'access-control-allow-methods': 'GET, POST, PATCH, DELETE, OPTIONS, HEAD',
       'access-control-allow-headers': 'apikey, authorization, content-type, x-client-info, x-supabase-api-version, prefer, idempotency-key',
+      // PostgREST count=exact is read from Content-Range by supabase-js; expose it to the browser.
+      'access-control-expose-headers': 'content-range',
       'access-control-max-age': '86400',
     };
 
@@ -399,6 +427,16 @@ async function mockSupabaseSession(page, initialData = {}) {
       return;
     }
 
+    if (url.pathname === '/rest/v1/processing_run' && method === 'GET') {
+      const captureFilter = url.searchParams.get('capture_id') || '';
+      if (captureFilter && initialData.processingRunDelayMs) {
+        await new Promise((resolve) => setTimeout(resolve, initialData.processingRunDelayMs));
+      }
+      const rows = processingRuns.filter((row) => !captureFilter || captureFilter === 'eq.' + row.capture_id);
+      await json(200, rows);
+      return;
+    }
+
     if (url.pathname === '/rest/v1/capture_part' && method === 'GET') {
       const idFilter = url.searchParams.get('id') || '';
       const captureFilter = url.searchParams.get('capture_id') || '';
@@ -409,6 +447,25 @@ async function mockSupabaseSession(page, initialData = {}) {
     if (url.pathname === '/rest/v1/capture_part' && method === 'POST') {
       const payload = request.postDataJSON();
       const rows = Array.isArray(payload) ? payload : [payload];
+      if (initialData.capturePartInitialInsertError
+        && rows.some((row) => !captureParts.some((existing) =>
+          existing.capture_id === row.capture_id && existing.part_index === row.part_index))) {
+        // The source capture was already committed; only its initial part failed.
+        initialData.capturePartInitialInsertError = false;
+        await json(500, { code: 'XX000', message: 'simulated initial capture_part insert failure' });
+        return;
+      }
+      if (initialData.capturePartRecoveryConflict
+        && rows.some((row) => !captureParts.some((existing) =>
+          existing.capture_id === row.capture_id && existing.part_index === row.part_index))) {
+        // Simulate another tab winning the unique capture_id/part_index insert.
+        captureParts.push({
+          ...rows[0],
+          id: '00000000-0000-7000-8000-000000000210',
+        });
+        await json(409, { code: '23505', message: 'duplicate key value violates unique constraint capture_part_capture_id_part_index_key' });
+        return;
+      }
       captureParts.push(...rows);
       insertedCaptureParts.push(...rows);
       await json(201, rows, { 'content-range': '0-0/*' });
@@ -529,7 +586,53 @@ async function mockSupabaseSession(page, initialData = {}) {
     }
 
     if (url.pathname === '/rest/v1/capture' && method === 'GET') {
-      await json(200, captures.filter((capture) => !capture.deleted_at));
+      // supabase-js uses offset/limit query parameters for range pagination.
+      // Keep Range-header support for callers that explicitly send it.
+      const rangeHeader = request.headers()['range'] || '0-99';
+      const [rangeStart, rangeEnd] = rangeHeader.split('-').map(Number);
+      const requestedOffset = Number(url.searchParams.get('offset'));
+      const requestedLimit = Number(url.searchParams.get('limit'));
+      const start = Number.isSafeInteger(requestedOffset) && requestedOffset >= 0
+        ? requestedOffset
+        : Number.isFinite(rangeStart) ? rangeStart : 0;
+      const end = Number.isSafeInteger(requestedLimit) && requestedLimit > 0
+        ? start + requestedLimit - 1
+        : Number.isFinite(rangeEnd) ? rangeEnd : start + 99;
+      if (initialData.capturePageDelayStart === start) {
+        await new Promise((resolve) => setTimeout(resolve, initialData.capturePageDelayMs ?? 800));
+      }
+      const searchParam = url.searchParams.get('search_document');
+      let filtered = [...captures];
+      if (searchParam) {
+        const value = searchParam.replace(/^(?:wfts|fts|plfts|phfts)\([^)]*\)\./, '');
+        const normalized = value.toLocaleLowerCase('es').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+        const words = normalized.split(/\s+/).filter(Boolean);
+        filtered = filtered.filter((capture) => {
+          const content = normalizeCaptureForDuplicate(capture.content_original);
+          return words.every((word) => content.includes(word));
+        });
+      }
+      const orderColumns = (url.searchParams.get('order') || '')
+        .split(',').filter(Boolean).map((clause) => {
+          const [column, direction] = clause.split('.');
+          return { column, direction };
+        });
+      filtered.sort((left, right) => {
+        for (const { column, direction } of orderColumns) {
+          const leftValue = left[column];
+          const rightValue = right[column];
+          if (leftValue === rightValue) continue;
+          if (leftValue == null) return direction === 'desc' ? -1 : 1;
+          if (rightValue == null) return direction === 'desc' ? 1 : -1;
+          const comparison = typeof leftValue === 'number' && typeof rightValue === 'number'
+            ? leftValue - rightValue
+            : String(leftValue).localeCompare(String(rightValue));
+          if (comparison !== 0) return direction === 'desc' ? -comparison : comparison;
+        }
+        return 0;
+      });
+      const pageRows = filtered.slice(start, end + 1);
+      await json(200, pageRows, { 'content-range': pageRows.length ? `${start}-${start + pageRows.length - 1}/${filtered.length}` : `*/${filtered.length}`, 'accept-ranges': 'items' });
       return;
     }
 
@@ -542,6 +645,7 @@ async function mockSupabaseSession(page, initialData = {}) {
         processing_status: row.processing_status || 'not_started',
         sync_status: row.sync_status || 'synced',
         captured_at: row.captured_at || new Date().toISOString(),
+        created_at: row.created_at || new Date().toISOString(),
         deleted_at: null,
       }));
       captures.unshift(...created);
@@ -833,6 +937,271 @@ async function mockSupabaseSession(page, initialData = {}) {
       return;
     }
 
+    if (url.pathname === '/functions/v1/inbox-processing-queue' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const run = {
+        id: '00000000-0000-7000-8000-000000000901',
+        capture_id: payload.captureId,
+        status: 'queued',
+        created_at: new Date().toISOString(),
+        result: {},
+      };
+      processingRuns.unshift(run);
+      queueRequests.push(payload);
+      await json(200, { runId: run.id, replayed: false });
+      return;
+    }
+
+    if (url.pathname === '/functions/v1/inbox-processing-process' && method === 'POST') {
+      const payload = request.postDataJSON();
+      processingRequests.push(payload);
+      const run = processingRuns.find((item) => item.id === payload.runId);
+      const capture = run && captures.find((item) => item.id === run.capture_id);
+      const part = capture && captureParts.find((item) => item.capture_id === capture.id);
+      if (!run || !capture || !part) {
+        await json(404, { error: 'PROCESSING_FIXTURE_NOT_FOUND' });
+        return;
+      }
+      part.category = 'task';
+      part.interpretation = 'Sugerencia estadística; requiere confirmación.';
+      part.review_status = 'unreviewed';
+      run.status = 'succeeded';
+      run.result = {
+        engine: 'first-party-statistical-hybrid',
+        processorVersion: 'inbox-tfidf-hybrid-v1',
+        classification: 'advisory-only',
+        proposals: [{ partIndex: 0, category: 'task', confidence: 0.68, requiresClarification: false }],
+      };
+      capture.processing_status = 'processed';
+      await json(200, { status: 'succeeded', engine: 'first-party-statistical-hybrid', proposalCount: 1 });
+      return;
+    }
+
+    if (url.pathname === '/rest/v1/rpc/find_inbox_duplicate_captures' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const ids = Array.isArray(payload.p_capture_ids) ? payload.p_capture_ids : [];
+      const duplicates = ids.map((id) => {
+        const source = captures.find((capture) => capture.id === id && !capture.deleted_at);
+        if (!source) return null;
+        const normalized = normalizeCaptureForDuplicate(source.content_original);
+        const matching = captures.filter((capture) => !capture.deleted_at
+          && capture.owner_user_id === source.owner_user_id
+          && normalizeCaptureForDuplicate(capture.content_original) === normalized);
+        return matching.length > 1
+          ? { capture_id: id, duplicate_count: matching.length, matching_capture_ids: matching.map((capture) => capture.id) }
+          : null;
+      }).filter(Boolean);
+      await json(200, duplicates);
+      return;
+    }
+
+    if (url.pathname === '/rest/v1/audit_event' && method === 'GET') {
+      const entityId = url.searchParams.get('entity_id')?.replace(/^eq\./, '');
+      const entityType = url.searchParams.get('entity_type')?.replace(/^eq\./, '');
+      const action = url.searchParams.get('action')?.replace(/^eq\./, '');
+      const matching = reviewAuditEvents.filter((entry) =>
+        (!entityId || entry.entity_id === entityId)
+        && (!entityType || entry.entity_type === entityType)
+        && (!action || entry.action === action)
+      ).sort((a, b) => b.occurred_at.localeCompare(a.occurred_at)).slice(0, 30);
+      await json(200, matching);
+      return;
+    }
+
+    if (url.pathname === '/rest/v1/rpc/set_inbox_capture_attention_status' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const capture = captures.find((item) => item.id === payload.p_capture_id);
+      if (!capture || capture.deleted_at) { await json(200, false); return; }
+      const before = capture.attention_status;
+      if (before !== payload.p_attention_status) {
+        capture.attention_status = payload.p_attention_status;
+        updatedCaptures.push({ ...capture });
+        reviewAuditEvents.push({
+          id: payload.p_audit_id,
+          entity_type: 'capture',
+          entity_id: capture.id,
+          action: 'capture.attention_status_changed',
+          occurred_at: new Date().toISOString(),
+          details: { attention_status_before: before, attention_status_after: payload.p_attention_status },
+        });
+      }
+      await json(200, true);
+      return;
+    }
+
+    if (url.pathname === '/rest/v1/rpc/review_inbox_capture_part' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const part = captureParts.find((item) => item.id === payload.p_capture_part_id);
+      reviewRequests.push(payload);
+      if (!part) { await json(200, false); return; }
+      const before = {
+        category: part.category,
+        interpretation: part.interpretation,
+        review_status: part.review_status,
+      };
+      Object.assign(part, {
+        category: payload.p_category ?? part.category,
+        interpretation: payload.p_interpretation ?? part.interpretation,
+        review_status: payload.p_review_status,
+      });
+      reviewAuditEvents.push({
+        id: payload.p_audit_id,
+        entity_type: 'capture_part',
+        entity_id: part.id,
+        action: 'capture.part_reviewed',
+        occurred_at: new Date().toISOString(),
+        details: {
+          category_before: before.category,
+          category_after: part.category,
+          interpretation_before: before.interpretation,
+          interpretation_after: part.interpretation,
+          review_status_before: before.review_status,
+          review_status_after: part.review_status,
+        },
+      });
+      updatedCaptureParts.push({ id: part.id, category: part.category, interpretation: part.interpretation, review_status: part.review_status });
+      await json(200, true);
+      return;
+    }
+
+    if (url.pathname === '/rest/v1/rpc/trash_inbox_capture' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const capture = captures.find((item) => item.id === payload.p_capture_id);
+      trashRequests.push({ action: 'trash', ...payload });
+      if (!capture || capture.deleted_at) { await json(200, false); return; }
+      const now = Date.now();
+      capture.deleted_at = new Date(now).toISOString();
+      capture.purge_after = new Date(now + 30 * 24 * 60 * 60 * 1000).toISOString();
+      await json(200, true);
+      return;
+    }
+
+    if (url.pathname === '/rest/v1/rpc/restore_inbox_capture' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const capture = captures.find((item) => item.id === payload.p_capture_id);
+      trashRequests.push({ action: 'restore', ...payload });
+      if (!capture || !capture.deleted_at || new Date(capture.purge_after).getTime() <= Date.now()) {
+        await json(200, false);
+        return;
+      }
+      capture.deleted_at = null;
+      capture.purge_after = null;
+      await json(200, true);
+      return;
+    }
+
+    if (url.pathname === '/rest/v1/rpc/sync_inbox_offline_text_capture' && method === 'POST') {
+      const payload = request.postDataJSON();
+      offlineSyncRequests.push(payload);
+      const captureId = payload.p_capture_id;
+      const partId = payload.p_part_id;
+      const contentOriginal = payload.p_content_original;
+      if (typeof captureId !== 'string' || typeof partId !== 'string'
+        || typeof contentOriginal !== 'string' || !contentOriginal.trim()) {
+        await json(400, { message: 'INVALID_OFFLINE_SYNC_FIXTURE' });
+        return;
+      }
+
+      const existing = offlineSyncedCaptures.get(captureId);
+      if (existing && (existing.part_id !== partId || existing.content_original !== contentOriginal)) {
+        await json(409, { message: 'OFFLINE_IDEMPOTENCY_PAYLOAD_MISMATCH' });
+        return;
+      }
+      const replayed = Boolean(existing);
+      if (!existing) {
+        offlineSyncedCaptures.set(captureId, {
+          capture_id: captureId,
+          part_id: partId,
+          content_original: contentOriginal,
+        });
+        captures.unshift({
+          id: captureId,
+          owner_user_id: profile.id,
+          created_by_user_id: profile.id,
+          input_type: 'text',
+          content_original: contentOriginal,
+          attention_status: 'needs_review',
+          processing_status: 'not_started',
+          sync_status: 'synced',
+          captured_at: payload.p_captured_at,
+          deleted_at: null,
+        });
+        captureParts.push({
+          id: partId,
+          capture_id: captureId,
+          part_index: 0,
+          original_fragment: contentOriginal,
+          interpretation: null,
+          category: null,
+          review_status: 'unreviewed',
+        });
+      }
+      offlineSyncReplayFlags.push(replayed);
+
+      // Model a committed server write whose acknowledgement was lost in transit.
+      // The next identical request must return the same IDs as an idempotent replay.
+      if (offlineSyncFailuresRemaining > 0) {
+        offlineSyncFailuresRemaining -= 1;
+        await json(503, { message: 'SYNTHETIC_SYNC_ACKNOWLEDGEMENT_LOST' });
+        return;
+      }
+      await json(200, [{
+        capture_id: captureId,
+        part_id: partId,
+        replayed,
+      }]);
+      return;
+    }
+
+    if (url.pathname === '/rest/v1/capture_audio_asset' && method === 'GET') {
+      await json(200, voiceAssets, { 'content-range': voiceAssets.length ? '0-' + (voiceAssets.length - 1) + '/*' : '*/0' });
+      return;
+    }
+
+    if (url.pathname === '/rest/v1/capture_audio_asset' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const rows = Array.isArray(payload) ? payload : [payload];
+      insertedVoiceAssets.push(...rows);
+      voiceAssets.push(...rows.map((row) => ({ ...row })));
+      await json(201, rows, { 'content-range': '0-0/*' });
+      return;
+    }
+
+    const privateAudioObjectPrefix = '/storage/v1/object/inbox-voice-private/';
+    if (url.pathname.startsWith(privateAudioObjectPrefix) && method === 'POST') {
+      const objectPath = decodeURIComponent(url.pathname.slice(privateAudioObjectPrefix.length));
+      uploadedVoiceObjects.push({
+        objectPath,
+        contentType: request.headers()['content-type'] || '',
+      });
+      await json(200, { Key: 'inbox-voice-private/' + objectPath });
+      return;
+    }
+
+    const privateAudioDownloadPrefix = '/storage/v1/object/authenticated/inbox-voice-private/';
+    if (url.pathname.startsWith(privateAudioDownloadPrefix) && method === 'GET') {
+      audioDownloadRequests.push(decodeURIComponent(url.pathname.slice(privateAudioDownloadPrefix.length)));
+      await route.fulfill({
+        status: 200,
+        headers: { ...corsHeaders, 'content-type': 'audio/webm' },
+        body: Buffer.from('synthetic private voice fixture bytes'),
+      });
+      return;
+    }
+
+    if (url.pathname === '/functions/v1/inbox-voice-finalize' && method === 'POST') {
+      const payload = request.postDataJSON();
+      voiceFinalizeRequests.push(payload);
+      const asset = voiceAssets.find((item) => item.id === payload.assetId);
+      if (asset) {
+        asset.status = 'uploaded';
+        asset.uploaded_at = '2026-11-25T00:00:00.000Z';
+        asset.retention_until = asset.retention_until || '2026-12-02T23:00:00.000Z';
+      }
+      await json(200, { verified: true, assetId: payload.assetId });
+      return;
+    }
+
     if (url.pathname.startsWith('/rest/v1/')) {
       await json(200, []);
       return;
@@ -841,7 +1210,7 @@ async function mockSupabaseSession(page, initialData = {}) {
     await json(404, { message: `Unexpected mocked Supabase request: ${method} ${url.pathname}` });
   });
 
-  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, protectedTimeBlocks, protectedTimeMutationRequests, protectedTimeConflicts, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
+  return { signedOutRequests, insertedTasks, updatedTasks, calendarEvents, protectedTimeBlocks, protectedTimeMutationRequests, protectedTimeConflicts, insertedAgendaEvents, idempotencyRequests, mutationRequests, updatedNoteIdeas, updatedLists, taskRows, projects, insertedProjects, updatedProjects, projectLinks, insertedProjectLinks, updatedProjectLinks, contributionRelations, insertedContributionRelations, updatedContributionRelations, areas, insertedAreas, updatedAreas, goals, insertedGoals, updatedGoals, subgoals, insertedSubgoals, updatedSubgoals, captures, updatedCaptures, insertedCaptures, captureParts, updatedCaptureParts, insertedCaptureParts, processingRuns, queueRequests, processingRequests, reviewRequests, reviewAuditEvents, trashRequests, offlineSyncRequests, offlineSyncReplayFlags, offlineSyncedCaptures, insertedVoiceAssets, uploadedVoiceObjects, voiceFinalizeRequests, audioDownloadRequests, voiceAssets, captureLinks, insertedCaptureLinks, noteIdeas, insertedNoteIdeas, lists, insertedLists, listItems, insertedListItems, updatedListItems };
 }
 
 test('mock-authenticated task creation uses the signed-in profile and Havana timezone', async ({ page }) => {
@@ -1009,6 +1378,53 @@ test('mock-authenticated task creation uses the signed-in profile and Havana tim
 });
 
 
+
+test('Inbox orders newly saved voice transcripts by Inbox creation time and preserves original recording time', async ({ page }) => {
+  const previousCapture = {
+    id: '00000000-0000-7000-8000-000000000711',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    input_type: 'text',
+    content_original: 'Captura anterior del Inbox',
+    attention_status: 'needs_review',
+    processing_status: 'not_started',
+    sync_status: 'synced',
+    captured_at: '2026-11-26T10:00:00.000Z',
+    created_at: '2026-11-26T10:00:00.000Z',
+    deleted_at: null,
+  };
+  const recentlySavedTranscript = {
+    id: '00000000-0000-7000-8000-000000000712',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    input_type: 'voice',
+    content_original: 'Transcripción local ya guardada',
+    attention_status: 'needs_review',
+    processing_status: 'not_started',
+    sync_status: 'synced',
+    captured_at: '2026-11-25T02:13:15.000Z',
+    created_at: '2026-11-27T11:59:01.000Z',
+    deleted_at: null,
+  };
+  await mockSupabaseSession(page, {
+    captures: [previousCapture, recentlySavedTranscript],
+  });
+
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  await expect(page.getByRole('heading', { name: 'Añadido a Inbox recientemente' })).toBeVisible();
+  const captureRows = page.locator('.capture-row');
+  await expect(captureRows).toHaveCount(2);
+  await expect(captureRows.nth(0)).toContainText('Transcripción local ya guardada');
+  await expect(captureRows.nth(0)).toContainText('Grabado');
+  await expect(captureRows.nth(0)).toContainText('añadido');
+  await expect(captureRows.nth(1)).toContainText('Captura anterior del Inbox');
+});
+
 test('Inbox supports search, review states, archiving, restore and original capture preservation', async ({ page }) => {
   const { captures, updatedCaptures, insertedCaptures, insertedCaptureParts } = await mockSupabaseSession(page);
   await page.goto('/');
@@ -1020,6 +1436,17 @@ test('Inbox supports search, review states, archiving, restore and original capt
   await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
   await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
   await expect(page.getByRole('heading', { name: 'Inbox', exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Prueba de transcripción local' })).toHaveCount(0);
+  await expect(page.locator('input[type="file"]')).toHaveCount(0);
+
+
+  // The capability notice must match the implemented private voice/offline behavior.
+  const capabilityNotice = page.locator('.honest-note');
+  await expect(capabilityNotice).toContainText('clasificador estadístico de primera parte');
+  await expect(capabilityNotice).toContainText('grabaciones de voz se conservan en almacenamiento privado');
+  await expect(capabilityNotice).toContainText('la huella SHA-256 se verifica y Whisper se ejecuta en este dispositivo');
+  await expect(capabilityNotice).toContainText('modo sin conexión cifra las capturas en este dispositivo');
+  await expect(capabilityNotice).toContainText('clave de recuperación fuera del dispositivo');
 
   // 1) Search the original capture text and show a clear no-match state.
   await expect(page.getByText('Llamar al proveedor antes del viernes')).toBeVisible();
@@ -1086,6 +1513,570 @@ test('Inbox supports search, review states, archiving, restore and original capt
   await expect(page.getByText(original)).toBeVisible();
 });
 
+
+test('Inbox clears the composer after a partial save so retry cannot duplicate the source capture', async ({ page }) => {
+  const { captures, insertedCaptures, captureParts, queueRequests, processingRequests } =
+    await mockSupabaseSession(page, {
+      captures: [],
+      captureParts: [],
+      capturePartInitialInsertError: true,
+    });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  const original = 'Comprar café para la semana';
+  const composer = page.getByPlaceholder('Escribe aquí lo que tienes en mente…');
+  await composer.fill(original);
+  await page.getByRole('button', { name: 'Guardar captura' }).click();
+
+  await expect(page.getByText('Captura guardada.')).toBeVisible();
+  await expect(composer).toHaveValue('');
+  await expect(page.getByRole('alert')).toContainText('No lo vuelvas a enviar');
+  expect(captures).toHaveLength(1);
+  expect(insertedCaptures).toHaveLength(1);
+  expect(insertedCaptures[0].content_original).toBe(original);
+  expect(captureParts).toHaveLength(0);
+  expect(queueRequests).toHaveLength(1);
+  expect(processingRequests).toHaveLength(1);
+
+  // The user can recover this same saved source instead of submitting it again.
+  await page.getByRole('button', { name: 'Organizar captura: ' + original }).click();
+  await expect(page.getByText('CAPTURA ORIGINAL · NO SE MODIFICA')).toBeVisible();
+  expect(captures).toHaveLength(1);
+  expect(insertedCaptures).toHaveLength(1);
+  expect(captureParts).toHaveLength(1);
+  expect(captureParts[0].original_fragment).toBe(original);
+});
+
+test('Inbox recovers and organizes a saved text capture whose first fragment insert previously failed', async ({ page }) => {
+  const { captures, captureParts, insertedCaptureParts, captureLinks, insertedNoteIdeas, reviewRequests, updatedCaptures } =
+    await mockSupabaseSession(page, { captureParts: [] });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  const capture = captures[0];
+  await page.getByRole('button', { name: 'Organizar captura: ' + capture.content_original }).click();
+  await expect(page.getByText('CAPTURA ORIGINAL · NO SE MODIFICA')).toBeVisible();
+  expect(insertedCaptureParts).toHaveLength(1);
+  expect(captureParts[0]).toMatchObject({
+    capture_id: capture.id,
+    part_index: 0,
+    original_fragment: capture.content_original,
+  });
+
+  await page.getByRole('button', { name: 'Confirmar y organizar' }).click();
+  await expect(page.getByText('Captura guardada como nota.')).toBeVisible();
+  expect(insertedNoteIdeas).toHaveLength(1);
+  expect(captureLinks).toHaveLength(1);
+  expect(reviewRequests).toHaveLength(1);
+  expect(reviewRequests[0].p_capture_part_id).toBe(insertedCaptureParts[0].id);
+  expect(capture.attention_status).toBe('reviewed');
+  expect(updatedCaptures.some((row) => row.id === capture.id && row.attention_status === 'reviewed')).toBe(true);
+});
+
+test('Inbox reuses the exact initial part when another session wins the recovery insert race', async ({ page }) => {
+  const { captures, captureParts, insertedCaptureParts, captureLinks, insertedNoteIdeas, reviewRequests, updatedCaptures } =
+    await mockSupabaseSession(page, { captureParts: [], capturePartRecoveryConflict: true });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  const capture = captures[0];
+  await page.getByRole('button', { name: 'Organizar captura: ' + capture.content_original }).click();
+  await expect(page.getByText('CAPTURA ORIGINAL · NO SE MODIFICA')).toBeVisible();
+  expect(insertedCaptureParts).toHaveLength(0);
+  expect(captureParts).toHaveLength(1);
+  expect(captureParts[0]).toMatchObject({
+    id: '00000000-0000-7000-8000-000000000210',
+    capture_id: capture.id,
+    part_index: 0,
+    original_fragment: capture.content_original,
+  });
+
+  await page.getByRole('button', { name: 'Confirmar y organizar' }).click();
+  await expect(page.getByText('Captura guardada como nota.')).toBeVisible();
+  expect(insertedNoteIdeas).toHaveLength(1);
+  expect(captureLinks).toHaveLength(1);
+  expect(reviewRequests).toHaveLength(1);
+  expect(reviewRequests[0].p_capture_part_id).toBe(captureParts[0].id);
+  expect(updatedCaptures.some((row) => row.id === capture.id && row.attention_status === 'reviewed')).toBe(true);
+});
+
+test('Inbox refuses to invent fragments for an already processed capture', async ({ page }) => {
+  const capture = {
+    id: '00000000-0000-7000-8000-000000000777',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    input_type: 'text',
+    content_original: 'Processed capture with missing part history',
+    attention_status: 'needs_review',
+    processing_status: 'processed',
+    sync_status: 'synced',
+    captured_at: '2026-11-23T12:00:00.000Z',
+    deleted_at: null,
+  };
+  const { captures, captureParts, insertedCaptureParts } = await mockSupabaseSession(page, {
+    captures: [capture],
+    captureParts: [],
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  await page.getByRole('button', { name: 'Organizar captura: ' + capture.content_original }).click();
+  await expect(page.getByRole('alert')).toContainText('ya fue procesada');
+  await expect(page.getByText(capture.content_original)).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(insertedCaptureParts).toHaveLength(0);
+  expect(captureParts).toHaveLength(0);
+  expect(captures).toHaveLength(1);
+});
+
+test('Inbox runs advisory processing, records review, and restores soft-deleted captures', async ({ page }) => {
+  const { captures, captureParts, processingRuns, queueRequests, processingRequests, reviewRequests, trashRequests, insertedTasks } = await mockSupabaseSession(page);
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  const original = captures[0].content_original;
+  await page.getByRole('button', { name: 'Generar sugerencias' }).first().click();
+  await expect(page.getByText('Propuestas preparadas. Revisa cada fragmento; no se creó ningún destino automáticamente.')).toBeVisible();
+  expect(queueRequests).toHaveLength(1);
+  expect(processingRequests).toHaveLength(1);
+  expect(processingRuns[0].result).toMatchObject({
+    engine: 'first-party-statistical-hybrid',
+    classification: 'advisory-only',
+  });
+  expect(captureParts[0]).toMatchObject({ category: 'task', review_status: 'unreviewed', original_fragment: original });
+  expect(insertedTasks).toHaveLength(0);
+  await expect(page.getByText(/^Puntuación orientativa:/)).toBeVisible();
+
+  await page.getByRole('button', { name: 'Descartar sugerencia' }).click();
+  await expect(page.getByText('Sugerencia descartada y decisión registrada en auditoría.')).toBeVisible();
+  expect(reviewRequests.at(-1)).toMatchObject({
+    p_capture_part_id: captureParts[0].id,
+    p_review_status: 'rejected',
+  });
+  expect(captureParts[0].review_status).toBe('rejected');
+
+  await page.getByRole('button', { name: 'Enviar a papelera' }).first().click();
+  await expect(page.getByText('Captura movida a la papelera. Se conservará durante 30 días antes de poder purgarse.')).toBeVisible();
+  expect(trashRequests.at(-1).action).toBe('trash');
+  expect(captures[0].deleted_at).toBeTruthy();
+  expect(new Date(captures[0].purge_after).getTime() - new Date(captures[0].deleted_at).getTime()).toBe(30 * 24 * 60 * 60 * 1000);
+
+  await page.getByLabel('Filtrar capturas por revisión').selectOption('trash');
+  await expect(page.getByText(original)).toBeVisible();
+  await page.getByRole('button', { name: 'Restaurar desde papelera' }).click();
+  await expect(page.getByText('Captura restaurada desde la papelera.')).toBeVisible();
+  expect(trashRequests.at(-1).action).toBe('restore');
+  expect(captures[0].deleted_at).toBeNull();
+  expect(captures[0].purge_after).toBeNull();
+  await page.getByLabel('Filtrar capturas por revisión').selectOption('needs_review');
+  await expect(page.getByText(original)).toBeVisible();
+  expect(insertedTasks).toHaveLength(0);
+});
+
+
+test('Inbox keeps Request and Habit suggestions unavailable until the owner chooses a supported destination', async ({ page }) => {
+  const captures = [
+    {
+      id: '00000000-0000-7000-8000-000000000701',
+      owner_user_id: profile.id,
+      created_by_user_id: profile.id,
+      input_type: 'text',
+      content_original: 'Solicitud: coordinar con el proveedor',
+      attention_status: 'needs_review',
+      processing_status: 'processed',
+      sync_status: 'synced',
+      captured_at: '2026-11-19T14:00:00.000Z',
+      deleted_at: null,
+    },
+    {
+      id: '00000000-0000-7000-8000-000000000702',
+      owner_user_id: profile.id,
+      created_by_user_id: profile.id,
+      input_type: 'text',
+      content_original: 'Hábito: entrenar cuatro veces por semana',
+      attention_status: 'needs_review',
+      processing_status: 'processed',
+      sync_status: 'synced',
+      captured_at: '2026-11-19T13:00:00.000Z',
+      deleted_at: null,
+    },
+  ];
+  const captureParts = [
+    {
+      id: '00000000-0000-7000-8000-000000000711',
+      capture_id: captures[0].id,
+      part_index: 0,
+      original_fragment: captures[0].content_original,
+      category: 'request',
+      review_status: 'unreviewed',
+    },
+    {
+      id: '00000000-0000-7000-8000-000000000712',
+      capture_id: captures[1].id,
+      part_index: 0,
+      original_fragment: captures[1].content_original,
+      category: 'habit',
+      review_status: 'unreviewed',
+    },
+  ];
+  const processingRuns = captures.map((capture, index) => ({
+    id: '00000000-0000-7000-8000-00000000073' + index,
+    capture_id: capture.id,
+    created_at: capture.captured_at,
+    result: { proposals: [{ partIndex: 0, requiresClarification: false, clarificationPrompt: null }] },
+  }));
+  const { insertedTasks, insertedCaptureLinks, reviewRequests } = await mockSupabaseSession(page, {
+    captures,
+    captureParts,
+    processingRuns,
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  await page.getByRole('button', { name: 'Organizar captura: Solicitud: coordinar con el proveedor' }).click();
+  let organizer = page.getByRole('dialog', { name: 'Organizar captura' });
+  await expect(organizer.getByLabel('Tipo de destino')).toHaveValue('request');
+  await expect(organizer.getByText(/La clasificación se conserva como Solicitud/)).toBeVisible();
+  await expect(organizer.getByRole('button', { name: /Destino aún no disponible/ })).toBeDisabled();
+  expect(insertedTasks).toHaveLength(0);
+  expect(insertedCaptureLinks).toHaveLength(0);
+  await organizer.getByLabel('Tipo de destino').selectOption('task');
+  await organizer.getByRole('button', { name: 'Confirmar y organizar' }).click();
+  await expect(page.getByText('Captura organizada como tarea.')).toBeVisible();
+  expect(insertedTasks).toHaveLength(1);
+  expect(insertedCaptureLinks).toHaveLength(1);
+  expect(reviewRequests.at(-1)).toMatchObject({
+    p_capture_part_id: captureParts[0].id,
+    p_category: 'task',
+    p_review_status: 'accepted',
+  });
+
+  await page.getByRole('button', { name: 'Organizar captura: Hábito: entrenar cuatro veces por semana' }).click();
+  organizer = page.getByRole('dialog', { name: 'Organizar captura' });
+  await expect(organizer.getByLabel('Tipo de destino')).toHaveValue('habit');
+  await expect(organizer.getByText(/La clasificación se conserva como Hábito/)).toBeVisible();
+  await expect(organizer.getByRole('button', { name: /Destino aún no disponible/ })).toBeDisabled();
+  expect(insertedTasks).toHaveLength(1);
+  expect(insertedCaptureLinks).toHaveLength(1);
+  expect(reviewRequests).toHaveLength(1);
+});
+
+
+test('Inbox requires an explicit clarification before accepting an ambiguous proposal', async ({ page }) => {
+  const capture = {
+    id: '00000000-0000-7000-8000-000000000721',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    input_type: 'text',
+    content_original: 'Pensar en cómo mejorar mi rutina',
+    attention_status: 'needs_review',
+    processing_status: 'processed',
+    sync_status: 'synced',
+    captured_at: '2026-11-19T15:00:00.000Z',
+    deleted_at: null,
+  };
+  const part = {
+    id: '00000000-0000-7000-8000-000000000722',
+    capture_id: capture.id,
+    part_index: 0,
+    original_fragment: capture.content_original,
+    category: 'note_idea',
+    review_status: 'unreviewed',
+  };
+  const processingRun = {
+    id: '00000000-0000-7000-8000-000000000723',
+    capture_id: capture.id,
+    created_at: '2026-11-19T15:01:00.000Z',
+    result: {
+      proposals: [{
+        partIndex: 0,
+        confidence: 0.42,
+        requiresClarification: true,
+        clarificationPrompt: '¿Qué quieres hacer o recordar con este texto?',
+      }],
+    },
+  };
+  const { insertedNoteIdeas, reviewRequests } = await mockSupabaseSession(page, {
+    captures: [capture],
+    captureParts: [part],
+    processingRuns: [processingRun],
+    processingRunDelayMs: 350,
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  await expect(page.getByText(/necesita aclaración/)).toBeVisible();
+  await page.getByRole('button', { name: 'Organizar captura: Pensar en cómo mejorar mi rutina' }).click();
+  const organizer = page.getByRole('dialog', { name: 'Organizar captura' });
+  const confirm = organizer.getByRole('button', { name: 'Confirmar y organizar' });
+  await expect(organizer.getByText('Verificando si la sugerencia necesita aclaración…')).toBeVisible();
+  await expect(confirm).toBeDisabled();
+  await expect(organizer.getByText('¿Qué quieres hacer o recordar con este texto?')).toBeVisible();
+  await expect(organizer.getByLabel('Aclaración / interpretación')).toBeVisible();
+  await expect(confirm).toBeDisabled();
+  await organizer.getByLabel('Aclaración / interpretación').fill('Es una idea para diseñar una rutina semanal sostenible.');
+  await expect(confirm).toBeEnabled();
+  await confirm.click();
+  await expect(page.getByText('Captura guardada como nota.')).toBeVisible();
+  expect(insertedNoteIdeas).toHaveLength(1);
+  expect(reviewRequests.at(-1)).toMatchObject({
+    p_capture_part_id: part.id,
+    p_category: 'note_idea',
+    p_review_status: 'accepted',
+    p_interpretation: 'Es una idea para diseñar una rutina semanal sostenible.',
+  });
+  expect(capture.content_original).toBe('Pensar en cómo mejorar mi rutina');
+});
+
+test('Inbox searches and paginates the complete capture archive beyond the first 250 rows', async ({ page }) => {
+  const olderCaptures = Array.from({ length: 257 }, (_, index) => ({
+    id: `00000000-0000-7000-8000-${String(1000000000 + index).padStart(12, '0')}`,
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    input_type: 'text',
+    content_original: index === 256 ? 'ARCHIVE_TAIL_UNIQUE_TERM' : `Historical capture ${index + 1}`,
+    attention_status: 'needs_review',
+    processing_status: 'not_started',
+    sync_status: 'synced',
+    captured_at: new Date(Date.UTC(2026, 10, 23 - index)).toISOString(),
+    deleted_at: null,
+  }));
+  const { captures } = await mockSupabaseSession(page, { captures: olderCaptures });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  await expect(page.getByText('Historical capture 1', { exact: true })).toBeVisible();
+  await expect(page.getByText('Historical capture 257', { exact: true })).toHaveCount(0);
+  // Initial page is 0–99; two more pages cover rows 100–256.
+  await page.getByRole('button', { name: 'Cargar más capturas' }).click();
+  await page.getByRole('button', { name: 'Cargar más capturas' }).click();
+  await expect(page.getByText('ARCHIVE_TAIL_UNIQUE_TERM')).toBeVisible();
+
+  await page.getByLabel('Buscar capturas').fill('ARCHIVE_TAIL_UNIQUE_TERM');
+  await expect(page.getByText('ARCHIVE_TAIL_UNIQUE_TERM')).toBeVisible();
+  expect(captures).toHaveLength(257);
+});
+
+test('Inbox ignores a delayed pagination response after the archive search changes', async ({ page }) => {
+  const captures = Array.from({ length: 120 }, (_, index) => ({
+    id: `00000000-0000-7000-8000-${String(1000001000 + index).padStart(12, '0')}`,
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    input_type: 'text',
+    content_original: index === 110 ? 'SEARCH_RACE_TARGET_UNIQUE' : `Historical capture ${index + 1}`,
+    attention_status: 'needs_review',
+    processing_status: 'not_started',
+    sync_status: 'synced',
+    captured_at: new Date(Date.UTC(2026, 10, 23 - index)).toISOString(),
+    deleted_at: null,
+  }));
+  await mockSupabaseSession(page, {
+    captures,
+    capturePageDelayStart: 100,
+    capturePageDelayMs: 900,
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  await expect(page.getByText('Historical capture 1', { exact: true })).toBeVisible();
+  const delayedPageRequest = page.waitForRequest((request) =>
+    request.url().includes('/rest/v1/capture')
+      && new URL(request.url()).searchParams.get('offset') === '100'
+      && new URL(request.url()).searchParams.get('limit') === '100'
+  );
+  await page.getByRole('button', { name: 'Cargar más capturas' }).click();
+  await delayedPageRequest;
+  await page.getByLabel('Buscar capturas').fill('SEARCH_RACE_TARGET_UNIQUE');
+  await expect(page.getByText('SEARCH_RACE_TARGET_UNIQUE')).toBeVisible();
+  await page.waitForTimeout(1100);
+
+  await expect(page.getByText('SEARCH_RACE_TARGET_UNIQUE')).toBeVisible();
+  await expect(page.getByText('Historical capture 101')).toHaveCount(0);
+  await expect(page.getByText('Historical capture 1')).toHaveCount(0);
+});
+
+test('Inbox can link a capture to an existing Project and preserve provenance', async ({ page }) => {
+  const project = {
+    id: '019b6000-0000-7000-8000-000000000501',
+    owner_user_id: profile.id, created_by_user_id: profile.id,
+    name: 'Automatizar el negocio', purpose: 'Proyecto existente',
+    status: 'active', archived_at: null, deleted_at: null,
+  };
+  const { captures, captureParts, insertedCaptureLinks, reviewRequests } = await mockSupabaseSession(page, { projects: [project] });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+  await page.getByRole('button', { name: 'Organizar captura: Llamar al proveedor antes del viernes' }).click();
+  const organizer = page.getByRole('dialog', { name: 'Organizar captura' });
+  await organizer.getByLabel('Tipo de destino').selectOption('project');
+  await organizer.getByLabel('Proyecto existente').selectOption(project.id);
+  await organizer.getByRole('button', { name: 'Confirmar y organizar' }).click();
+  await expect(page.getByText('Captura vinculada al proyecto existente.')).toBeVisible();
+  expect(insertedCaptureLinks).toHaveLength(1);
+  expect(insertedCaptureLinks[0]).toMatchObject({ capture_part_id: captureParts[0].id, project_id: project.id, link_status: 'confirmed' });
+  expect(reviewRequests.at(-1)).toMatchObject({ p_category: 'project', p_review_status: 'accepted' });
+  await page.getByLabel('Filtrar capturas por revisión').selectOption('organized');
+  await expect(page.getByRole('button', { name: 'Abrir proyectos' })).toBeVisible();
+  expect(captures[0].content_original).toBe('Llamar al proveedor antes del viernes');
+});
+
+test('Inbox can link captures to existing Goals and Subgoals without duplicating objectives', async ({ page }) => {
+  const goal = {
+    id: '019b6000-0000-7000-8000-000000000601',
+    owner_user_id: profile.id, created_by_user_id: profile.id,
+    life_area_id: '019b6000-0000-7000-8000-000000000602',
+    title: 'Alcanzar libertad financiera', status: 'active', archived_at: null, deleted_at: null,
+  };
+  const subgoal = {
+    id: '019b6000-0000-7000-8000-000000000603',
+    goal_id: goal.id, created_by_user_id: profile.id,
+    title: 'Incrementar ingresos mensuales', status: 'active', archived_at: null, deleted_at: null,
+  };
+  const { captureParts, insertedCaptureLinks, reviewRequests } = await mockSupabaseSession(page, { goals: [goal], subgoals: [subgoal] });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  await page.getByRole('button', { name: 'Organizar captura: Llamar al proveedor antes del viernes' }).click();
+  let organizer = page.getByRole('dialog', { name: 'Organizar captura' });
+  await organizer.getByLabel('Tipo de destino').selectOption('goal');
+  await organizer.getByLabel('Meta existente').selectOption(goal.id);
+  await organizer.getByRole('button', { name: 'Confirmar y organizar' }).click();
+  await expect(page.getByText('Captura vinculada a la meta existente.')).toBeVisible();
+  expect(insertedCaptureLinks[0]).toMatchObject({ capture_part_id: captureParts[0].id, goal_id: goal.id });
+  expect(reviewRequests.at(-1)).toMatchObject({ p_category: 'goal_subgoal', p_review_status: 'accepted' });
+
+  await page.getByLabel('Filtrar capturas por revisión').selectOption('organized');
+  await expect(page.getByRole('button', { name: 'Abrir metas' })).toBeVisible();
+
+  // This fixture starts as reviewed; the first capture is now organized and
+  // excluded from this filter, so the second capture remains independently reviewable.
+  await page.getByLabel('Filtrar capturas por revisión').selectOption('reviewed');
+  await page.getByRole('button', { name: 'Organizar captura: Idea para mejorar el negocio' }).click();
+  organizer = page.getByRole('dialog', { name: 'Organizar captura' });
+  await organizer.getByLabel('Tipo de destino').selectOption('subgoal');
+  await organizer.getByLabel('Submeta existente').selectOption(subgoal.id);
+  await organizer.getByRole('button', { name: 'Confirmar y organizar' }).click();
+  await expect(page.getByText('Captura vinculada a la submeta existente.')).toBeVisible();
+  expect(insertedCaptureLinks[1]).toMatchObject({ capture_part_id: captureParts[1].id, subgoal_id: subgoal.id });
+  expect(reviewRequests.at(-1)).toMatchObject({ p_category: 'goal_subgoal', p_review_status: 'accepted' });
+});
+
+test('Inbox marks normalized duplicate text without merging or deleting captures', async ({ page }) => {
+  const { captures, captureParts, captureLinks } = await mockSupabaseSession(page);
+  const duplicate = {
+    ...captures[0],
+    id: '00000000-0000-7000-8000-000000000111',
+    content_original: 'LLAMAR AL PROVEEDOR ANTES DEL VIERNES!',
+    captured_at: '2026-11-20T12:00:00.000Z',
+  };
+  captures.push(duplicate);
+  captureParts.push({
+    ...captureParts[0], id: '00000000-0000-7000-8000-000000000211',
+    capture_id: duplicate.id,
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+  await expect(page.getByText('Posible duplicado normalizado · revisar antes de combinar')).toHaveCount(2);
+  expect(captures).toHaveLength(4);
+  expect(captureLinks).toHaveLength(0);
+  expect(captures.every((capture) => !capture.deleted_at)).toBe(true);
+});
+
+test('Inbox can turn a reviewed capture into an Agenda Event with an owner-scoped provenance link', async ({ page }) => {
+  const { captures, captureParts, idempotencyRequests, insertedAgendaEvents, insertedCaptureLinks, reviewRequests, reviewAuditEvents } = await mockSupabaseSession(page);
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.getByRole('heading', { name: 'Hoy', exact: true })).toBeVisible();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  await page.getByRole('button', { name: 'Organizar captura: Llamar al proveedor antes del viernes' }).click();
+  const organizer = page.getByRole('dialog', { name: 'Organizar captura' });
+  await organizer.getByLabel('Tipo de destino').selectOption('event');
+  await organizer.getByLabel('Nombre del evento').fill('Llamar al proveedor');
+  await organizer.getByLabel('Fecha del evento').fill('2026-11-27');
+  await organizer.getByRole('button', { name: 'Confirmar y organizar' }).click();
+  await expect(page.getByText('Evento creado en Agenda y vinculado al Inbox.')).toBeVisible();
+
+  expect(idempotencyRequests).toHaveLength(1);
+  expect(idempotencyRequests[0].event).toEqual({
+    title: 'Llamar al proveedor',
+    temporalKind: 'all_day',
+    startDate: '2026-11-27',
+    endDateExclusive: '2026-11-28',
+  });
+  expect(idempotencyRequests[0].key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  expect(insertedAgendaEvents).toHaveLength(1);
+  expect(insertedCaptureLinks).toHaveLength(1);
+  expect(insertedCaptureLinks[0]).toMatchObject({
+    capture_part_id: captureParts[0].id,
+    calendar_event_id: insertedAgendaEvents[0].id,
+    link_status: 'confirmed',
+  });
+  expect(reviewRequests.at(-1)).toMatchObject({
+    p_capture_part_id: captureParts[0].id,
+    p_category: 'event',
+    p_review_status: 'accepted',
+  });
+  await page.getByLabel('Filtrar capturas por revisión').selectOption('organized');
+  await page.getByRole('button', { name: 'Ver historial' }).click();
+  await expect(page.getByText('Sin categoría → Evento')).toBeVisible();
+  await expect(page.getByText('Después: Clasificación manual confirmada: evento de Agenda.')).toBeVisible();
+  expect(reviewAuditEvents).toHaveLength(2);
+  expect(reviewAuditEvents.map((event) => event.action).sort()).toEqual(['capture.attention_status_changed', 'capture.part_reviewed'].sort());
+  expect(reviewAuditEvents.find((event) => event.action === 'capture.attention_status_changed').details).toMatchObject({ attention_status_before: 'needs_review', attention_status_after: 'reviewed' });
+  await expect(page.getByRole('button', { name: 'Abrir Agenda' })).toBeVisible();
+  expect(captures[0].content_original).toBe('Llamar al proveedor antes del viernes');
+});
 
 test('Projects support search, lifecycle, editing, archive, restore and linked task detail', async ({ page }) => {
   const projectA = {
@@ -1430,6 +2421,8 @@ test('Inbox converts a capture into a task and preserves its source link', async
   await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
 
   const original = captures[0].content_original;
+  const initialCaptureRow = page.locator('.capture-row').filter({ hasText: original });
+  await expect(initialCaptureRow.getByRole('button', { name: 'Descartar sugerencia' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Organizar captura: ' + original }).click();
   await page.getByLabel('Tipo de destino').selectOption('task');
   await page.getByLabel('Título de la tarea').fill('Llamar al proveedor');
@@ -1460,6 +2453,10 @@ test('Inbox converts a capture into a task and preserves its source link', async
 
   await page.getByLabel('Filtrar capturas por revisión').selectOption('organized');
   await expect(page.getByText('Organizada · Tarea')).toBeVisible();
+  const organizedCaptureRow = page.locator('.capture-row').filter({ hasText: original });
+  await expect(organizedCaptureRow.getByRole('button', { name: 'Generar sugerencias' })).toHaveCount(0);
+  await expect(organizedCaptureRow.getByRole('button', { name: 'Reintentar procesamiento' })).toHaveCount(0);
+  await expect(organizedCaptureRow.getByRole('button', { name: 'Descartar sugerencia' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Organizar captura: ' + original })).toHaveCount(0);
   await page.getByRole('button', { name: 'Archivar captura: ' + original }).click();
   await expect(page.getByText('Organizada · Tarea · Archivada')).toBeVisible();
@@ -3290,4 +4287,531 @@ test('Agenda Event edits recheck Protected Time and persist the selected hard ov
   }]);
   expect(calendarEvents[0].description).toBe('Detalles actualizados; el horario sigue protegido.');
   expect(calendarEvents[0].protected_time_decisions).toHaveLength(1);
+});
+
+
+
+test('topbar reports network connectivity instead of claiming that data is synchronized', async ({ page }) => {
+  await mockSupabaseSession(page);
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.locator('.connection-state')).toHaveText('Con conexión');
+  await expect(page.locator('.connection-state')).toHaveClass(/is-online/);
+
+  await page.context().setOffline(true);
+  await expect(page.locator('.connection-state')).toHaveText('Sin conexión');
+  await expect(page.locator('.connection-state')).toHaveClass(/is-offline/);
+
+  await page.context().setOffline(false);
+  await expect(page.locator('.connection-state')).toHaveText('Con conexión');
+});
+
+
+test('offline vault displays a human-readable message for an incorrect passphrase', async ({ page }) => {
+  await mockSupabaseSession(page);
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  await page.getByLabel('Nueva frase de desbloqueo offline').fill('clave-de-prueba-segura-2026');
+  await page.getByRole('button', { name: 'Crear bóveda privada' }).click();
+  await expect(page.getByText('Guarda ahora tu clave de recuperación')).toBeVisible();
+  const recoveryCode = await page.locator('.offline-vault-recovery code').innerText();
+  const confirmRecovery = page.getByLabel('Confirmar clave de recuperación offline');
+  const dismissRecovery = page.getByRole('button', { name: 'Ya la guardé' });
+  await expect(dismissRecovery).toBeDisabled();
+  const wrongRecoveryCode = (recoveryCode[0] === '0' ? '1' : '0') + recoveryCode.slice(1);
+  await confirmRecovery.fill(wrongRecoveryCode);
+  await expect(dismissRecovery).toBeDisabled();
+  await confirmRecovery.fill(recoveryCode);
+  await expect(dismissRecovery).toBeEnabled();
+  await dismissRecovery.click();
+  await page.getByRole('button', { name: 'Bloquear' }).click();
+
+  await page.getByLabel('Frase de desbloqueo offline').fill('contraseña-incorrecta-2026');
+  await page.getByRole('button', { name: 'Desbloquear bóveda' }).click();
+  await expect(page.locator('.offline-vault-panel .form-error[role="alert"]'))
+    .toHaveText('Contraseña incorrecta. Inténtalo de nuevo.');
+});
+
+
+test('desktop offline capture survives a lost sync acknowledgement and retries with the same IDs', async ({ page }) => {
+  const { offlineSyncRequests, offlineSyncReplayFlags, offlineSyncedCaptures, captures, captureParts } =
+    await mockSupabaseSession(page, { offlineSyncFailures: 1 });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  await page.getByLabel('Nueva frase de desbloqueo offline').fill('desktop-offline-passphrase-2026');
+  await page.getByRole('button', { name: 'Crear bóveda privada' }).click();
+  await expect(page.getByText('Guarda ahora tu clave de recuperación')).toBeVisible();
+  const recoveryCode = await page.locator('.offline-vault-recovery code').innerText();
+  const confirmRecovery = page.getByLabel('Confirmar clave de recuperación offline');
+  const dismissRecovery = page.getByRole('button', { name: 'Ya la guardé' });
+  await expect(dismissRecovery).toBeDisabled();
+  const wrongRecoveryCode = (recoveryCode[0] === '0' ? '1' : '0') + recoveryCode.slice(1);
+  await confirmRecovery.fill(wrongRecoveryCode);
+  await expect(dismissRecovery).toBeDisabled();
+  await confirmRecovery.fill(recoveryCode);
+  await expect(dismissRecovery).toBeEnabled();
+  await dismissRecovery.click();
+  await expect(page.locator('.offline-vault-state')).toHaveText('Desbloqueada');
+
+  const source = 'PRUEBA DESKTOP OFFLINE — reintento idempotente.';
+  await page.context().setOffline(true);
+  await expect(page.locator('.connection-state')).toHaveText('Sin conexión');
+  await page.locator('.inbox-composer textarea').fill(source);
+  await page.getByRole('button', { name: 'Guardar cifrada' }).click();
+  await expect(page.locator('.offline-vault-panel'))
+    .toContainText('1 captura(s) cifrada(s) pendiente(s)');
+  await expect(page.locator('.offline-vault-queue')).toContainText(source);
+  expect(offlineSyncRequests).toHaveLength(0);
+
+  await page.context().setOffline(false);
+  await expect(page.locator('.connection-state')).toHaveText('Con conexión');
+  const syncButton = page.getByRole('button', { name: 'Sincronizar ahora' });
+  await expect(syncButton).toBeEnabled();
+
+  // The mocked server commits the capture once, but the first acknowledgement is lost.
+  await syncButton.click();
+  await expect(page.locator('.alert.alert-error'))
+    .toContainText('1 permanecen cifradas para reintentar');
+  await expect(page.locator('.offline-vault-panel'))
+    .toContainText('1 captura(s) cifrada(s) pendiente(s)');
+  expect(offlineSyncRequests).toHaveLength(1);
+
+  await syncButton.click();
+  await expect(page.locator('.offline-vault-panel'))
+    .toContainText('0 captura(s) cifrada(s) pendiente(s)');
+  await expect(page.locator('.offline-vault-queue')).toHaveCount(0);
+  await expect(page.locator('.alert.alert-success'))
+    .toContainText('Capturas offline sincronizadas.');
+
+  expect(offlineSyncRequests).toHaveLength(2);
+  expect(offlineSyncRequests[1]).toMatchObject({
+    p_capture_id: offlineSyncRequests[0].p_capture_id,
+    p_part_id: offlineSyncRequests[0].p_part_id,
+    p_content_original: source,
+  });
+  expect(offlineSyncReplayFlags).toEqual([false, true]);
+  expect(offlineSyncedCaptures.size).toBe(1);
+  expect(offlineSyncedCaptures.get(offlineSyncRequests[0].p_capture_id))
+    .toMatchObject({
+      capture_id: offlineSyncRequests[0].p_capture_id,
+      part_id: offlineSyncRequests[0].p_part_id,
+      content_original: source,
+    });
+  expect(captures.filter((capture) => capture.id === offlineSyncRequests[0].p_capture_id)).toHaveLength(1);
+  expect(captureParts.filter((part) => part.id === offlineSyncRequests[0].p_part_id)).toHaveLength(1);
+});
+
+
+test('offline reopen restores the same owner vault and encrypted queue without Supabase', async ({ page }) => {
+  await mockSupabaseSession(page);
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  const cachedProfile = await page.evaluate((authId) => {
+    const raw = localStorage.getItem('simplelife:offline-profile:v1:' + authId);
+    return raw ? JSON.parse(raw) : null;
+  }, authUser.id);
+  expect(cachedProfile).toMatchObject({
+    version: 1,
+    authUserId: authUser.id,
+    profileId: profile.id,
+  });
+
+  await page.getByLabel('Nueva frase de desbloqueo offline').fill('offline-reopen-passphrase-2026');
+  await page.getByRole('button', { name: 'Crear bóveda privada' }).click();
+  await expect(page.getByText('Guarda ahora tu clave de recuperación')).toBeVisible();
+  const recoveryCode = await page.locator('.offline-vault-recovery code').innerText();
+  const confirmRecovery = page.getByLabel('Confirmar clave de recuperación offline');
+  await confirmRecovery.fill(recoveryCode);
+  await page.getByRole('button', { name: 'Ya la guardé' }).click();
+  await expect(page.locator('.offline-vault-state')).toHaveText('Desbloqueada');
+
+  const source = 'CAPTURA CIFRADA PERSISTENTE — reapertura sin conexión.';
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => false });
+    window.dispatchEvent(new Event('offline'));
+  });
+  await expect(page.locator('.connection-state')).toHaveText('Sin conexión');
+  await page.locator('.inbox-composer textarea').fill(source);
+  await page.getByRole('button', { name: 'Guardar cifrada' }).click();
+  await expect(page.locator('.offline-vault-queue')).toContainText(source);
+  await page.getByRole('button', { name: 'Bloquear' }).click();
+  await expect(page.locator('.offline-vault-state')).toHaveText('Bloqueada');
+
+  // Keep the local Vite document reachable, but make every Supabase request fail.
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => false });
+  });
+  const blockSupabase = (route) => route.abort();
+  await page.route(`${projectUrl}/**`, blockSupabase);
+  await page.reload();
+  // A full reload restores the app's default section (Today); navigate back
+  // to Inbox before asserting its private vault state.
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+  await expect(page.locator('.connection-state')).toHaveText('Sin conexión');
+  await expect(page.locator('.offline-vault-state')).toHaveText('Bloqueada');
+  await expect(page.getByLabel('Frase de desbloqueo offline')).toBeVisible();
+  await expect(page.getByText(/No se pudo preparar tu perfil/)).toHaveCount(0);
+
+  await page.getByLabel('Frase de desbloqueo offline').fill('offline-reopen-passphrase-2026');
+  await page.getByRole('button', { name: 'Desbloquear bóveda' }).click();
+  await expect(page.locator('.offline-vault-state')).toHaveText('Desbloqueada');
+  await expect(page.locator('.offline-vault-queue')).toContainText(source);
+  await expect(page.locator('.offline-vault-panel'))
+    .toContainText('1 captura(s) cifrada(s) pendiente(s)');
+  await expect(page.getByRole('button', { name: 'Sincronizar ahora' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: /Grabar audio/ })).toBeDisabled();
+
+  // Reconnect and allow the same authenticated owner to revalidate against DEV.
+  await page.unroute(`${projectUrl}/**`, blockSupabase);
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => true });
+    window.dispatchEvent(new Event('online'));
+  });
+  await expect(page.locator('.connection-state')).toHaveText('Con conexión');
+  await expect(page.getByText('Llamar al proveedor antes del viernes')).toBeVisible();
+  const syncButton = page.getByRole('button', { name: 'Sincronizar ahora' });
+  await expect(syncButton).toBeEnabled();
+  await syncButton.click();
+  await expect(page.locator('.offline-vault-panel'))
+    .toContainText('0 captura(s) cifrada(s) pendiente(s)');
+  await expect(page.locator('.alert.alert-success'))
+    .toContainText('Capturas offline sincronizadas.');
+});
+
+test('mobile vault recovery key restores queued encrypted capture and rotates the passphrase', async ({ page }) => {
+  await mockSupabaseSession(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.locator('.mobile-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  await page.getByLabel('Nueva frase de desbloqueo offline').fill('offline-vault-original-passphrase-2026');
+  await page.getByRole('button', { name: 'Crear bóveda privada' }).click();
+  await expect(page.getByText('Guarda ahora tu clave de recuperación')).toBeVisible();
+
+  const recoveryKey = await page.locator('.offline-vault-recovery code').innerText();
+  expect(recoveryKey).toMatch(/^[0-9a-f]{64}$/);
+  await page.getByLabel('Confirmar clave de recuperación offline').fill(recoveryKey);
+  await page.getByRole('button', { name: 'Ya la guardé' }).click();
+  await expect(page.locator('.offline-vault-state')).toHaveText('Desbloqueada');
+
+  const source = 'CAPTURA RECUPERABLE — debe sobrevivir a la rotación de clave.';
+  await page.context().setOffline(true);
+  await expect(page.locator('.connection-state')).toHaveText('Sin conexión');
+  await page.locator('.inbox-composer textarea').fill(source);
+  await page.getByRole('button', { name: 'Guardar cifrada' }).click();
+  await expect(page.locator('.offline-vault-queue')).toContainText(source);
+  await expect(page.locator('.offline-vault-panel'))
+    .toContainText('1 captura(s) cifrada(s) pendiente(s)');
+
+  const storedRecords = await page.evaluate(async (profileId) => {
+    const database = await new Promise((resolve, reject) => {
+      const request = indexedDB.open('simplelife-private-offline-v1-' + profileId);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      return await new Promise((resolve, reject) => {
+        const request = database.transaction('captures', 'readonly')
+          .objectStore('captures').getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    } finally {
+      database.close();
+    }
+  }, profile.id);
+  expect(storedRecords).toHaveLength(1);
+  expect(JSON.stringify(storedRecords)).not.toContain(source);
+
+  // A lost one-time key can be replaced safely while the owner still knows the current passphrase.
+  await page.getByRole('button', { name: 'Bloquear' }).click();
+  await expect(page.locator('.offline-vault-state')).toHaveText('Bloqueada');
+  await page.getByLabel('Frase de desbloqueo offline')
+    .fill('offline-vault-original-passphrase-2026');
+  await page.getByRole('button', { name: 'Desbloquear bóveda' }).click();
+  await expect(page.locator('.offline-vault-state')).toHaveText('Desbloqueada');
+
+  await page.getByRole('button', { name: 'Renovar clave de recuperación' }).click();
+  await page.getByLabel('Frase actual de desbloqueo offline')
+    .fill('offline-vault-original-passphrase-2026');
+  await page.getByRole('button', { name: 'Generar nueva clave de recuperación' }).click();
+  await expect(page.getByText('Guarda tu nueva clave de recuperación')).toBeVisible();
+  const newRecoveryKey = await page.locator('.offline-vault-recovery code').innerText();
+  expect(newRecoveryKey).toMatch(/^[0-9a-f]{64}$/);
+  expect(newRecoveryKey).not.toBe(recoveryKey);
+  await page.getByLabel('Confirmar clave de recuperación offline').fill(newRecoveryKey);
+  await page.getByRole('button', { name: 'Ya la guardé' }).click();
+
+  await page.getByRole('button', { name: 'Bloquear' }).click();
+  await expect(page.locator('.offline-vault-state')).toHaveText('Bloqueada');
+  await page.getByRole('button', { name: 'Perdí mi frase de desbloqueo' }).click();
+
+  const keyInput = page.getByLabel('Clave de recuperación offline');
+  const newPassphrase = page.getByLabel('Nueva frase offline');
+  const recoverButton = page.getByRole('button', { name: 'Recuperar y cambiar frase' });
+  await keyInput.fill(recoveryKey);
+  await newPassphrase.fill('offline-vault-rotated-passphrase-2026');
+  await recoverButton.click();
+  await expect(page.locator('.offline-vault-panel .form-error[role="alert"]'))
+    .toHaveText('Clave de recuperación incorrecta. Comprueba la clave e inténtalo de nuevo.');
+  await expect(page.locator('.offline-vault-state')).toHaveText('Bloqueada');
+
+  await keyInput.fill(newRecoveryKey);
+  await recoverButton.click();
+  await expect(page.locator('.offline-vault-state')).toHaveText('Desbloqueada');
+  await expect(page.locator('.offline-vault-panel'))
+    .toContainText('Bóveda recuperada. La frase de desbloqueo se ha actualizado.');
+  await expect(page.locator('.offline-vault-queue')).toContainText(source);
+
+  // Lock and unlock again to prove the new passphrase, not only the recovery
+  // operation, can reopen the same encrypted queue on this browser profile.
+  await page.getByRole('button', { name: 'Bloquear' }).click();
+  await expect(page.locator('.offline-vault-state')).toHaveText('Bloqueada');
+  await page.getByLabel('Frase de desbloqueo offline')
+    .fill('offline-vault-rotated-passphrase-2026');
+  await page.getByRole('button', { name: 'Desbloquear bóveda' }).click();
+  await expect(page.locator('.offline-vault-state')).toHaveText('Desbloqueada');
+  await expect(page.locator('.offline-vault-queue')).toContainText(source);
+  await expect(page.locator('.offline-vault-panel'))
+    .toContainText('1 captura(s) cifrada(s) pendiente(s)');
+  await expect(page.locator('.connection-state')).toHaveText('Sin conexión');
+});
+
+test('Inbox safely verifies a saved private recording and exposes its local transcription action', async ({ page }) => {
+  const firstAsset = {
+    id: '019b7000-0000-7000-8000-000000000501',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    capture_id: null,
+    bucket_id: 'inbox-voice-private',
+    object_path: profile.id + '/019b7000-0000-7000-8000-000000000501/source.webm',
+    mime_type: 'audio/webm',
+    file_size_bytes: 128,
+    sha256_hex: 'a'.repeat(64),
+    status: 'uploading',
+    retention_until: '2026-12-02T02:03:15.000Z',
+    created_at: '2026-11-25T21:03:15.000Z',
+  };
+  const secondAsset = {
+    ...firstAsset,
+    id: '019b7000-0000-7000-8000-000000000502',
+    object_path: profile.id + '/019b7000-0000-7000-8000-000000000502/source.webm',
+    created_at: '2026-11-25T21:03:25.000Z',
+  };
+  const { voiceAssets, voiceFinalizeRequests, uploadedVoiceObjects } = await mockSupabaseSession(page, {
+    voiceAssets: [secondAsset, firstAsset],
+  });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  const pending = page.getByRole('region', { name: 'Audios privados pendientes' });
+  await expect(pending).toContainText('verificación pendiente');
+  const retryButtons = pending.getByRole('button', { name: 'Reintentar verificación' });
+  await expect(retryButtons).toHaveCount(2);
+
+  await retryButtons.first().click();
+  await expect(page.locator('.alert.alert-success'))
+    .toContainText('Audio verificado y finalizado');
+  await expect(pending).toContainText('listo para transcribir localmente');
+  await expect(pending.getByRole('button', { name: 'Reintentar verificación' })).toHaveCount(1);
+  await expect(pending.getByRole('button', { name: 'Transcribir localmente' })).toHaveCount(1);
+
+  await pending.getByRole('button', { name: 'Reintentar verificación' }).click();
+  await expect(page.locator('.alert.alert-success'))
+    .toContainText('Audio verificado y finalizado');
+  await expect(pending.getByRole('button', { name: 'Reintentar verificación' })).toHaveCount(0);
+  await expect(pending.getByRole('button', { name: 'Transcribir localmente' })).toHaveCount(2);
+
+  expect(voiceFinalizeRequests).toHaveLength(2);
+  expect(voiceFinalizeRequests.map((request) => request.assetId).sort())
+    .toEqual([firstAsset.id, secondAsset.id].sort());
+  expect(voiceAssets.every((asset) => asset.status === 'uploaded')).toBe(true);
+  // Reconciliation sends only the owner-scoped asset IDs to the finalizer.
+  // It does not record or upload the audio bytes a second time.
+  expect(uploadedVoiceObjects).toHaveLength(0);
+});
+
+test('Inbox exposes one local transcription action per already-uploaded private recording without downloading it', async ({ page }) => {
+  const retentionUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  const firstAsset = {
+    id: '019b7200-0000-7000-8000-000000000601',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    capture_id: null,
+    bucket_id: 'inbox-voice-private',
+    object_path: profile.id + '/019b7200-0000-7000-8000-000000000601/source.webm',
+    mime_type: 'audio/webm',
+    file_size_bytes: 128,
+    sha256_hex: 'b'.repeat(64),
+    status: 'uploaded',
+    uploaded_at: new Date().toISOString(),
+    retention_until: retentionUntil,
+    created_at: new Date().toISOString(),
+  };
+  const secondAsset = {
+    ...firstAsset,
+    id: '019b7200-0000-7000-8000-000000000602',
+    object_path: profile.id + '/019b7200-0000-7000-8000-000000000602/source.webm',
+  };
+  const { voiceAssets, audioDownloadRequests } = await mockSupabaseSession(page, {
+    voiceAssets: [secondAsset, firstAsset],
+  });
+
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  const pending = page.getByRole('region', { name: 'Audios privados pendientes' });
+  await expect(pending).toContainText('listo para transcribir localmente');
+  const buttons = pending.getByRole('button', { name: 'Transcribir localmente' });
+  await expect(buttons).toHaveCount(2);
+  await expect(buttons.nth(0)).toBeEnabled();
+  await expect(buttons.nth(1)).toBeEnabled();
+
+  expect(voiceAssets.every((asset) => asset.status === 'uploaded')).toBe(true);
+  expect(audioDownloadRequests).toHaveLength(0);
+});
+
+test('mobile voice capture uploads a private original and offers local transcription in Inbox', async ({ page }) => {
+  await page.addInitScript(() => {
+    const track = { stop: () => { window.__voiceMicrophoneTrackStopped = true; } };
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        getUserMedia: async () => ({ getTracks: () => [track] }),
+      },
+    });
+    class FakeMediaRecorder {
+      static isTypeSupported(type) {
+        return type === 'audio/webm;codecs=opus';
+      }
+      constructor(stream, options = {}) {
+        this.stream = stream;
+        this.mimeType = options.mimeType || 'audio/webm';
+        this.state = 'inactive';
+        this.ondataavailable = null;
+        this.onstop = null;
+      }
+      start() {
+        this.state = 'recording';
+      }
+      stop() {
+        if (this.state === 'inactive') return;
+        this.state = 'inactive';
+        this.ondataavailable?.({
+          data: new Blob(['synthetic private voice bytes'], { type: this.mimeType }),
+        });
+        this.onstop?.();
+      }
+    }
+    window.MediaRecorder = FakeMediaRecorder;
+  });
+
+  const { insertedVoiceAssets, uploadedVoiceObjects, voiceFinalizeRequests } =
+    await mockSupabaseSession(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.locator('.mobile-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  const voicePanel = page.getByRole('region', { name: 'Captura de voz privada' });
+  const recordButton = voicePanel.getByRole('button', { name: 'Grabar audio' });
+  await expect(recordButton).toBeEnabled();
+  await recordButton.click();
+  await expect(voicePanel.getByText('Grabando…')).toBeVisible();
+  await voicePanel.getByRole('button', { name: 'Detener y guardar' }).click();
+
+  await expect(voicePanel)
+    .toContainText('Puedes transcribirlo localmente desde su tarjeta en Inbox');
+  const savedVoiceCard = page.getByTestId('private-voice-asset-' + insertedVoiceAssets[0]?.id);
+  await expect(savedVoiceCard.getByRole('button', { name: 'Transcribir localmente' })).toBeEnabled();
+  expect(insertedVoiceAssets).toHaveLength(1);
+  expect(uploadedVoiceObjects).toHaveLength(1);
+  expect(voiceFinalizeRequests).toHaveLength(1);
+
+  const asset = insertedVoiceAssets[0];
+  const upload = uploadedVoiceObjects[0];
+  expect(asset).toMatchObject({
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    bucket_id: 'inbox-voice-private',
+    mime_type: 'audio/webm',
+    status: 'uploading',
+  });
+  expect(asset.file_size_bytes).toBeGreaterThan(0);
+  expect(asset.sha256_hex).toMatch(/^[0-9a-f]{64}$/);
+  expect(upload.objectPath).toBe(profile.id + '/' + asset.id + '/source.webm');
+  expect(upload.contentType).toContain('multipart/form-data');
+  expect(voiceFinalizeRequests[0]).toEqual({ assetId: asset.id });
+  expect(await page.evaluate(() => window.__voiceMicrophoneTrackStopped)).toBe(true);
+});
+
+
+test('Inbox shows one local transcription action per saved private recording without downloading automatically', async ({ page }) => {
+  const audioOne = {
+    id: '019b7000-0000-7000-8000-000000000601',
+    owner_user_id: profile.id,
+    created_by_user_id: profile.id,
+    capture_id: null,
+    bucket_id: 'inbox-voice-private',
+    object_path: profile.id + '/019b7000-0000-7000-8000-000000000601/source.webm',
+    mime_type: 'audio/webm',
+    file_size_bytes: 64,
+    sha256_hex: '0'.repeat(64),
+    status: 'uploaded',
+    retention_until: '2026-12-02T23:00:00.000Z',
+    created_at: '2026-11-26T18:00:00.000Z',
+  };
+  const audioTwo = {
+    ...audioOne,
+    id: '019b7000-0000-7000-8000-000000000602',
+    object_path: profile.id + '/019b7000-0000-7000-8000-000000000602/source.webm',
+    created_at: '2026-11-26T17:00:00.000Z',
+  };
+  const { voiceAssets, uploadedVoiceObjects, voiceFinalizeRequests, audioDownloadRequests, queueRequests } =
+    await mockSupabaseSession(page, { voiceAssets: [audioOne, audioTwo] });
+  await page.goto('/');
+  await page.getByLabel('Correo electrónico').fill(authUser.email);
+  await page.getByLabel('Contraseña').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await page.locator('.side-nav').getByRole('button', { name: /Inbox/ }).click();
+
+  const pending = page.getByRole('region', { name: 'Audios privados pendientes' });
+  await expect(pending).toBeVisible();
+  const cards = pending.getByTestId(/private-voice-asset-/);
+  await expect(cards).toHaveCount(2);
+  await expect(pending.getByRole('button', { name: 'Transcribir localmente' })).toHaveCount(2);
+  await expect(pending.locator('input[type="file"]')).toHaveCount(0);
+  await expect(pending).toContainText('listo para transcribir localmente');
+
+  // Opening Inbox must not download, re-upload or send any recording to a server worker.
+  expect(voiceAssets).toHaveLength(2);
+  expect(uploadedVoiceObjects).toHaveLength(0);
+  expect(voiceFinalizeRequests).toHaveLength(0);
+  expect(audioDownloadRequests).toHaveLength(0);
+  expect(queueRequests).toHaveLength(0);
 });

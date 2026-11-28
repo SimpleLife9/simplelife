@@ -1,0 +1,12 @@
+{
+  "imports": {
+    "@supabase/supabase-js": "npm:@supabase/supabase-js@2.119.2"
+  },
+  "lock": {
+    "path": "../../../deno.lock",
+    "frozen": true
+  },
+  "compilerOptions": {
+    "strict": true
+  }
+}

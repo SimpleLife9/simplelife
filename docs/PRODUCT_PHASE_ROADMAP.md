@@ -45,16 +45,21 @@ This is a preparation phase, not a new product module. It prevents new features 
 **Objective:** capture anything with minimal friction and turn it into traceable, recoverable information.
 
 **Deliverables**
-- Global text/voice capture and transcription.
-- Original capture preservation and multi-item splitting.
-- Eight categories: task, event, request, habit, goal/subgoal, project, note/idea and list.
-- Confidence-aware suggestions and selective clarification.
-- Traceable destinations, correction history, deduplication/merge proposals.
-- Processing/sync/review/authorization views.
-- Recoverable trash, search and safe deletion flow.
-- Offline capture, retry and idempotent synchronization design.
+- Text capture with original preservation and lossless multi-item splitting.
+- Eight advisory categories: task, event, request, habit, goal/subgoal, project, note/idea and list.
+- Confidence/clarification indicators, manual correction and auditable acceptance/rejection.
+- Owner-scoped, traceable destinations: task, Agenda Event, existing Goal/Subgoal, Project, note/idea and list.
+- Indexed full-text search and paginated navigation across the full capture archive.
+- Cross-archive normalized duplicate discovery without automatic merge/deletion.
+- Secure processing queue, bounded retries, leases, authenticated worker and scheduled-dispatcher endpoint.
+- Recoverable 30-day trash, followed by bounded physical purge and privacy-safe audit metadata.
+- Desktop/mobile web flows and automated PostgreSQL/RLS/Edge Runtime regression.
 
-**Dependency:** Agenda event contracts must exist before event classification becomes a supported Inbox destination.
+**Dependency:** Agenda event contracts exist and Inbox creates Events through the authenticated Agenda writer. Habit and Request destination workflows remain in their later phases.
+
+**Implementation status — 23 November 2026: INTEGRATION IN PROGRESS / NOT CLOSED.** PR [#97](https://github.com/SimpleLife9/simplelife/pull/97) contains the text capture/processing/review flow, Agenda Event linkage, existing Goal/Subgoal/Project linkage, global indexed search, owner-isolated duplicate discovery, bounded retry dispatcher and 30-day retention purge. The processor is deterministic and heuristic, not a real AI model. Latest commit and exact-SHA CI are still under validation; no PASS is claimed until the final run succeeds.
+
+**Open exit gates:** voice recording and transcription with a private audio lifecycle and approved provider/region/retention; actual AI model/provider and credentials; encrypted offline persistence, recovery and conflict resolution; hosted schedule plus secret for retry/purge invocation; owner acceptance on desktop and a physical Android device. No merge, hosted migration, function deployment or release has been performed. Do not close this phase or advance to Phase 3 until those gates have evidence or an explicit owner-approved deferral.
 
 ### Phase 3 — ARIA intelligent planner (Vision Phase C)
 

@@ -1,0 +1,65 @@
+# Inbox voice transcription queue
+
+## Purpose
+
+Keep a verified private audio upload durable between upload finalization and a future approved speech-to-text worker. A transcription is not complete until the derived capture, original transcript part, audio provenance, and normal Inbox processing run are committed together.
+
+## Lifecycle
+
+- `queued`: a private upload changed to `uploaded`; the database trigger inserts one job per audio asset.
+- `leased`: one worker owns the job under a lease token and bounded expiry.
+- `retryable`: a lease ended before `request_started`; another attempt may safely claim it after backoff.
+- `succeeded`: transcript, capture, part, audio provenance, and `processing_run` committed atomically.
+- `manual_review`: a provider request may already have been sent, the result is ambiguous, or the bounded attempt limit was reached. This state is never auto-claimed again.
+- `expired`: the source asset is no longer eligible or its existing retention window elapsed.
+
+The queue allows at most three claims. A lease that expires before request start may be reclaimed. Once request start is recorded, lease expiry or worker failure moves the job to manual review instead of silently sending the same audio again. This is intentionally conservative because a timed-out inference may already have been accepted or billed.
+
+## Trusted operations
+
+The queue and attempt tables live in the non-API `private` schema, have RLS enabled, and grant no direct table access to browser or service roles. Only the service-role RPCs can claim, record request start, fail, or complete a job. Each attempt stores provider/model/adapter/region identifiers and evidence identifiers only; it does not store credentials, audio bytes, or transcript text.
+
+Before a future worker calls a provider, it must evaluate the fail-closed speech route policy at request time and pass verified evidence identifiers to `mark_inbox_voice_transcription_request_started`. That RPC re-locks and re-checks the source asset status and retention deadline immediately before it records `request_started`; an expired, unlinked, or otherwise ineligible source cannot proceed to inference. The policy helper is not yet connected to a provider worker, and this queue migration does not make an external request.
+
+## Atomic Inbox hand-off
+
+The completion RPC creates a voice `capture`, its original `capture_part`, updates `capture_audio_asset` with provider/model/region provenance, and inserts a queued `processing_run` in one database transaction. The audio asset ID is the processing idempotency key. An exact replay returns the original IDs; a conflicting transcript is rejected. The processing worker remains deterministic and advisory-only; the owner still reviews proposals.
+
+The new completion path replaces the older transcript-only RPC because that function could persist a voice capture without enqueuing normal Inbox processing.
+
+## Retention and rollout
+
+Queueing and retrying never extend the original seven-day retention window for an untranscribed source. Expired assets cannot be claimed. When a transcript succeeds, the audio asset follows the existing capture-retention rules.
+
+This is schema and lifecycle groundwork only. No provider adapter, scheduler, route discovery, or real transcription call is enabled by this change. No hosted Supabase project or production deployment is changed by CI; the required tests run against ephemeral local Postgres. Merge and hosted migration application remain separate gates.
+
+## Internal Edge worker contract (no provider enabled)
+
+A secret-only Edge endpoint, `inbox-voice-transcription-worker`, now implements the provider-neutral execution order, but it is intentionally disabled in the deployed entrypoint because no verified route resolver or explicit provider adapter is wired.
+
+- It evaluates route eligibility **before claim**. With the current production entrypoint, missing route/adapter returns `SPEECH_ROUTE_NOT_CONFIGURED` without touching the queue, downloading audio, or contacting a provider.
+- When dependencies are injected for tests, it claims one job, downloads from the private bucket, recomputes size/SHA-256, and refuses to continue on mismatch.
+- It records provider/model/adapter/region and nine evidence identifiers using `mark_inbox_voice_transcription_request_started` immediately before the adapter call.
+- Provider errors after that durable marker use the terminal manual-review path; no automatic provider retry occurs. Successful results must match the verified provider/model/region before atomic completion creates the Inbox capture/part/processing run.
+- The Deno fixture tests cover missing route, legal eligibility denial, digest mismatch, successful synthetic completion, provider timeout ambiguity, provenance mismatch, no-work and stale lease.
+- The actual local Edge Runtime smoke invokes the endpoint and requires the disabled response when no route is configured.
+
+This worker is not a real STT integration yet. It has no configured Groq/Cloudflare/ARIA credentials, no provider endpoint, no scheduler and no production route resolver; synthetic provider tests never contact an external service.
+
+
+## Browser-local transcription from a real Inbox recording
+
+The Inbox exposes one **Transcribir localmente** action inside each eligible private audio card. There is no free-standing file picker or external test-audio path in the user workflow.
+
+1. The owner deliberately selects one uploaded asset. Opening Inbox or loading the list does not download audio.
+2. The browser downloads only that owner's object through the authenticated private Storage API. It validates owner, bucket, immutable object path, upload state, seven-day retention, byte size and the recorded SHA-256 before inference.
+3. The verified Blob stays in memory and is passed to the pinned Whisper.cpp tiny-q5_1 runtime on the same device. Spanish inference uses the already-tested same-origin WASM runtime. No voice Edge worker, remote provider, external speech API or audio upload is called.
+4. The owner can edit the recognized text and explicitly save it as a new `voice` capture. The public `record_inbox_voice_transcription_local` function is an authenticated-only `SECURITY DEFINER` wrapper with an explicit `auth.uid()` gate; it delegates to a private `SECURITY DEFINER` implementation which independently resolves and checks the active owner. The `private` schema remains completely inaccessible to API roles, and direct execution of the private implementation is revoked. Its exact-replay behavior prevents duplicate captures if the client loses the response.
+5. Saving creates the voice capture only. It does not queue proposal processing or generate suggestions automatically. The capture appears in Inbox as unorganized; the owner may later choose **Generar sugerencias**. Suggestions remain advisory and no destination is created without the owner's confirmation.
+
+The original Storage object is never replaced, deleted, rewritten or copied to the offline vault. The database stores transcript text and fixed local model provenance; once linked, the source audio follows its capture's existing retention/trash lifecycle. Downloading the private recording requires network access; model inference itself runs locally after the Whisper model has been prepared on this device.
+
+The separate provider-neutral server transcription queue and `inbox-voice-transcription-worker` remain disabled/fail-closed. This UI flow does not enable them, apply hosted migrations, configure credentials or contact a provider. CI verifies the RPC against ephemeral local Postgres only.
+
+
+The first `SECURITY INVOKER` wrapper experiment was rejected by the existing Event SQL regression because it required granting API `USAGE` on `private`. The final design keeps that schema fully closed and exposes only the narrowly granted public wrapper, which verifies `auth.uid()` before delegating. Both functions run with a fixed `pg_catalog` search path; only the authenticated role can execute the public wrapper.

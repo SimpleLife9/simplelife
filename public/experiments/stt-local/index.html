@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#174d40">
+  <title>SimpleLife · Laboratorio STT local</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#20342f;background:#f4f7f3;font-synthesis:none;text-rendering:optimizeLegibility}
+    *{box-sizing:border-box}body{margin:0;min-width:320px;padding:28px 16px 48px}
+    main{width:min(760px,100%);margin:0 auto;background:#fff;border:1px solid #e3eae3;border-radius:22px;padding:clamp(20px,4vw,36px);box-shadow:0 16px 42px rgba(25,57,46,.06)}
+    .eyebrow{font-size:.72rem;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#6c8978}
+    h1{font-size:clamp(1.65rem,4vw,2.2rem);letter-spacing:-.04em;line-height:1.1;margin:10px 0}
+    p{line-height:1.55;color:#687a70}.notice{background:#fff6e7;border:1px solid #f1dfbb;border-radius:12px;padding:13px 15px;color:#6e5220;font-size:.9rem}
+    .privacy{background:#edf5ef;border:1px solid #d9e8dc;border-radius:12px;padding:13px 15px;color:#315d43;font-size:.9rem}
+    .controls{display:flex;flex-wrap:wrap;gap:10px;margin:18px 0}
+    button{border:0;border-radius:11px;padding:12px 16px;font-weight:700;background:#174d40;color:white;cursor:pointer}
+    button.secondary{background:#edf3ed;color:#315d43}button:disabled{opacity:.5;cursor:not-allowed}
+    .status{border:1px solid #e5ebe5;background:#fbfcfb;border-radius:12px;padding:14px 16px;margin:16px 0;font-size:.9rem;color:#52655a;min-height:48px}
+    label{display:block;font-weight:700;margin:16px 0 8px}
+    input[type=file],input[type=text]{display:block;width:100%;border:1px solid #dce6dd;border-radius:12px;padding:13px;background:#fbfdfb}
+    input[type=file]{border-style:dashed;border-color:#b9cbbd}
+    .result{white-space:pre-wrap;overflow-wrap:anywhere;border:1px solid #e5ebe5;border-radius:12px;padding:16px;min-height:70px;background:#fbfcfb;color:#20342f}
+    .small{font-size:.82rem;color:#849187}.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px;margin:14px 0}
+    .metric{background:#f5f8f5;border-radius:10px;padding:11px}.metric b{display:block;font-size:1.02rem;color:#315d43}.metric span{font-size:.75rem;color:#7b8b80}
+    a{color:#245e4c}hr{border:0;border-top:1px solid #e7ece7;margin:22px 0}
+  </style>
+</head>
+<body>
+<main>
+  <div class="eyebrow">Prueba aislada · no forma parte de la aplicación principal</div>
+  <h1>Transcripción local de voz</h1>
+  <p>Laboratorio con <strong>whisper.cpp + WebAssembly SIMD</strong>. Usa el modelo Tiny multilingüe cuantizado Q5_1 (32,2 MB): se descarga una vez y queda guardado en IndexedDB para reutilizarlo sin volver a consumir descarga en cada sesión.</p>
+  <div class="notice"><strong>Usa únicamente audio sintético o público de prueba.</strong> No selecciones audios privados ni grabaciones personales. Este laboratorio no está aprobado para procesar originales.</div>
+  <div class="privacy" style="margin-top:12px"><strong>Privacidad:</strong> el audio se decodifica y procesa en esta pestaña. Nunca se envía al Worker ni a un servicio de inferencia. El Worker existente solo transmite el archivo público del modelo, de una revisión fija, mediante GET/HEAD. El runtime WASM está empaquetado con SimpleLife y se carga desde el mismo origen; el modelo público se descarga solo al pulsar preparar. No se usa micrófono, Supabase, ARIA ni un servicio de transcripción remoto.</div>
+
+  <h2 style="margin-top:24px">1. Preparar motor y modelo</h2>
+  <p class="small">Modelo: <code>ggml-tiny-q5_1.bin</code> · revisión fija <code>0b364b56</code> · SHA-256 verificado antes de inicializar · CPU local, 2 hilos.</p>
+  <div class="controls">
+    <button id="load-model">Descargar y preparar motor</button>
+    <button id="release-model" class="secondary" disabled>Soltar motor</button>
+  </div>
+  <div id="status" class="status" role="status" aria-live="polite">Motor sin cargar. La descarga solo comienza al pulsar el botón.</div>
+  <div class="metrics">
+    <div class="metric"><b id="storage">—</b><span>Uso y cuota de almacenamiento local</span></div>
+    <div class="metric"><b id="device-memory">—</b><span>Memoria del dispositivo (si el navegador la expone)</span></div>
+    <div class="metric"><b id="heap">—</b><span>Heap JS (no incluye toda la memoria WASM)</span></div>
+  </div>
+
+  <hr>
+  <h2>2. Probar un audio sintético</h2>
+  <p>Selecciona un archivo breve (máximo 25 MiB y 2 minutos). Se convierte a mono/16 kHz y se procesa localmente. La inferencia no consume solicitudes de una API ni créditos por minuto.</p>
+  <label for="audio-file">Audio sintético o público de prueba</label>
+  <input id="audio-file" type="file" accept="audio/*" disabled>
+  <div class="controls">
+    <button id="transcribe" disabled>Transcribir localmente</button>
+  </div>
+  <div id="transcription" class="result" aria-live="polite">La transcripción aparecerá aquí.</div>
+  <div class="metrics">
+    <div class="metric"><b id="duration">—</b><span>Duración de audio</span></div>
+    <div class="metric"><b id="elapsed">—</b><span>Tiempo de inferencia</span></div>
+    <div class="metric"><b id="wer">—</b><span>Error de palabras frente a referencia</span></div>
+  </div>
+  <label for="reference">Texto de referencia opcional</label>
+  <input id="reference" type="text" autocomplete="off" placeholder="Escribe la frase exacta del audio para medir WER">
+  <p class="small">El WER es una métrica orientativa de esta muestra; no certifica precisión en español cubano ni en audios reales.</p>
+  <hr>
+  <p class="small">Estado experimental. No se conecta a la cola privada ni crea capturas. Al soltar el motor, el modelo verificado permanece almacenado localmente; el navegador libera memoria cuando lo considere oportuno.</p>
+</main>
+<script type="module" src="./app.js"></script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { isSupabaseConfigured } from './lib/supabase.js';
 import { AuthScreen } from './features/auth/AuthScreen.jsx';
 import { ConfigurationScreen } from './shared/components/ConfigurationScreen.jsx';
@@ -8,8 +8,101 @@ import { getPageTitle, getPageDescription } from './app/navigation.js';
 import { createAppActions } from './app/createAppActions.js';
 import { AppPages } from './app/AppPages.jsx';
 import { useAppAuth } from './app/useAppAuth.js';
+import { OFFLINE_SHELL_CACHE_NAME, getOfflineShellStatusMessage } from './lib/offline-shell-readiness.js';
 
+function OfflinePreparationStatus() {
+  const [state, setState] = useState(import.meta.env.PROD ? 'checking' : 'hidden');
 
+  useEffect(() => {
+    if (!import.meta.env.PROD || !('serviceWorker' in navigator) || !('caches' in window)) {
+      setState('hidden');
+      return undefined;
+    }
+
+    const registrationPromise = window.__SIMPLELIFE_SW_REGISTRATION__;
+    if (!registrationPromise) {
+      setState('unavailable');
+      return undefined;
+    }
+
+    let stopped = false;
+    let checking = false;
+
+    const verifyOfflineShell = async () => {
+      if (checking || stopped) return;
+      checking = true;
+      try {
+        const registration = await registrationPromise;
+        if (!registration) throw new Error('Service worker registration failed.');
+        if (!registration.active) await navigator.serviceWorker.ready;
+        if (!navigator.serviceWorker.controller) {
+          if (!stopped) setState('preparing');
+          return;
+        }
+
+        const cache = await caches.open(OFFLINE_SHELL_CACHE_NAME);
+        const manifestResponse = await cache.match(
+          new URL('/precache-manifest.json', window.location.origin).href,
+          { ignoreVary: true },
+        );
+        if (!manifestResponse) {
+          if (!stopped) setState('preparing');
+          return;
+        }
+
+        const manifest = await manifestResponse.json();
+        if (manifest?.version !== 1 || !Array.isArray(manifest.assets)) {
+          throw new Error('Offline asset manifest is invalid.');
+        }
+
+        const cachedAssets = await Promise.all(manifest.assets.map((asset) => (
+          cache.match(new URL(asset, window.location.origin).href, { ignoreVary: true })
+        )));
+        const cachedDocument = await cache.match(
+          new URL('/index.html', window.location.origin).href,
+          { ignoreVary: true },
+        );
+
+        if (!stopped) {
+          setState(cachedDocument && cachedAssets.every(Boolean) ? 'ready' : 'preparing');
+        }
+      } catch {
+        if (!stopped) setState('unavailable');
+      } finally {
+        checking = false;
+      }
+    };
+
+    const handleReadinessChange = () => { void verifyOfflineShell(); };
+    navigator.serviceWorker.addEventListener('controllerchange', handleReadinessChange);
+    window.addEventListener('online', handleReadinessChange);
+
+    const timeout = window.setTimeout(() => {
+      if (!stopped) setState((current) => (current === 'ready' ? current : 'unavailable'));
+    }, 25_000);
+
+    void verifyOfflineShell();
+
+    return () => {
+      stopped = true;
+      window.clearTimeout(timeout);
+      navigator.serviceWorker.removeEventListener('controllerchange', handleReadinessChange);
+      window.removeEventListener('online', handleReadinessChange);
+    };
+  }, []);
+
+  if (state === 'hidden' || state === 'checking' || state === 'ready') return null;
+
+  const message = getOfflineShellStatusMessage(state, navigator.onLine !== false);
+  if (!message) return null;
+
+  return (
+    <div className={`offline-shell-status is-${state}`} role="status" aria-live="polite">
+      <span className="offline-shell-status-dot" aria-hidden="true" />
+      <span>{message}</span>
+    </div>
+  );
+}
 
 function App() {
   const [activePage, setActivePage] = useState('today');
@@ -18,7 +111,6 @@ function App() {
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
-
 
   const { showNotice, showError, runAction } = useMemo(() => createAppActions({
     setBusy,
@@ -47,18 +139,37 @@ function App() {
     else showNotice('Sesión cerrada.');
   };
 
-  if (!isSupabaseConfigured) return <ConfigurationScreen />;
-  if (!authReady || (session && !profileReady)) return <LoadingScreen label="Preparando tu espacio…" />;
+  if (!isSupabaseConfigured) {
+    return (
+      <>
+        <OfflinePreparationStatus />
+        <ConfigurationScreen />
+      </>
+    );
+  }
+
+  if (!authReady || (session && !profileReady)) {
+    return (
+      <>
+        <OfflinePreparationStatus />
+        <LoadingScreen label="Preparando tu espacio…" />
+      </>
+    );
+  }
+
   if (!session) {
     return (
-      <AuthScreen
-        mode={authMode}
-        setMode={setAuthMode}
-        onSubmit={handleAuth}
-        busy={authBusy}
-        error={authError}
-        message={authMessage}
-      />
+      <>
+        <OfflinePreparationStatus />
+        <AuthScreen
+          mode={authMode}
+          setMode={setAuthMode}
+          onSubmit={handleAuth}
+          busy={authBusy}
+          error={authError}
+          message={authMessage}
+        />
+      </>
     );
   }
 
@@ -71,35 +182,35 @@ function App() {
     : getPageDescription(activePage, morePage);
 
   return (
-    <AppShell
-      profile={profile}
-      email={session.user.email}
-      onSignOut={handleSignOut}
-      activePage={activePage}
-      onNavigate={setActivePage}
-      morePage={morePage}
-      onMorePageChange={setMorePage}
-      title={title}
-      eyebrow={eyebrow}
-      description={description}
-      notice={notice}
-      error={error}
-      onClearAlerts={() => { setError(''); setNotice(''); }}
-    >
-      <AppPages
-        activePage={activePage}
-        morePage={morePage}
+    <>
+      <AppShell
         profile={profile}
-        refreshKey={refreshKey}
-        runAction={runAction}
-        busy={busy}
-        setActivePage={setActivePage}
-        setMorePage={setMorePage}
-      />
-    </AppShell>
+        email={session.user.email}
+        onSignOut={handleSignOut}
+        activePage={activePage}
+        onNavigate={setActivePage}
+        morePage={morePage}
+        onMorePageChange={setMorePage}
+        title={title}
+        eyebrow={eyebrow}
+        description={description}
+        notice={notice}
+        error={error}
+        onClearAlerts={() => { setError(''); setNotice(''); }}
+      >
+        <AppPages
+          activePage={activePage}
+          morePage={morePage}
+          profile={profile}
+          refreshKey={refreshKey}
+          runAction={runAction}
+          busy={busy}
+          setActivePage={setActivePage}
+          setMorePage={setMorePage}
+        />
+      </AppShell>
+    </>
   );
 }
-
-
 
 export default App;

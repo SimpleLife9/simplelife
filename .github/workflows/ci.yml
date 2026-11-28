@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: simplelife-ci-v2-${{ github.ref }}
@@ -15,39 +15,27 @@ concurrency:
 
 jobs:
   test-and-build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - name: Check whether an npm lockfile already exists
-        id: lockfile
+      - name: Require committed npm dependency lockfile
         run: |
-          if [ -f package-lock.json ]; then
-            echo "missing=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "missing=true" >> "$GITHUB_OUTPUT"
+          if [ ! -f package-lock.json ]; then
+            echo "::error::package-lock.json must be committed before CI can install dependencies."
+            exit 1
           fi
 
-      - name: Generate the pinned npm dependency lockfile
-        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
-
-      - name: Save the initial lockfile to main
-        if: github.event_name == 'push' && steps.lockfile.outputs.missing == 'true'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package-lock.json
-          git commit -m "chore: add npm dependency lockfile"
-          git push origin HEAD:main
-
-      - name: Install exactly the locked dependencies
+      - name: Install exactly the committed dependencies
         run: npm ci --no-audit --no-fund
 
       - name: Install Chromium for browser tests
@@ -70,13 +58,13 @@ jobs:
 
       - name: Verify the pinned Deno dependency graph
         run: |
-          deno install --config supabase/functions/agenda-time-resolve/deno.json --frozen-lockfile --entrypoint supabase/functions/agenda-time-resolve/index.ts --entrypoint supabase/functions/agenda-event-create/index.ts --entrypoint supabase/functions/agenda-event-mutate/index.ts --entrypoint supabase/functions/agenda-protected-time-mutate/index.ts tests/agenda-iana-resolver.deno.ts tests/agenda-time-resolve.http.deno.ts tests/agenda-timezone-auth.deno.ts tests/agenda-event-profile.deno.ts tests/agenda-event-idempotency.deno.ts tests/agenda-event-create.deno.ts tests/agenda-event-mutation.deno.ts tests/agenda-protected-time.deno.ts tests/agenda-protected-time-conflicts.deno.ts
+          deno install --config supabase/functions/agenda-time-resolve/deno.json --frozen-lockfile --entrypoint supabase/functions/agenda-time-resolve/index.ts --entrypoint supabase/functions/agenda-event-create/index.ts --entrypoint supabase/functions/agenda-event-mutate/index.ts --entrypoint supabase/functions/agenda-protected-time-mutate/index.ts --entrypoint supabase/functions/inbox-processing-queue/index.ts --entrypoint supabase/functions/inbox-processing-worker/index.ts --entrypoint supabase/functions/inbox-processing-process/index.ts --entrypoint supabase/functions/inbox-processing-dispatcher/index.ts --entrypoint supabase/functions/inbox-voice-finalize/index.ts --entrypoint supabase/functions/inbox-voice-transcription-worker/index.ts tests/agenda-iana-resolver.deno.ts tests/agenda-time-resolve.http.deno.ts tests/agenda-timezone-auth.deno.ts tests/agenda-event-profile.deno.ts tests/agenda-event-idempotency.deno.ts tests/agenda-event-create.deno.ts tests/agenda-event-mutation.deno.ts tests/agenda-protected-time.deno.ts tests/agenda-protected-time-conflicts.deno.ts tests/inbox-processing.deno.ts tests/inbox-processing-proposals.deno.ts tests/inbox-processing-dispatcher.deno.ts tests/inbox-voice-finalize.deno.ts tests/inbox-voice-transcription-worker.deno.ts
 
       - name: Test and type-check Agenda IANA resolver with frozen lockfile
         run: |
-          deno test --config supabase/functions/agenda-time-resolve/deno.json --frozen-lockfile tests/agenda-iana-resolver.deno.ts tests/agenda-time-resolve.http.deno.ts tests/agenda-event-profile.deno.ts tests/agenda-event-idempotency.deno.ts tests/agenda-event-create.deno.ts tests/agenda-event-mutation.deno.ts tests/agenda-protected-time.deno.ts tests/agenda-protected-time-conflicts.deno.ts
+          deno test --config supabase/functions/agenda-time-resolve/deno.json --frozen-lockfile tests/agenda-iana-resolver.deno.ts tests/agenda-time-resolve.http.deno.ts tests/agenda-event-profile.deno.ts tests/agenda-event-idempotency.deno.ts tests/agenda-event-create.deno.ts tests/agenda-event-mutation.deno.ts tests/agenda-protected-time.deno.ts tests/agenda-protected-time-conflicts.deno.ts tests/inbox-processing.deno.ts tests/inbox-processing-proposals.deno.ts tests/inbox-processing-dispatcher.deno.ts tests/inbox-voice-finalize.deno.ts tests/inbox-voice-transcription-worker.deno.ts tests/inbox-processing-scheduled.deno.ts
           APPVEYOR=simplelife-auth-test AI_AGENT=simplelife-auth-test CI=1 NODE_ENV=test deno test --allow-env=APPVEYOR,AI_AGENT,CI,DEBUG,NODE_ENV,MODE,MINIMAL,NO_COLOR,FORCE_COLOR,TERM,SUPABASE_URL,SUPABASE_PUBLISHABLE_KEYS,SUPABASE_SECRET_KEYS,SUPABASE_JWKS --config supabase/functions/agenda-time-resolve/deno.json --frozen-lockfile tests/agenda-timezone-auth.deno.ts
-          deno check --config supabase/functions/agenda-time-resolve/deno.json --frozen-lockfile supabase/functions/agenda-time-resolve/index.ts supabase/functions/agenda-event-create/index.ts supabase/functions/agenda-event-mutate/index.ts supabase/functions/agenda-protected-time-mutate/index.ts
+          deno check --config supabase/functions/agenda-time-resolve/deno.json --frozen-lockfile supabase/functions/agenda-time-resolve/index.ts supabase/functions/agenda-event-create/index.ts supabase/functions/agenda-event-mutate/index.ts supabase/functions/agenda-protected-time-mutate/index.ts supabase/functions/inbox-processing-queue/index.ts supabase/functions/inbox-processing-worker/index.ts supabase/functions/inbox-processing-process/index.ts supabase/functions/inbox-processing-dispatcher/index.ts supabase/functions/inbox-processing-scheduled/index.ts supabase/functions/inbox-voice-finalize/index.ts supabase/functions/inbox-voice-transcription-worker/index.ts
 
       - name: Set up pinned Supabase CLI
         uses: supabase/setup-cli@v1
@@ -94,7 +82,8 @@ jobs:
               raise SystemExit("Expected [db.migrations] config block was not found")
           path.write_text(config.replace(marker, "[db.migrations]\nenabled = false\nschema_paths = []", 1))
           PY
-          supabase start
+          set -o pipefail
+          supabase start 2>&1 | sed -E 's/(sb_secret|sb_publishable)_[A-Za-z0-9_-]+/\1_[REDACTED]/g'
 
       - name: Reproduce hosted RLS bootstrap in ephemeral local Postgres
         run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/local-supabase-bootstrap.sql
@@ -111,6 +100,45 @@ jobs:
           path.write_text(config.replace(marker, "[db.migrations]\nenabled = true\nschema_paths = []", 1))
           PY
           supabase migration up
+
+      - name: Test Inbox capture ownership and source preservation in ephemeral local Postgres
+        run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/inbox-capture-rls.test.sql
+
+      - name: Test Inbox trash, restore and part-review audit in ephemeral local Postgres
+        run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/inbox-review-trash-audit.test.sql
+
+      - name: Test Inbox Event provenance links and calendar owner isolation in ephemeral local Postgres
+        run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/inbox-event-link.test.sql
+
+      - name: Test Inbox indexed global search and owner-scoped duplicate lookup in ephemeral local Postgres
+        run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/inbox-global-search.test.sql
+
+      - name: Test Inbox existing Goal, Subgoal and Project provenance owner isolation in ephemeral local Postgres
+        run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/inbox-existing-destinations.test.sql
+
+      - name: Test Inbox 30-day physical retention purge and lease safety in ephemeral local Postgres
+        run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/inbox-retention-purge.test.sql
+
+      - name: Test Inbox processing lifecycle and owner isolation in ephemeral local Postgres
+        run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/inbox-processing-lifecycle.test.sql
+
+      - name: Test Inbox encrypted offline sync and owner isolation in ephemeral local Postgres
+        run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/inbox-offline-sync.test.sql
+
+      - name: Test Inbox private voice asset ownership and retention in ephemeral local Postgres
+        run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/inbox-voice-private-assets.test.sql
+
+      - name: Test durable Inbox voice transcription queue in ephemeral local Postgres
+        run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/inbox-voice-transcription-queue.test.sql
+
+      - name: Test owner-scoped local Inbox voice transcript persistence in ephemeral local Postgres
+        run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/inbox-voice-local-transcription.test.sql
+
+      - name: Test Inbox server-verified voice digest RPC privileges in ephemeral local Postgres
+        run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/inbox-voice-server-digest.test.sql
+
+      - name: Test Inbox scheduler Vault token permissions in ephemeral local Postgres
+        run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/inbox-scheduler.test.sql
 
       - name: Test Event persistence and append-only audit invariants in ephemeral local Postgres
         run: docker exec -i supabase_db_simplelife psql -v ON_ERROR_STOP=1 -U postgres -d postgres < scripts/sql/agenda-event-persistence.test.sql
@@ -132,6 +160,9 @@ jobs:
 
       - name: Verify Agenda auth in the actual local Edge Runtime
         run: node scripts/agenda-edge-runtime-smoke.mjs
+
+      - name: Verify Inbox processing queue, worker, dispatcher and server voice finalizer in the actual local Edge Runtime
+        run: node scripts/inbox-processing-edge-smoke.mjs
 
       - name: Verify Event Create JWT gate in the actual local Edge Runtime
         run: node scripts/agenda-event-create-edge-smoke.mjs
@@ -158,6 +189,192 @@ jobs:
       - name: Build production assets
         run: npm run build
 
+      - name: Verify production PWA cold-start offline launch
+        run: npm run test:pwa
+
+      - name: Wait for Cloudflare branch Preview to match this production build
+        if: github.event_name == 'pull_request'
+        env:
+          PWA_PREVIEW_URL: https://feat-phase2-inbox-completion-v1-simplelife-inbox-p2-preview.robvg9.workers.dev
+        run: |
+          node --input-type=module <<'NODE'
+          import { createHash } from 'node:crypto';
+          import { readFile } from 'node:fs/promises';
+
+          const expected = JSON.parse(await readFile('dist/precache-manifest.json', 'utf8'));
+          const expectedAssets = JSON.stringify([...expected.assets].sort());
+          const expectedServiceWorker = await readFile('dist/sw.js', 'utf8');
+          const expectedServiceWorkerHash = createHash('sha256').update(expectedServiceWorker).digest('hex');
+          const deadline = Date.now() + 180_000;
+          let lastIssue = 'Preview deployment has not published the current build.';
+
+          while (Date.now() < deadline) {
+            try {
+              const manifestUrl = new URL('/precache-manifest.json', process.env.PWA_PREVIEW_URL);
+              manifestUrl.searchParams.set('ci_check', String(Date.now()));
+              const manifestResponse = await fetch(manifestUrl, {
+                cache: 'no-store',
+                signal: AbortSignal.timeout(8_000),
+              });
+              if (!manifestResponse.ok) {
+                throw new Error(`Preview manifest returned HTTP ${manifestResponse.status}`);
+              }
+
+              const actual = await manifestResponse.json();
+              const manifestMatches = actual.version === expected.version
+                && Array.isArray(actual.assets)
+                && JSON.stringify([...actual.assets].sort()) === expectedAssets;
+              if (!manifestMatches) {
+                lastIssue = 'Preview asset manifest does not match this CI build.';
+              } else {
+                // The Service Worker is excluded from precache-manifest.json.
+                // Compare it separately so an old SW cannot pass this gate just
+                // because the JS/CSS content hashes stayed unchanged.
+                const swUrl = new URL('/sw.js', process.env.PWA_PREVIEW_URL);
+                swUrl.searchParams.set('ci_check', String(Date.now()));
+                const swResponse = await fetch(swUrl, {
+                  cache: 'no-store',
+                  signal: AbortSignal.timeout(8_000),
+                });
+                if (!swResponse.ok) {
+                  throw new Error(`Preview Service Worker returned HTTP ${swResponse.status}`);
+                }
+
+                const actualServiceWorker = await swResponse.text();
+                const actualServiceWorkerHash = createHash('sha256')
+                  .update(actualServiceWorker)
+                  .digest('hex');
+                if (actualServiceWorkerHash === expectedServiceWorkerHash) {
+                  // The isolated STT lab lives at stable public paths outside
+                  // Vite's hashed asset manifest. Verify its exact bytes too;
+                  // matching the shell manifest/SW alone cannot detect stale
+                  // HTML or JavaScript served by the Preview edge cache.
+                  for (const path of [
+                    '/experiments/stt-local/index.html',
+                    '/experiments/stt-local/app.js',
+                  ]) {
+                    const assetUrl = new URL(path, process.env.PWA_PREVIEW_URL);
+                    assetUrl.searchParams.set('ci_check', String(Date.now()));
+                    const assetResponse = await fetch(assetUrl, {
+                      cache: 'no-store',
+                      signal: AbortSignal.timeout(8_000),
+                    });
+                    if (!assetResponse.ok) {
+                      throw new Error(`Preview STT lab asset ${path} returned HTTP ${assetResponse.status}`);
+                    }
+                    const actualAsset = await assetResponse.text();
+                    const expectedAsset = await readFile(`dist${path}`, 'utf8');
+                    if (actualAsset !== expectedAsset) {
+                      throw new Error(`Preview STT lab asset is stale and does not match this CI build: ${path}`);
+                    }
+                    const assetCacheControl = assetResponse.headers.get('cache-control') || '';
+                    if (!/no-store/i.test(assetCacheControl)) {
+                      throw new Error(`Preview STT lab asset cache policy must be no-store: ${path} (${assetCacheControl || 'missing'})`);
+                    }
+                    console.log(`Preview serves the exact current STT lab asset with no-store: ${path}`);
+                  }
+
+                  // A matching manifest and Service Worker are not sufficient:
+                  // Cloudflare's static asset headers must also be deployed.
+                  // Send the same Fetch Metadata used by a browser navigation
+                  // so this gate observes the actual app-document cache policy.
+                  const documentUrl = new URL('/', process.env.PWA_PREVIEW_URL);
+                  documentUrl.searchParams.set('ci_check', String(Date.now()));
+                  const documentResponse = await fetch(documentUrl, {
+                    cache: 'no-store',
+                    headers: {
+                      'sec-fetch-mode': 'navigate',
+                      'sec-fetch-dest': 'document',
+                    },
+                    signal: AbortSignal.timeout(8_000),
+                  });
+                  if (!documentResponse.ok) {
+                    throw new Error(`Preview app document returned HTTP ${documentResponse.status}`);
+                  }
+
+                  const documentCacheControl = documentResponse.headers.get('cache-control') || '';
+                  const coop = documentResponse.headers.get('cross-origin-opener-policy') || '';
+                  const coep = documentResponse.headers.get('cross-origin-embedder-policy') || '';
+                  if (!/no-store/i.test(documentCacheControl)) {
+                    lastIssue = `Preview app document must be no-store to deliver updates: ${documentCacheControl || 'missing'}`;
+                  } else if (coop.toLowerCase() !== 'same-origin' || coep.toLowerCase() !== 'credentialless') {
+                    lastIssue = `Preview Whisper isolation headers are missing or incorrect: COOP=${coop || 'missing'}, COEP=${coep || 'missing'}`;
+                  } else {
+                    const expectedDocument = await readFile('dist/index.html', 'utf8');
+                    const actualDocument = await documentResponse.text();
+                    if (actualDocument !== expectedDocument) {
+                      lastIssue = 'Preview app document HTML does not exactly match the current CI build.';
+                    } else {
+                      // Verify the actual Inbox application bundle, not only
+                      // the manifest and Service Worker. A stale root document
+                      // or hashed JS/CSS bundle must never pass this gate.
+                      const appAssetPaths = [...expectedDocument.matchAll(/(?:src|href)="([^"]+)"/g)]
+                        .map((match) => match[1])
+                        .filter((path) => path.startsWith('/assets/') && (path.endsWith('.js') || path.endsWith('.css')));
+                      if (!appAssetPaths.some((path) => path.endsWith('.js'))) {
+                        throw new Error('The CI app document does not reference an application JavaScript bundle.');
+                      }
+                      for (const path of [...new Set(appAssetPaths)]) {
+                        const assetUrl = new URL(path, process.env.PWA_PREVIEW_URL);
+                        assetUrl.searchParams.set('ci_check', String(Date.now()));
+                        const assetResponse = await fetch(assetUrl, {
+                          cache: 'no-store',
+                          signal: AbortSignal.timeout(15_000),
+                        });
+                        if (!assetResponse.ok) {
+                          throw new Error('Preview application bundle ' + path + ' returned HTTP ' + assetResponse.status);
+                        }
+                        const actualAsset = await assetResponse.text();
+                        const expectedAsset = await readFile('dist' + path, 'utf8');
+                        if (actualAsset !== expectedAsset) {
+                          throw new Error('Preview application bundle does not exactly match the current CI build: ' + path);
+                        }
+                        console.log('Preview serves the exact current application bundle: ' + path);
+                      }
+                      console.log('Preview serves the exact production asset manifest (' + actual.assets.length + ' assets).');
+                      console.log('Preview serves the exact production Service Worker (sha256 ' + actualServiceWorkerHash + ').');
+                      console.log('Preview app document HTML matches dist/index.html byte-for-byte (' + documentCacheControl + ').');
+                      console.log('Preview isolation headers verified (COOP ' + coop + '; COEP ' + coep + ').');
+                      process.exit(0);
+                    }
+                  }
+                } else {
+                  lastIssue = 'Preview Service Worker is stale; its content hash does not match dist/sw.js.';
+                }
+              }
+            } catch (error) {
+              lastIssue = error.message;
+            }
+
+            await new Promise((resolve) => setTimeout(resolve, 5_000));
+          }
+
+          throw new Error(`Cloudflare Preview did not match this CI build: ${lastIssue}`);
+          NODE
+
+      - name: Generate synthetic Spanish speech fixture for Whisper acceptance
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v espeak-ng >/dev/null 2>&1; then
+            ESPEAK_BIN=espeak-ng
+          elif command -v espeak >/dev/null 2>&1; then
+            ESPEAK_BIN=espeak
+          else
+            sudo apt-get update
+            sudo apt-get install -y espeak-ng
+            ESPEAK_BIN=espeak-ng
+          fi
+          mkdir -p tests/fixtures/audio
+          "$ESPEAK_BIN" -v es-la -s 105 -a 180 -p 45 -g 20 -w tests/fixtures/audio/synthetic-spanish-voice.wav "Soy Carlos. Soy Carlos. Soy Carlos."
+          test -s tests/fixtures/audio/synthetic-spanish-voice.wav
+      - name: Verify Cloudflare Preview cold launch after full browser restart
+        if: github.event_name == 'pull_request'
+        env:
+          PWA_BASE_URL: https://feat-phase2-inbox-completion-v1-simplelife-inbox-p2-preview.robvg9.workers.dev
+        run: npm run test:pwa
+
       - name: Upload browser traces on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -166,3 +383,11 @@ jobs:
           path: test-results/
           if-no-files-found: ignore
           retention-days: 7
+
+# Phase 2: CI covers capture security, processing proposals and authenticated worker paths.
+
+# Keep the original queue lifecycle contract tests in the phase 2 integration suite.
+
+# Phase 2 final exact-SHA validation includes the secure capture, processing, review and trash slices.
+
+# Exact-head rerun after correcting the duplicate-fixture assertion and Inbox review styles.

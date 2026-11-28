@@ -1,0 +1,387 @@
+-- Private voice source storage: owner isolation, immutable source metadata,
+-- transcript provenance, and bounded retention for unlinked/trashed audio.
+BEGIN;
+
+INSERT INTO auth.users (
+  id, instance_id, aud, role, email, encrypted_password,
+  email_confirmed_at, raw_app_meta_data, raw_user_meta_data
+) VALUES
+  ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','00000000-0000-0000-0000-000000000000',
+   'authenticated','authenticated','voice-owner-a-20261123@example.invalid','',now(),
+   '{"provider":"email","providers":["email"]}'::jsonb,'{}'::jsonb),
+  ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb','00000000-0000-0000-0000-000000000000',
+   'authenticated','authenticated','voice-owner-b-20261123@example.invalid','',now(),
+   '{"provider":"email","providers":["email"]}'::jsonb,'{}'::jsonb)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.user_profile (id, auth_user_id, display_name)
+VALUES
+  ('019b7200-0000-7000-8000-000000000001','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','Voice owner A'),
+  ('019b7200-0000-7000-8000-000000000002','bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb','Voice owner B')
+ON CONFLICT (id) DO NOTHING;
+
+DO $test$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM storage.buckets
+    WHERE id='inbox-voice-private' AND public=false AND file_size_limit=26214400
+  ) THEN RAISE EXCEPTION 'Voice bucket must be private and limited to 25 MiB'; END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='storage' AND tablename='objects'
+      AND policyname='inbox_voice_private_owner_insert'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='storage' AND tablename='objects'
+      AND policyname='inbox_voice_private_owner_select'
+  ) THEN
+    RAISE EXCEPTION 'Private voice Storage policies are missing';
+  END IF;
+  IF has_table_privilege('authenticated','public.capture_audio_asset','DELETE') THEN
+    RAISE EXCEPTION 'Authenticated users must not physically delete voice asset metadata';
+  END IF;
+  IF has_function_privilege('authenticated',
+       'public.finalize_inbox_audio_upload(uuid,integer,text)','EXECUTE')
+     OR has_function_privilege('anon',
+       'public.finalize_inbox_audio_upload(uuid,integer,text)','EXECUTE')
+     OR has_function_privilege('service_role',
+       'public.finalize_inbox_audio_upload(uuid,integer,text)','EXECUTE')
+     OR NOT has_function_privilege('service_role',
+       'public.finalize_inbox_audio_upload_verified(uuid,uuid,integer,text)','EXECUTE')
+     OR has_function_privilege('authenticated',
+       'public.finalize_inbox_audio_upload_verified(uuid,uuid,integer,text)','EXECUTE')
+     OR has_function_privilege('anon',
+       'public.finalize_inbox_audio_upload_verified(uuid,uuid,integer,text)','EXECUTE')
+     OR has_function_privilege('authenticated',
+       'public.record_inbox_voice_transcription(uuid,uuid,uuid,uuid,text,text,text,text)','EXECUTE')
+     OR has_function_privilege('anon',
+       'public.record_inbox_voice_transcription(uuid,uuid,uuid,uuid,text,text,text,text)','EXECUTE')
+     OR has_function_privilege('service_role',
+       'public.record_inbox_voice_transcription(uuid,uuid,uuid,uuid,text,text,text,text)','EXECUTE') THEN
+    RAISE EXCEPTION 'Voice finalization and transcription must be callable by trusted service_role only';
+  END IF;
+  IF has_table_privilege('service_role','public.audit_event','INSERT') THEN
+    RAISE EXCEPTION 'Audio retention must not grant direct audit_event INSERT';
+  END IF;
+END;
+$test$;
+
+SET LOCAL ROLE authenticated;
+SET LOCAL request.jwt.claim.sub='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+INSERT INTO public.capture_audio_asset (
+  id, owner_user_id, created_by_user_id, bucket_id, object_path,
+  mime_type, file_size_bytes, sha256_hex
+) VALUES (
+  '019b7200-0000-7000-8000-000000000101',
+  '019b7200-0000-7000-8000-000000000001',
+  '019b7200-0000-7000-8000-000000000001',
+  'inbox-voice-private',
+  '019b7200-0000-7000-8000-000000000001/019b7200-0000-7000-8000-000000000101/source.webm',
+  'audio/webm', 4096, repeat('a',64)
+);
+
+
+-- The browser may create staging metadata, but cannot disable or extend
+-- the seven-day cleanup window with client-controlled retention values.
+DO $test$
+DECLARE
+  v_null_denied boolean := false;
+  v_future_denied boolean := false;
+BEGIN
+  BEGIN
+    INSERT INTO public.capture_audio_asset (
+      id,owner_user_id,created_by_user_id,bucket_id,object_path,mime_type,
+      file_size_bytes,sha256_hex,retention_until,status
+    ) VALUES (
+      '019b7200-0000-7000-8000-000000000106',
+      '019b7200-0000-7000-8000-000000000001',
+      '019b7200-0000-7000-8000-000000000001',
+      'inbox-voice-private',
+      '019b7200-0000-7000-8000-000000000001/019b7200-0000-7000-8000-000000000106/source.webm',
+      'audio/webm',1024,repeat('c',64),NULL,'uploading'
+    );
+  EXCEPTION WHEN insufficient_privilege THEN
+    v_null_denied := true;
+  END;
+  IF NOT v_null_denied THEN
+    RAISE EXCEPTION 'Authenticated owner bypassed staging retention with NULL';
+  END IF;
+
+  BEGIN
+    INSERT INTO public.capture_audio_asset (
+      id,owner_user_id,created_by_user_id,bucket_id,object_path,mime_type,
+      file_size_bytes,sha256_hex,retention_until,status
+    ) VALUES (
+      '019b7200-0000-7000-8000-000000000107',
+      '019b7200-0000-7000-8000-000000000001',
+      '019b7200-0000-7000-8000-000000000001',
+      'inbox-voice-private',
+      '019b7200-0000-7000-8000-000000000107/source.webm',
+      'audio/webm',1024,repeat('d',64),statement_timestamp()+interval '8 days','uploading'
+    );
+  EXCEPTION WHEN insufficient_privilege THEN
+    v_future_denied := true;
+  END;
+  IF NOT v_future_denied THEN
+    RAISE EXCEPTION 'Authenticated owner extended staging retention beyond seven days';
+  END IF;
+END;
+$test$;
+
+INSERT INTO storage.objects (bucket_id, name, owner_id, metadata)
+VALUES (
+  'inbox-voice-private',
+  '019b7200-0000-7000-8000-000000000001/019b7200-0000-7000-8000-000000000101/source.webm',
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  jsonb_build_object('size','4096','mimetype','audio/webm')
+);
+
+DO $test$
+DECLARE
+  v_capture uuid;
+  v_part uuid;
+  v_retention timestamptz;
+  v_expired_asset uuid := '019b7200-0000-7000-8000-000000000102';
+  v_count integer;
+BEGIN
+  -- The user may upload the private object and create staging metadata;
+  -- only the trusted backend may finalize it after computing the real digest.
+
+  -- An abandoned in-progress upload expires after its seven-day staging window.
+  INSERT INTO public.capture_audio_asset (
+    id,owner_user_id,created_by_user_id,bucket_id,object_path,mime_type,
+    file_size_bytes,sha256_hex,retention_until,status
+  ) VALUES (
+    v_expired_asset,'019b7200-0000-7000-8000-000000000001',
+    '019b7200-0000-7000-8000-000000000001','inbox-voice-private',
+    '019b7200-0000-7000-8000-000000000001/019b7200-0000-7000-8000-000000000102/source.webm',
+    'audio/webm',1024,repeat('b',64),now()-interval '1 second','uploading'
+  );
+END;
+$test$;
+RESET ROLE;
+
+-- Only the trusted backend may claim, attribute and atomically complete voice jobs.
+SET LOCAL ROLE service_role;
+DO $test$
+DECLARE
+  v_capture uuid := '019b7200-0000-7000-8000-000000000103';
+  v_part uuid := '019b7200-0000-7000-8000-000000000104';
+  v_run uuid := '019b7200-0000-7000-8000-000000000105';
+  v_attempt record;
+  v_capture_out uuid;
+  v_part_out uuid;
+  v_run_out uuid;
+  v_replayed boolean;
+  v_duplicate_rejected boolean := false;
+  v_capture_count integer;
+  v_part_count integer;
+  v_run_count integer;
+BEGIN
+  IF NOT public.finalize_inbox_audio_upload_verified(
+    '019b7200-0000-7000-8000-000000000001',
+    '019b7200-0000-7000-8000-000000000101',
+    4096,
+    repeat('a',64)
+  ) THEN RAISE EXCEPTION 'Service role could not finalize private audio upload after verified digest'; END IF;
+
+  SELECT * INTO v_attempt
+  FROM public.claim_inbox_voice_transcription_job(
+    '019b7200-0000-7000-8000-000000000110',
+    '00000000-0000-4000-8000-000000000110',90
+  );
+  IF NOT FOUND OR v_attempt.asset_id<>'019b7200-0000-7000-8000-000000000101'
+     OR v_attempt.attempt_number<>1 THEN
+    RAISE EXCEPTION 'Verified voice upload did not receive a durable job lease';
+  END IF;
+
+  IF NOT public.mark_inbox_voice_transcription_request_started(
+    v_attempt.asset_id,v_attempt.lease_token,'test-provider','fixture-model','test-adapter',
+    'us-west-2','inbox-speech-route-policy-v1',
+    jsonb_build_object(
+      'capability','evidence:capability','provider','evidence:provider',
+      'model','evidence:model','adapter','evidence:adapter','account','evidence:account',
+      'legalEligibility','evidence:legal','region','evidence:region',
+      'privacy','evidence:privacy','quota','evidence:quota'
+    )
+  ) THEN RAISE EXCEPTION 'Trusted worker could not persist request-start evidence'; END IF;
+
+  SELECT capture_id,part_id,processing_run_id,replayed
+  INTO v_capture_out,v_part_out,v_run_out,v_replayed
+  FROM public.complete_inbox_voice_transcription_job(
+    v_attempt.asset_id,v_attempt.lease_token,v_capture,v_part,v_run,
+    'Texto transcrito de prueba.','test-provider','fixture-model','us-west-2'
+  );
+  IF v_capture_out<>v_capture OR v_part_out<>v_part OR v_run_out<>v_run OR v_replayed THEN
+    RAISE EXCEPTION 'Atomic voice completion did not return the expected capture/part/run';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM public.capture
+    WHERE id=v_capture AND input_type='voice'
+      AND content_original='Texto transcrito de prueba.'
+      AND processing_status='queued'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM public.capture_part
+    WHERE id=v_part AND capture_id=v_capture AND part_index=0
+      AND original_fragment='Texto transcrito de prueba.'
+  ) THEN
+    RAISE EXCEPTION 'Voice transcript was not persisted as an Inbox-ready capture and part';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM public.processing_run
+    WHERE id=v_run AND capture_id=v_capture
+      AND processor_version='inbox-proposal-v1'
+      AND status='queued'
+      AND idempotency_key='019b7200-0000-7000-8000-000000000101'
+  ) THEN
+    RAISE EXCEPTION 'Voice completion did not enqueue the normal Inbox processing pipeline';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM public.capture_audio_asset
+    WHERE id='019b7200-0000-7000-8000-000000000101'
+      AND capture_id=v_capture AND status='transcribed'
+      AND transcription_provider='test-provider'
+      AND transcription_model='fixture-model'
+      AND transcription_region='us-west-2'
+      AND retention_until IS NULL
+  ) THEN
+    RAISE EXCEPTION 'Original audio was not linked to its provider-attributed transcript';
+  END IF;
+
+  SELECT capture_id,part_id,processing_run_id,replayed
+  INTO v_capture_out,v_part_out,v_run_out,v_replayed
+  FROM public.complete_inbox_voice_transcription_job(
+    v_attempt.asset_id,v_attempt.lease_token,v_capture,v_part,v_run,
+    'Texto transcrito de prueba.','test-provider','fixture-model','us-west-2'
+  );
+  IF NOT v_replayed OR v_capture_out<>v_capture OR v_part_out<>v_part OR v_run_out<>v_run THEN
+    RAISE EXCEPTION 'Exact voice completion replay was not idempotent';
+  END IF;
+
+  BEGIN
+    PERFORM * FROM public.complete_inbox_voice_transcription_job(
+      v_attempt.asset_id,v_attempt.lease_token,
+      '019b7200-0000-7000-8000-000000000108',
+      '019b7200-0000-7000-8000-000000000109',
+      '019b7200-0000-7000-8000-000000000112',
+      'Duplicate transcript must not persist.','test-provider','fixture-model','us-west-2'
+    );
+  EXCEPTION WHEN SQLSTATE '55000' THEN
+    v_duplicate_rejected := true;
+  END;
+  IF NOT v_duplicate_rejected THEN
+    RAISE EXCEPTION 'A completed voice job accepted a conflicting transcript replay';
+  END IF;
+
+  SELECT count(*) INTO v_capture_count
+  FROM public.capture WHERE id IN (v_capture,'019b7200-0000-7000-8000-000000000108');
+  SELECT count(*) INTO v_part_count
+  FROM public.capture_part WHERE id IN (v_part,'019b7200-0000-7000-8000-000000000109');
+  SELECT count(*) INTO v_run_count
+  FROM public.processing_run WHERE id=v_run AND capture_id=v_capture;
+  IF v_capture_count<>1 OR v_part_count<>1 OR v_run_count<>1 THEN
+    RAISE EXCEPTION 'Voice replay duplicated capture/part/run counts (% / % / %)',
+      v_capture_count,v_part_count,v_run_count;
+  END IF;
+END;
+$test$;
+RESET ROLE;
+
+SET LOCAL ROLE authenticated;
+SET LOCAL request.jwt.claim.sub='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+DO $test$
+BEGIN
+  IF NOT public.trash_inbox_capture(
+    '019b7200-0000-7000-8000-000000000103',
+    '019b7200-0000-7000-8000-000000000105'
+  ) THEN RAISE EXCEPTION 'Voice capture could not enter the normal 30-day trash lifecycle'; END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.capture_audio_asset aa
+    JOIN public.capture c ON c.id=aa.capture_id
+    WHERE aa.id='019b7200-0000-7000-8000-000000000101'
+      AND aa.retention_until=c.purge_after
+  ) THEN
+    RAISE EXCEPTION 'Audio retention is not synchronized with the capture recovery window';
+  END IF;
+END;
+$test$;
+RESET ROLE;
+
+-- Owner B cannot inspect Owner A's private voice metadata or finalize its upload.
+SET LOCAL ROLE authenticated;
+SET LOCAL request.jwt.claim.sub='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+DO $test$
+DECLARE v_count bigint; v_denied boolean := false;
+BEGIN
+  SELECT count(*) INTO v_count FROM public.capture_audio_asset;
+  IF v_count <> 0 THEN RAISE EXCEPTION 'Owner B can read Owner A private voice assets'; END IF;
+  BEGIN
+    PERFORM public.finalize_inbox_audio_upload_verified(
+      '019b7200-0000-7000-8000-000000000001',
+      '019b7200-0000-7000-8000-000000000101',
+      4096,
+      repeat('a',64)
+    );
+  EXCEPTION WHEN insufficient_privilege THEN v_denied := true;
+  END;
+  IF NOT v_denied THEN RAISE EXCEPTION 'Owner B could finalize Owner A audio upload'; END IF;
+END;
+$test$;
+RESET ROLE;
+
+-- The service role only uses narrow definer RPCs; it receives no direct audit grant.
+SET LOCAL ROLE service_role;
+DO $test$
+DECLARE
+  v_assets uuid[];
+  v_paths text[];
+  v_deleted integer;
+BEGIN
+  SELECT array_agg(asset_id ORDER BY asset_id), array_agg(object_path ORDER BY asset_id)
+    INTO v_assets, v_paths
+  FROM public.list_expired_inbox_audio_assets(10);
+  IF v_assets IS NULL OR NOT ('019b7200-0000-7000-8000-000000000102' = ANY(v_assets)) THEN
+    RAISE EXCEPTION 'Unattached expired voice asset was not selected for object deletion';
+  END IF;
+  IF NOT has_function_privilege('service_role',
+       'public.complete_inbox_audio_asset_purge(uuid[],uuid[])','EXECUTE') THEN
+    RAISE EXCEPTION 'Service role cannot complete audio object deletion';
+  END IF;
+  IF has_table_privilege('service_role','public.audit_event','SELECT')
+     OR has_table_privilege('service_role','public.audit_event','INSERT') THEN
+    RAISE EXCEPTION 'Audio purge must not grant direct audit_event privileges';
+  END IF;
+  IF cardinality(v_assets) <> 1 THEN
+    RAISE EXCEPTION 'Expected exactly one unattached expired audio fixture, found %', cardinality(v_assets);
+  END IF;
+  SELECT public.complete_inbox_audio_asset_purge(
+    v_assets,
+    ARRAY['019b7200-0000-7000-8000-000000000201'::uuid]
+  ) INTO v_deleted;
+  IF v_deleted <> cardinality(v_assets) THEN
+    RAISE EXCEPTION 'Audio metadata purge count did not match the expired assets';
+  END IF;
+END;
+$test$;
+RESET ROLE;
+
+DO $test$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM public.capture_audio_asset
+    WHERE id='019b7200-0000-7000-8000-000000000102'
+  ) THEN RAISE EXCEPTION 'Expired audio metadata was not removed after object deletion receipt'; END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.audit_event
+    WHERE action='capture.audio_purged'
+      AND entity_id='019b7200-0000-7000-8000-000000000102'
+      AND source='system'
+      AND details->>'object_removed'='true'
+  ) THEN RAISE EXCEPTION 'Audio retention audit receipt is missing'; END IF;
+END;
+$test$;
+
+ROLLBACK;

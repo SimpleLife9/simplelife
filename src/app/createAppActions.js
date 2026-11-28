@@ -18,7 +18,7 @@ export function createAppActions({
     setNotice('');
   };
 
-  const runAction = async (operation, successMessage) => {
+  const runAction = async (operation, successMessage, options = {}) => {
     setBusy(true);
     setError('');
     setNotice('');
@@ -28,7 +28,8 @@ export function createAppActions({
       if (successMessage) showNotice(successMessage);
       return true;
     } catch (actionError) {
-      showError(actionError?.message || 'No se pudo completar la operación.');
+      if (typeof options.onError === 'function') options.onError(actionError);
+      else showError(actionError?.message || 'No se pudo completar la operación.');
       return false;
     } finally {
       setBusy(false);
