@@ -1442,7 +1442,7 @@ test('Inbox supports search, review states, archiving, restore and original capt
 
   // The capability notice must match the implemented private voice/offline behavior.
   const capabilityNotice = page.locator('.honest-note');
-  await expect(capabilityNotice).toContainText('reglas locales deterministas (no con un modelo de IA)');
+  await expect(capabilityNotice).toContainText('clasificador estadístico de primera parte');
   await expect(capabilityNotice).toContainText('grabaciones de voz se conservan en almacenamiento privado');
   await expect(capabilityNotice).toContainText('la huella SHA-256 se verifica y Whisper se ejecuta en este dispositivo');
   await expect(capabilityNotice).toContainText('modo sin conexión cifra las capturas en este dispositivo');
@@ -1666,7 +1666,7 @@ test('Inbox runs advisory processing, records review, and restores soft-deleted 
   });
   expect(captureParts[0]).toMatchObject({ category: 'task', review_status: 'unreviewed', original_fragment: original });
   expect(insertedTasks).toHaveLength(0);
-  await expect(page.getByText('Afinidad heurística: 68%')).toBeVisible();
+  await expect(page.getByText(/^Puntuación orientativa:/)).toBeVisible();
 
   await page.getByRole('button', { name: 'Descartar sugerencia' }).click();
   await expect(page.getByText('Sugerencia descartada y decisión registrada en auditoría.')).toBeVisible();
